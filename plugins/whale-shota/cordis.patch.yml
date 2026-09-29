@@ -1,0 +1,6 @@
+# whale-shota bundle patch —— 自用版
+# 只插一行：皮肤与桌宠合并在同一个客户端 bundle 里，由同一个 apply 挂载，
+# 因此这一行既是皮肤的总开关，也是桌宠的总开关。
+- insert:
+    - id: ui-skin-whale-shota
+      name: 'whale-shota'

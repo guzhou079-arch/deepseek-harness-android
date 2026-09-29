@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    package="com.deepseek.harness"
+    android:versionCode="50"
+    android:versionName="1.19">
+    <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="28" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.WRITE_SETTINGS" />
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- 定时任务：精确闹钟（Android 12+ 需要；setAlarmClock 不受此权限限制，双保险） -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <!-- v1.16 NFC 读卡：NFC 是 normal 权限，安装即授予，无需运行时申请 -->
+    <uses-permission android:name="android.permission.NFC" />
+    <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
+    <!-- v1.16：NFC 硬件可选——没有 NFC 的机型照装不误 -->
+    <uses-feature android:name="android.hardware.nfc" android:required="false" />
+    <application
+        android:label="@string/app_name"
+        android:icon="@drawable/ic_launcher"
+        android:allowBackup="true"
+        android:usesCleartextTraffic="true"
+        android:hardwareAccelerated="true"
+        android:requestLegacyExternalStorage="true">
+
+        <meta-data
+            android:name="moe.shizuku.client.V3_SUPPORT"
+            android:value="true" />
+
+        <!-- 原来写的是 unspecified（=「不表态，系统看着办」），真机表现为沿用当前屏幕旋转：
+             从横屏的游戏/视频切回来仍是横屏（跟随的是上一个应用，而不是系统设置）。
+             fullUser：系统「自动旋转」开着 → 跟随重力感应（含反向横竖屏）；
+             关着（锁定方向）→ 跟随用户锁定。 -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:screenOrientation="fullUser"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:theme="@style/AppTheme">
+            <!-- 原主题 Theme.Black.NoTitleBar.Fullscreen 会隐藏状态栏，
+                 部分 ROM（如 ColorOS）还会把窗口整体下移，顶部露出一块黑条。
+                 改为 res/values/styles.xml 的 AppTheme（父主题 Theme.Black.NoTitleBar，
+                 不隐藏状态栏，状态栏/导航栏底色跟随主题）。 -->
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- 前台保活服务：引擎运行期间常驻通知栏，挂后台不被杀 -->
+        <service
+            android:name=".EngineService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!-- 定时任务闹钟接收器（⑥）：AI 设置定时后由系统闹钟唤醒，即使 App 被杀也能触发 -->
+        <receiver
+            android:name=".AlarmReceiver"
+            android:exported="false" />
+
+        <!-- 小鲸鱼悬浮窗（含引擎状态显示） -->
+        <service
+            android:name=".OverlayService"
+            android:exported="false" />
+
+        <!-- 虚拟屏接入桥：启动 Operit server + HTTP->binder 转发（插件 API） -->
+        <service
+            android:name=".VsreenBridgeService"
+            android:exported="false" />
+
+        <!-- v1.7 无障碍服务：AI 读屏 + 模拟操作 + 无障碍截图（用户需在系统设置开启） -->
+        <service
+            android:name=".AccessibilityService"
+            android:exported="false"
+            android:label="DeepSeek Harness 屏幕助手"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_config" />
+        </service>
+
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="com.deepseek.harness.shizuku"
+            android:multiprocess="false"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+
+        <!-- v1.13：「分享日志」以**文件**形式发出（targetSdk 28 不允许直传 file:// URI，
+             本项目无 androidx，故自实现最小只读 ContentProvider，只暴露 cache/share 下的文件） -->
+        <provider
+            android:name=".LogShareProvider"
+            android:authorities="com.deepseek.harness.logshare"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+    </application>
+</manifest>

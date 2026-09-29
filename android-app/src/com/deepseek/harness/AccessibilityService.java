@@ -1,0 +1,1768 @@
+package com.deepseek.harness;
+
+import android.accessibilityservice.AccessibilityServiceInfo;
+import android.accessibilityservice.GestureDescription;
+import android.app.Notification;
+import android.content.ActivityNotFoundException;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.graphics.Path;
+import android.graphics.Rect;
+import android.net.Uri;
+import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
+import android.util.DisplayMetrics;
+import android.util.Log;
+import android.view.Display;
+import android.view.WindowManager;
+import android.view.accessibility.AccessibilityEvent;
+import android.view.accessibility.AccessibilityNodeInfo;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.io.OutputStreamWriter;
+import java.net.InetSocketAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
+
+/**
+ * 无障碍服务（v1.7.3）：给 AI 提供「看屏幕 + 操作屏幕」能力。
+ * 与 node 插件 dsh-tool-accessibility 通过本地 HTTP（127.0.0.1:<a11yPort>）通信。
+ * 端口 = 引擎端口 + 101（正式版 3181 / Lite 3183 / 兼容版 3185），三版本共存不冲突。
+ * 注意：javac -bootclasspath android.jar 下不能用 lambda/方法引用，全部用显式匿名类。
+ *
+ * v1.7.3 新增「通用触摸手势引擎」（/gesture /touch /swipe /hold /touch-release /touch-status）：
+ *  - 多笔时间轴：一次请求可含 down/move/up/tap/swipe/hold/wait，全部同时注入（真多指）；
+ *  - 按住保持：down 后不 up 的手指会一直按住（willContinue），可跨请求延续——"左手按住摇杆，
+ *    右手同时点技能"就是 down(0) 之后再来 tap(1)；
+ *  - 分数坐标：所有坐标支持 fx/fy（0~1 相对屏幕比例），彻底消除截图缩放误差；
+ *  - 安全网：手指按住超时（30s）自动抬起、同 finger 覆盖、release_all 一键复位、
+ *    手势失败/服务断开全部复位。
+ */
+public class AccessibilityService extends android.accessibilityservice.AccessibilityService {
+
+    private static final String TAG = "dsh-a11y";
+    private static final String PREFS = "dsh_prefs";
+    private static final String KEY_A11Y_PORT = "a11y_port";
+
+    /** 服务是否已连接（用户已在系统设置开启无障碍）。 */
+    public static volatile boolean isRunning = false;
+    /** 当前活跃窗口的包名。 */
+    public static volatile String activePackage = "";
+
+    private static final int MAX_NODES = 250;
+    private static final int MAX_DEPTH = 40;
+    private static final int MAX_TEXT_LEN = 120;
+    private static final int SOCKET_TIMEOUT_MS = 8000;
+
+    /** 手势引擎：最大手指数（多数设备 getMaxStrokeCount() ≥ 10）。 */
+    private static final int MAX_FINGERS = 8;
+    /** 手指按住保持超时（毫秒），超过自动抬起，防止 AI 失控后手指一直压着屏幕。 */
+    private static final long HOLD_TIMEOUT_MS = 30000;
+    /** 单次手势时间轴总长上限（毫秒）。 */
+    private static final long MAX_GESTURE_TOTAL_MS = 120000;
+
+    private final Object gestureLock = new Object();
+    private final boolean[] fingerDown = new boolean[MAX_FINGERS];
+    private final float[] fingerX = new float[MAX_FINGERS];
+    private final float[] fingerY = new float[MAX_FINGERS];
+    private final long[] fingerDownAt = new long[MAX_FINGERS];
+    private int screenW = 0;
+    private int screenH = 0;
+
+    private ServerSocket serverSocket;
+
+    // ---- 通知捕获状态（v1.23，契约见 selfbuild/notes/notif-contract.md）----
+    /** 通知环形缓冲容量（契约 MAX=50）。 */
+    private static final int NOTIF_MAX = 50;
+    /** 通知缓冲锁：captureNotification 写、路由读、/notifications-wait 在此 wait。 */
+    private final Object notifLock = new Object();
+    /** 通知环形缓冲（最多 NOTIF_MAX 条，按 seq 升序 = 旧→新）。访问必须持 notifLock。 */
+    private final List<NotifEntry> notifRing = new ArrayList<NotifEntry>();
+    /** 已分配的最大 seq：从 1 起单调递增、永不复用；清空缓冲也不重置。 */
+    private long notifSeq = 0L;
+    /** 是否已成功订阅 TYPE_NOTIFICATION_STATE_CHANGED（/notifications-status 的 enabled）。 */
+    private volatile boolean notifEnabled = false;
+
+    private static class StrokeDesc {
+        Path path;
+        long startTime;
+        long duration;
+        boolean willContinue;
+        StrokeDesc(Path p, long s, long d, boolean wc) {
+            path = p;
+            startTime = s;
+            duration = d;
+            willContinue = wc;
+        }
+    }
+
+    @Override
+    public void onServiceConnected() {
+        isRunning = true;
+        Log.i(TAG, "accessibility service connected");
+        // 端口必须由包名决定，不能信 dsh_prefs 里的 a11y_port：该 pref 跨版本持久化，升级后旧包
+        // 写下的 3181 仍会被读到 → 正式版与 Lite 的无障碍服务都往 3181 绑，后连的那个 bind 失败
+        // 且静默，先连的那个应答 —— 插件于是拿到“另一个包”的截图/节点（跨包路径必然 EACCES）。
+        int port = 3181;
+        try {
+            String pkg = getPackageName();
+            int defaultEngine = pkg.contains("beta") ? 3082 : pkg.contains("compat") ? 3084 : 3080;
+            port = defaultEngine + 101;
+            SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+            if (prefs.getInt(KEY_A11Y_PORT, port) != port) {
+                prefs.edit().putInt(KEY_A11Y_PORT, port).apply(); // 顺手纠正历史脏值
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "derive a11y port failed", t);
+        }
+        startServer(port);
+        // v1.23 通知捕获：运行时给已开启的无障碍服务追加「通知」事件类型（不改 AndroidManifest）。
+        subscribeNotificationEvents();
+    }
+
+    @Override
+    public void onAccessibilityEvent(AccessibilityEvent event) {
+        // v1.23 通知捕获：通知事件带的 package 是「发通知的 App」，不是前台窗口。
+        // 先备份旧值，命中通知事件时还原，免得 /status 的 package 被通知带偏
+        // （那是屏幕纪律判断「前台是不是游戏」的依据）。
+        final String pkgBeforeNotif = activePackage;
+        if (event != null && event.getPackageName() != null) {
+            activePackage = event.getPackageName().toString();
+        }
+        if (event != null && event.getEventType() == AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED) {
+            activePackage = pkgBeforeNotif;
+            captureNotification(event);
+        }
+    }
+
+    @Override
+    public void onInterrupt() {
+        Log.w(TAG, "accessibility service interrupted");
+        releaseAllFingers();
+    }
+
+    @Override
+    public boolean onUnbind(android.content.Intent intent) {
+        isRunning = false;
+        releaseAllFingers();
+        stopServer();
+        return super.onUnbind(intent);
+    }
+
+    private void stopServer() {
+        try {
+            if (serverSocket != null) serverSocket.close();
+        } catch (Throwable ignored) {
+        }
+        serverSocket = null;
+    }
+
+    private void startServer(final int port) {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                ServerSocket ss = null;
+                try {
+                    ss = new ServerSocket();
+                    ss.setReuseAddress(true);
+                    ss.bind(new InetSocketAddress("127.0.0.1", port));
+                    serverSocket = ss;
+                    Log.i(TAG, "a11y server listening on " + port);
+                    while (!Thread.currentThread().isInterrupted()) {
+                        try {
+                            final Socket s = ss.accept();
+                            handleConnection(s);
+                        } catch (Throwable t) {
+                            try { Thread.sleep(100); } catch (Throwable ignored) {}
+                        }
+                    }
+                } catch (Throwable t) {
+                    Log.w(TAG, "a11y server stopped", t);
+                } finally {
+                    try { if (ss != null) ss.close(); } catch (Throwable ignored) {}
+                }
+            }
+        }, "a11y-server").start();
+    }
+
+    private String parsePath(String head) {
+        int sp1 = head.indexOf(' ');
+        int sp2 = sp1 >= 0 ? head.indexOf(' ', sp1 + 1) : -1;
+        if (sp1 >= 0 && sp2 > sp1) return head.substring(sp1 + 1, sp2);
+        return "/";
+    }
+
+    private String queryParam(String path, String key) {
+        int q = path.indexOf('?');
+        if (q < 0) return "";
+        String query = path.substring(q + 1);
+        for (String pair : query.split("&")) {
+            int eq = pair.indexOf('=');
+            if (eq > 0) {
+                String k = pair.substring(0, eq);
+                if (k.equals(key)) {
+                    try {
+                        return java.net.URLDecoder.decode(pair.substring(eq + 1), "UTF-8");
+                    } catch (Exception ignored) {
+                        return pair.substring(eq + 1);
+                    }
+                }
+            }
+        }
+        return "";
+    }
+
+    private double parseDoubleSafe(String s, double def) {
+        try {
+            return Double.parseDouble(s);
+        } catch (Throwable t) {
+            return def;
+        }
+    }
+
+    private void handleConnection(final Socket s) {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    s.setSoTimeout(SOCKET_TIMEOUT_MS);
+                    InputStream in = s.getInputStream();
+                    StringBuilder head = new StringBuilder();
+                    int c;
+                    while ((c = in.read()) != -1) {
+                        head.append((char) c);
+                        if (head.length() >= 4 && head.substring(head.length() - 4).equals("\r\n\r\n")) break;
+                        if (head.length() > 8192) break;
+                    }
+                    String headStr = head.toString();
+                    String path = parsePath(headStr);
+                    // 读取 POST body（/gesture 传 JSON）
+                    String body = "";
+                    int ci = headStr.toLowerCase().indexOf("content-length:");
+                    if (ci >= 0) {
+                        int eol = headStr.indexOf("\r\n", ci);
+                        if (eol > ci) {
+                            String v = headStr.substring(ci + 15, eol).trim();
+                            try {
+                                int len = Integer.parseInt(v);
+                                if (len > 0 && len < 262144) {
+                                    byte[] buf = new byte[len];
+                                    int off = 0;
+                                    while (off < len) {
+                                        int n = in.read(buf, off, len - off);
+                                        if (n < 0) break;
+                                        off += n;
+                                    }
+                                    body = new String(buf, 0, off, "UTF-8");
+                                }
+                            } catch (Throwable ignored) {
+                            }
+                        }
+                    }
+                    String respBody;
+                    try {
+                        respBody = route(path, body);
+                    } catch (Throwable t) {
+                        respBody = jsonError("内部错误: " + t.getMessage());
+                    }
+                    BufferedWriter w = new BufferedWriter(new OutputStreamWriter(s.getOutputStream(), "UTF-8"));
+                    w.write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: "
+                            + respBody.getBytes("UTF-8").length + "\r\nConnection: close\r\n\r\n" + respBody);
+                    w.flush();
+                    s.close();
+                } catch (Throwable t) {
+                    Log.w(TAG, "a11y connection error", t);
+                    try { s.close(); } catch (Throwable ignored) {}
+                }
+            }
+        }, "a11y-conn").start();
+    }
+
+    private String jsonError(String msg) {
+        try {
+            JSONObject o = new JSONObject();
+            o.put("ok", false);
+            o.put("error", msg == null ? "未知错误" : msg);
+            return o.toString();
+        } catch (Throwable t) {
+            return "{\"ok\":false,\"error\":\"json error\"}";
+        }
+    }
+
+    private String route(String path, String body) throws Exception {
+        String base = path;
+        int q = path.indexOf('?');
+        if (q >= 0) base = path.substring(0, q);
+
+        if (base.equals("/status")) return handleStatus();
+        if (base.equals("/dump")) return handleDump();
+        if (base.equals("/tap")) return handleTap(path);
+        if (base.equals("/input")) return handleInput(path);
+        if (base.equals("/back")) return handleGlobalAction(GLOBAL_ACTION_BACK);
+        if (base.equals("/home")) return handleGlobalAction(GLOBAL_ACTION_HOME);
+        if (base.equals("/scroll")) return handleScroll(path);
+        if (base.equals("/screenshot")) return handleScreenshot(path);
+        if (base.equals("/swipe")) return handleSwipe(path);
+        if (base.equals("/hold")) return handleHold(path);
+        if (base.equals("/touch")) return handleTouch(path);
+        if (base.equals("/touch-release")) return handleTouchRelease();
+        if (base.equals("/touch-status")) return handleTouchStatus();
+        if (base.equals("/gesture")) return handleGesture(body);
+        if (base.equals("/open-file")) return handleOpenFile(body);
+        // v1.16 NFC 读卡：MainActivity 开 reader mode，数据经 NfcStore 中转
+        if (base.equals("/nfc-status")) return NfcStore.statusJson(this).toString();
+        if (base.equals("/nfc-arm")) return handleNfcArm(body);
+        if (base.equals("/nfc-last")) return handleNfcLast(path);
+        if (base.equals("/nfc-history")) return handleNfcHistory();
+        if (base.equals("/nfc-clear")) return NfcStore.clearJson().toString();
+        // v1.23 通知捕获：无障碍服务订阅 TYPE_NOTIFICATION_STATE_CHANGED 后，条目留在内存环形缓冲
+        if (base.equals("/notifications")) return handleNotifications(path);
+        if (base.equals("/notifications-wait")) return handleNotificationsWait(path);
+        if (base.equals("/notifications-clear")) return handleNotificationsClear();
+        if (base.equals("/notifications-status")) return handleNotificationsStatus();
+        // v1.22 自构建探针：证明「自己编译的 classes.dex」真的在跑（只读路由）
+        if (base.equals("/selfbuild-ping")) {
+            return "{\"ok\":true,\"build\":\"selfbuild-dex-v1\",\"pid\":" + android.os.Process.myPid()
+                    + ",\"uptimeMs\":" + android.os.SystemClock.elapsedRealtime() + "}";
+        }
+        return jsonError("未知路由: " + base);
+    }
+
+    // ===================== NFC 读卡（v1.16） =====================
+    // 数据由 MainActivity（reader mode）读入 NfcStore，这里只负责把状态/结果回给插件。
+    // 为什么挂在无障碍桥上：插件侧只认这一个本地 HTTP 通道（127.0.0.1:3181），
+    // 且 AccessibilityService 与 MainActivity 同进程，静态中转即可，不必再开端口。
+
+    /** 开/关「待命」（body: {"armed":true|false}，缺省 true）。 */
+    private String handleNfcArm(String body) {
+        try {
+            boolean on = true;
+            if (body != null && body.trim().length() > 0) {
+                JSONObject o = new JSONObject(body);
+                on = o.optBoolean("armed", true);
+            }
+            return NfcStore.arm(this, on).toString();
+        } catch (Throwable t) {
+            return jsonError("nfc-arm 失败: " + t.getMessage());
+        }
+    }
+
+    /** 最近一次标签；?since=<seq> 表示只认比它更新的（轮询等待用）。 */
+    private String handleNfcLast(String path) {
+        try {
+            String sv = queryParam(path, "since");
+            long since = -1L;
+            if (sv != null && sv.trim().length() > 0) {
+                try {
+                    since = Long.parseLong(sv.trim());
+                } catch (Throwable ignored) {
+                }
+            }
+            return NfcStore.lastJsonObj(since).toString();
+        } catch (Throwable t) {
+            return jsonError("nfc-last 失败: " + t.getMessage());
+        }
+    }
+
+    private String handleNfcHistory() {
+        try {
+            JSONObject o = new JSONObject();
+            o.put("ok", true);
+            o.put("count", NfcStore.currentSeq());
+            o.put("items", NfcStore.historyJson());
+            return o.toString();
+        } catch (Throwable t) {
+            return jsonError("nfc-history 失败: " + t.getMessage());
+        }
+    }
+
+    // ===================== 打开文件（交付文件「打开」按钮，v1.15） =====================
+
+    /**
+     * 用手机里的 App 打开一个文件/文件夹。
+     *
+     * 背景：前端「交付文件 → 用默认应用打开」走 dsh-native-command 的桌面启动器，
+     * 它只实现了 darwin/win32/linux，安卓上被判成「此主机没有可用的桌面」。
+     * 安卓唯一能发 Intent 的地方是 App 进程，所以由引擎侧补丁 POST 到这里。
+     * 入参 {"path":"/sdcard/xxx.docx"}；文件夹退化为打开系统文件管理。
+     */
+    private String handleOpenFile(String body) {
+        try {
+            // 显式初始化：不依赖 javac 的确定赋值推导
+            String abs = null;
+            boolean isDir = false;
+            try {
+                JSONObject o = new JSONObject(body == null || body.isEmpty() ? "{}" : body);
+                String p = o.optString("path", "").trim();
+                if (p.isEmpty()) return jsonError("缺少 path");
+                File f = new File(p);
+                if (!f.isAbsolute()) return jsonError("path 必须是绝对路径: " + p);
+                if (!f.exists()) return jsonError("文件不存在: " + p);
+                abs = f.getCanonicalPath();
+                isDir = f.isDirectory();
+            } catch (Throwable t) {
+                return jsonError("参数解析失败: " + t.getMessage());
+            }
+            String mime = isDir ? "resource/folder" : LogShareProvider.mimeOfName(abs);
+            Uri uri = LogShareProvider.uriForAbs(this, abs);
+            if (uri == null) return jsonError("路径不在允许范围内: " + abs);
+            Intent view = new Intent(Intent.ACTION_VIEW);
+            view.setDataAndType(uri, mime);
+            view.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+            try {
+                startActivity(view);
+            } catch (ActivityNotFoundException noApp) {
+                // 没 App 认领：文件夹退化为系统文件管理，文件弹选择器
+                Intent fb;
+                if (isDir) {
+                    fb = new Intent(Intent.ACTION_MAIN);
+                    fb.addCategory("android.intent.category.APP_FILES");
+                } else {
+                    fb = Intent.createChooser(view, "选择打开方式");
+                    fb.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                }
+                fb.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(fb);
+            }
+            JSONObject r = new JSONObject();
+            r.put("ok", true);
+            r.put("path", abs);
+            r.put("directory", isDir);
+            r.put("mime", mime);
+            return r.toString();
+        } catch (Throwable t) {
+            return jsonError("打开失败: " + t.getMessage());
+        }
+    }
+
+    // ===================== 屏幕尺寸 / 坐标 =====================
+
+    /** 当前真实屏幕尺寸（物理像素，与无障碍截图同一坐标系）。 */
+    private int[] screenSize() {
+        try {
+            WindowManager wm = (WindowManager) getSystemService(WINDOW_SERVICE);
+            DisplayMetrics dm = new DisplayMetrics();
+            wm.getDefaultDisplay().getRealMetrics(dm);
+            return new int[]{dm.widthPixels, dm.heightPixels};
+        } catch (Throwable t) {
+            try {
+                DisplayMetrics dm = getResources().getDisplayMetrics();
+                return new int[]{dm.widthPixels, dm.heightPixels};
+            } catch (Throwable t2) {
+                return new int[]{0, 0};
+            }
+        }
+    }
+
+    /** JSON 坐标解析：fx/fy（0~1 分数）优先，x/y（像素）兜底。 */
+    private int resolveInt(JSONObject op, String fracKey, String pxKey, int screenLen, int def) {
+        try {
+            if (op.has(fracKey)) {
+                double f = op.optDouble(fracKey, -1);
+                if (f >= 0 && f <= 1) return (int) Math.round(f * screenLen);
+            }
+            if (op.has(pxKey)) return op.optInt(pxKey, -1);
+        } catch (Throwable ignored) {
+        }
+        return def;
+    }
+
+    /** GET 查询参数坐标解析：fx/fy 优先，x/y 兜底。 */
+    private int coordFromParams(String path, String pxKey, String fKey, int screenLen) {
+        String p = queryParam(path, pxKey);
+        String f = queryParam(path, fKey);
+        if (!f.isEmpty()) {
+            double d = parseDoubleSafe(f, -1);
+            if (d >= 0 && d <= 1) return (int) Math.round(d * screenLen);
+        }
+        if (!p.isEmpty()) return (int) parseDoubleSafe(p, -1);
+        return -1;
+    }
+
+    // ===================== 通用触摸手势引擎 =====================
+
+    /** 把单个 op 的坐标（x/y 或 fx/fy）解析为 JSONObject，供合成单步手势用。 */
+    private void putCoord(JSONObject op, String pxX, String pxY, String fX, String fY, int sx, int sy) {
+        try {
+            if (sx >= 0) op.put(pxX, sx);
+            if (sy >= 0) op.put(pxY, sy);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** 抬起全部按住中的手指（加锁入口，供服务生命周期调用）。 */
+    private void releaseAllFingers() {
+        synchronized (gestureLock) {
+            releaseAllFingersUnlocked();
+        }
+    }
+
+    /** 抬起全部按住中的手指（调用方必须已持有 gestureLock）。 */
+    private void releaseAllFingersUnlocked() {
+        boolean any = false;
+        for (int f = 0; f < MAX_FINGERS; f++) {
+            if (fingerDown[f]) {
+                any = true;
+                fingerDown[f] = false;
+            }
+        }
+        if (!any) return;
+        try {
+            GestureDescription.Builder gb = new GestureDescription.Builder();
+            for (int f = 0; f < MAX_FINGERS; f++) {
+                if (fingerX[f] >= 0 && fingerY[f] >= 0) {
+                    // 注意：上面已把 fingerDown 全部置 false，这里用坐标数组判断即可
+                    Path p = new Path();
+                    p.moveTo(fingerX[f], fingerY[f]);
+                    gb.addStroke(new GestureDescription.StrokeDescription(p, 0, 80, false));
+                }
+            }
+            dispatchGesture(gb.build(), null, null);
+        } catch (Throwable t) {
+            Log.w(TAG, "release all failed", t);
+        }
+    }
+
+    /**
+     * 执行一组手势笔（时间轴编排，全部同时注入）。op 结构：
+     *   { "kind": "down"|"move"|"up"|"tap"|"swipe"|"hold"|"wait",
+     *     "finger": 0..7,
+     *     "x"/"y" 或 "fx"/"fy"（0~1 分数）,
+     *     "x2"/"y2" 或 "fx2"/"fy2"（swipe 终点）,
+     *     "durationMs": 笔时长（wait=等待毫秒；tap 默认 60；swipe 默认 300；
+     *                    hold 默认 500；move 默认 100；up 默认 100） }
+     * down 后未 up 的手指保持按住，可跨请求延续；下次请求自动带上延续笔。
+     */
+    private String executeGesture(JSONArray ops) {
+        synchronized (gestureLock) {
+            try {
+                int[] size = screenSize();
+                if (size[0] <= 0 || size[1] <= 0) return jsonError("无法获取屏幕尺寸");
+                // 屏幕尺寸变化（旋转/分辨率切换）→ 旧手指坐标失效，全部复位
+                if (screenW != 0 && (size[0] != screenW || size[1] != screenH)) {
+                    releaseAllFingersUnlocked();
+                }
+                screenW = size[0];
+                screenH = size[1];
+
+                int n = ops == null ? 0 : ops.length();
+                if (n == 0) return jsonError("手势列表为空");
+
+                // ===== 第一遍：解析 + 校验 + 时间轴（此时不修改任何真实状态）=====
+                // 虚拟手指状态：模拟本请求内 down/move/up 的演化，用于校验（真实状态不动）
+                boolean[] virtualDown = new boolean[MAX_FINGERS];
+                System.arraycopy(fingerDown, 0, virtualDown, 0, MAX_FINGERS);
+                long now = System.currentTimeMillis();
+                boolean[] expired = new boolean[MAX_FINGERS];
+                for (int f = 0; f < MAX_FINGERS; f++) {
+                    if (fingerDown[f] && now - fingerDownAt[f] > HOLD_TIMEOUT_MS) expired[f] = true;
+                }
+                String[] kinds = new String[n];
+                int[] fings = new int[n];
+                int[] xs = new int[n];
+                int[] ys = new int[n];
+                int[] x2s = new int[n];
+                int[] y2s = new int[n];
+                long[] starts = new long[n];
+                long[] ends = new long[n];
+                // 真实按住且被本请求接管的手指 → 其首个 op 开始时刻（补「保持到 op 开始」的延续笔）
+                long[] firstOpStart = new long[MAX_FINGERS];
+                for (int f = 0; f < MAX_FINGERS; f++) firstOpStart[f] = -1;
+                long t = 0;
+                for (int i = 0; i < n; i++) {
+                    JSONObject op = ops.getJSONObject(i);
+                    String kind = op.optString("kind", "");
+                    int finger = op.has("finger") ? op.optInt("finger", -1) : -1;
+                    int x = resolveInt(op, "fx", "x", screenW, -1);
+                    int y = resolveInt(op, "fy", "y", screenH, -1);
+                    int x2 = resolveInt(op, "fx2", "x2", screenW, -1);
+                    int y2 = resolveInt(op, "fy2", "y2", screenH, -1);
+                    long dur = op.optLong("durationMs", -1);
+                    long seg;
+                    boolean held = finger >= 0 && finger < MAX_FINGERS && virtualDown[finger];
+                    if ("wait".equals(kind)) {
+                        seg = Math.max(0, op.optLong("ms", 0));
+                    } else if ("down".equals(kind)) {
+                        seg = 40;
+                        if (finger < 0 || finger >= MAX_FINGERS) return jsonError("down 的 finger 越界（0~7）");
+                        if (x < 0 || y < 0) return jsonError("down 需要 x/y 或 fx/fy");
+                        if (expired[finger]) return jsonError("down 的手指 " + finger + " 已超时自动抬起，请重新 down");
+                        if (held && firstOpStart[finger] < 0) firstOpStart[finger] = t;
+                        virtualDown[finger] = true;
+                    } else if ("move".equals(kind)) {
+                        seg = dur >= 0 ? dur : 100;
+                        if (finger < 0 || finger >= MAX_FINGERS) return jsonError("move 的 finger 越界（0~7）");
+                        if (!held) return jsonError("move 的手指 " + finger + " 未按住（先 down）");
+                        if (expired[finger]) return jsonError("move 的手指 " + finger + " 已超时自动抬起，请重新 down");
+                        if (x < 0 || y < 0) return jsonError("move 需要 x/y 或 fx/fy");
+                        if (firstOpStart[finger] < 0) firstOpStart[finger] = t;
+                    } else if ("up".equals(kind)) {
+                        seg = dur >= 0 ? dur : 100;
+                        if (finger < 0 || finger >= MAX_FINGERS) return jsonError("up 的 finger 越界（0~7）");
+                        if (!held) return jsonError("up 的手指 " + finger + " 未按住（先 down）");
+                        if (expired[finger]) return jsonError("up 的手指 " + finger + " 已超时自动抬起，请重新 down");
+                        if (firstOpStart[finger] < 0) firstOpStart[finger] = t;
+                        virtualDown[finger] = false;
+                    } else if ("tap".equals(kind)) {
+                        seg = dur >= 0 ? dur : 60;
+                        if (x < 0 || y < 0) return jsonError("tap 需要 x/y 或 fx/fy");
+                        if (held) {
+                            if (expired[finger]) return jsonError("tap 的手指 " + finger + " 已超时自动抬起，请重新 down");
+                            if (firstOpStart[finger] < 0) firstOpStart[finger] = t;
+                            virtualDown[finger] = false;
+                        }
+                    } else if ("swipe".equals(kind)) {
+                        seg = dur >= 0 ? dur : 300;
+                        if (x < 0 || y < 0 || x2 < 0 || y2 < 0) {
+                            return jsonError("swipe 需要起点(x/y 或 fx/fy)和终点(x2/y2 或 fx2/fy2)");
+                        }
+                        if (held) {
+                            if (expired[finger]) return jsonError("swipe 的手指 " + finger + " 已超时自动抬起，请重新 down");
+                            if (firstOpStart[finger] < 0) firstOpStart[finger] = t;
+                            virtualDown[finger] = false;
+                        }
+                    } else if ("hold".equals(kind)) {
+                        seg = dur >= 0 ? dur : 500;
+                        if (x < 0 || y < 0) return jsonError("hold 需要 x/y 或 fx/fy");
+                        if (held) {
+                            if (expired[finger]) return jsonError("hold 的手指 " + finger + " 已超时自动抬起，请重新 down");
+                            if (firstOpStart[finger] < 0) firstOpStart[finger] = t;
+                            virtualDown[finger] = false;
+                        }
+                    } else {
+                        return jsonError("未知手势 kind: " + kind);
+                    }
+                    kinds[i] = kind;
+                    fings[i] = finger;
+                    xs[i] = x;
+                    ys[i] = y;
+                    x2s[i] = x2;
+                    y2s[i] = y2;
+                    starts[i] = t;
+                    ends[i] = t + seg;
+                    t += seg;
+                }
+                long totalT = t;
+                if (totalT <= 0) return jsonError("手势时间轴为空");
+                if (totalT > MAX_GESTURE_TOTAL_MS) {
+                    return jsonError("手势总时长超限（>" + (MAX_GESTURE_TOTAL_MS / 1000) + "s）；长按请用 down 保持，不要用长 wait");
+                }
+
+                // ===== 第二遍准备：生成笔（所有校验已通过，不会中途返回）=====
+                GestureDescription.Builder gb = new GestureDescription.Builder();
+                List<StrokeDesc> strokes = new ArrayList<StrokeDesc>();
+
+                // 保持中的手指：
+                //  - 未接管 → 全程延续笔（保持到手势结束）
+                //  - 被接管 → 保持到其首个 op 开始（op 笔接同一指针，避免等待期被系统误抬起）
+                //  - 已过期 → 原地抬起笔
+                for (int f = 0; f < MAX_FINGERS; f++) {
+                    if (!fingerDown[f]) continue;
+                    if (expired[f]) {
+                        Path p = new Path();
+                        p.moveTo(fingerX[f], fingerY[f]);
+                        strokes.add(new StrokeDesc(p, 0, 80, false));
+                    } else if (firstOpStart[f] < 0) {
+                        Path p = new Path();
+                        p.moveTo(fingerX[f], fingerY[f]);
+                        strokes.add(new StrokeDesc(p, 0, totalT, true));
+                    } else if (firstOpStart[f] > 0) {
+                        Path p = new Path();
+                        p.moveTo(fingerX[f], fingerY[f]);
+                        strokes.add(new StrokeDesc(p, 0, firstOpStart[f], true));
+                    }
+                    // firstOpStart==0：op 笔从 0 开始，无需保持笔
+                }
+
+                // 第二遍：逐 op 生成笔（cur 为手指当前坐标；所有校验已通过，不会中途返回）
+                float[] curX = new float[MAX_FINGERS];
+                float[] curY = new float[MAX_FINGERS];
+                System.arraycopy(fingerX, 0, curX, 0, MAX_FINGERS);
+                System.arraycopy(fingerY, 0, curY, 0, MAX_FINGERS);
+
+                for (int i = 0; i < n; i++) {
+                    String kind = kinds[i];
+                    int finger = fings[i];
+                    int x = xs[i];
+                    int y = ys[i];
+                    int x2 = x2s[i];
+                    int y2 = y2s[i];
+                    long start = starts[i];
+                    long end = ends[i];
+                    long seg = end - start;
+                    boolean held = finger >= 0 && finger < MAX_FINGERS && fingerDown[finger];
+
+                    if ("wait".equals(kind)) {
+                        // 无笔，仅占时间轴
+                    } else if ("down".equals(kind)) {
+                        if (held) {
+                            // 已按住 → 视为滑到新位置并继续保持
+                            Path path = new Path();
+                            path.moveTo(curX[finger], curY[finger]);
+                            path.lineTo(x, y);
+                            strokes.add(new StrokeDesc(path, start, seg, true));
+                        } else {
+                            Path path = new Path();
+                            path.moveTo(x, y);
+                            strokes.add(new StrokeDesc(path, start, totalT - start, true));
+                            fingerDownAt[finger] = now;
+                        }
+                        fingerDown[finger] = true;
+                        fingerX[finger] = x;
+                        fingerY[finger] = y;
+                        curX[finger] = x;
+                        curY[finger] = y;
+                    } else if ("move".equals(kind)) {
+                        Path path = new Path();
+                        path.moveTo(curX[finger], curY[finger]);
+                        path.lineTo(x, y);
+                        strokes.add(new StrokeDesc(path, start, seg, true));
+                        fingerX[finger] = x;
+                        fingerY[finger] = y;
+                        curX[finger] = x;
+                        curY[finger] = y;
+                    } else if ("up".equals(kind)) {
+                        Path path = new Path();
+                        path.moveTo(curX[finger], curY[finger]);
+                        if (x >= 0 && y >= 0) {
+                            path.lineTo(x, y); // 先滑到目标位置再抬起
+                            fingerX[finger] = x;
+                            fingerY[finger] = y;
+                        }
+                        strokes.add(new StrokeDesc(path, start, seg, false));
+                        fingerDown[finger] = false;
+                    } else if ("tap".equals(kind)) {
+                        if (held) {
+                            // 已按住的手指 tap → 滑到目标并抬起
+                            Path path = new Path();
+                            path.moveTo(curX[finger], curY[finger]);
+                            path.lineTo(x, y);
+                            strokes.add(new StrokeDesc(path, start, seg, false));
+                            fingerDown[finger] = false;
+                            fingerX[finger] = x;
+                            fingerY[finger] = y;
+                        } else {
+                            // 新手指点按（按下即抬起）
+                            Path path = new Path();
+                            path.moveTo(x, y);
+                            strokes.add(new StrokeDesc(path, start, seg, false));
+                        }
+                    } else if ("swipe".equals(kind)) {
+                        if (held) {
+                            // 已按住的手指 swipe → 从当前位置滑到终点并抬起
+                            Path path = new Path();
+                            path.moveTo(curX[finger], curY[finger]);
+                            path.lineTo(x2, y2);
+                            strokes.add(new StrokeDesc(path, start, seg, false));
+                            fingerDown[finger] = false;
+                            fingerX[finger] = x2;
+                            fingerY[finger] = y2;
+                        } else {
+                            Path path = new Path();
+                            path.moveTo(x, y);
+                            path.lineTo(x2, y2);
+                            strokes.add(new StrokeDesc(path, start, seg, false));
+                        }
+                    } else if ("hold".equals(kind)) {
+                        if (held) {
+                            // 已按住的手指 hold → 滑到目标位置按住到结束再抬起
+                            Path path = new Path();
+                            path.moveTo(curX[finger], curY[finger]);
+                            path.lineTo(x, y);
+                            strokes.add(new StrokeDesc(path, start, seg, false));
+                            fingerDown[finger] = false;
+                            fingerX[finger] = x;
+                            fingerY[finger] = y;
+                        } else {
+                            // 新手指：按下 → 保持 duration → 抬起
+                            Path path = new Path();
+                            path.moveTo(x, y);
+                            strokes.add(new StrokeDesc(path, start, seg, false));
+                        }
+                    }
+                }
+
+                if (strokes.isEmpty()) return jsonError("手势没有可执行的笔");
+                // 注：getMaxStrokeCount() 是 @hide API，public android.jar 没有；固定 8 指远低于设备上限（通常 ≥10）
+                if (strokes.size() > MAX_FINGERS + 2) {
+                    releaseAllFingersUnlocked();
+                    return jsonError("笔画数超限（单次最多 " + (MAX_FINGERS + 2) + " 笔）");
+                }
+                for (StrokeDesc sd : strokes) {
+                    gb.addStroke(new GestureDescription.StrokeDescription(sd.path, sd.startTime, sd.duration, sd.willContinue));
+                }
+                final GestureDescription gesture = gb.build();
+
+                final CountDownLatch latch = new CountDownLatch(1);
+                final boolean[] success = {false};
+                dispatchGesture(gesture, new GestureResultCallback() {
+                    @Override
+                    public void onCompleted(GestureDescription g) {
+                        success[0] = true;
+                        latch.countDown();
+                    }
+
+                    @Override
+                    public void onCancelled(GestureDescription g) {
+                        latch.countDown();
+                    }
+                }, null);
+                boolean done = latch.await(totalT + 5000, TimeUnit.MILLISECONDS);
+                if (!done) {
+                    releaseAllFingersUnlocked();
+                    return jsonError("手势执行超时，已复位所有手指");
+                }
+                if (!success[0]) {
+                    releaseAllFingersUnlocked();
+                    return jsonError("手势被系统取消（可能被新手势或手动触摸打断），已复位所有手指");
+                }
+
+                // 返回当前按住的手指
+                JSONArray held = new JSONArray();
+                for (int f = 0; f < MAX_FINGERS; f++) {
+                    if (fingerDown[f]) {
+                        JSONObject h = new JSONObject();
+                        h.put("finger", f);
+                        h.put("x", (int) fingerX[f]);
+                        h.put("y", (int) fingerY[f]);
+                        h.put("fx", fingerX[f] / screenW);
+                        h.put("fy", fingerY[f] / screenH);
+                        held.put(h);
+                    }
+                }
+                JSONObject o = new JSONObject();
+                o.put("ok", true);
+                o.put("durationMs", totalT);
+                o.put("held", held);
+                return o.toString();
+            } catch (Throwable t) {
+                releaseAllFingersUnlocked();
+                return jsonError("gesture error: " + t.getMessage());
+            }
+        }
+    }
+
+    /** /gesture：POST JSON 数组（或 {"strokes": [...]}），执行一组手势笔。 */
+    private String handleGesture(String body) {
+        try {
+            if (body == null || body.trim().isEmpty()) return jsonError("gesture 需要 POST JSON body");
+            String s = body.trim();
+            JSONArray ops;
+            if (s.startsWith("[")) {
+                ops = new JSONArray(s);
+            } else {
+                JSONObject o = new JSONObject(s);
+                ops = o.optJSONArray("strokes");
+                if (ops == null) return jsonError("gesture body 需要是数组或 {\"strokes\":[...]}");
+            }
+            return executeGesture(ops);
+        } catch (Throwable t) {
+            return jsonError("gesture 参数解析失败: " + t.getMessage());
+        }
+    }
+
+    /** /touch：action=down|move|up|release&finger=N&x/y 或 fx/fy（状态式单指操作）。 */
+    private String handleTouch(String path) {
+        try {
+            String action = queryParam(path, "action");
+            String fStr = queryParam(path, "finger");
+            if (action.isEmpty()) return jsonError("touch 需要 action=down|move|up|release");
+            if (fStr.isEmpty()) return jsonError("touch 需要 finger=0~7");
+            int finger = (int) parseDoubleSafe(fStr, -1);
+            if (finger < 0 || finger >= MAX_FINGERS) return jsonError("finger 越界（0~7）");
+            JSONObject op = new JSONObject();
+            op.put("kind", "release".equals(action) ? "up" : action);
+            op.put("finger", finger);
+            if (!"up".equals(action) && !"release".equals(action)) {
+                int x = coordFromParams(path, "x", "fx", screenW == 0 ? screenSize()[0] : screenW);
+                int y = coordFromParams(path, "y", "fy", screenH == 0 ? screenSize()[1] : screenH);
+                if (x < 0 || y < 0) return jsonError("touch 需要 x/y 或 fx/fy");
+                op.put("x", x);
+                op.put("y", y);
+            }
+            JSONArray ops = new JSONArray();
+            ops.put(op);
+            return executeGesture(ops);
+        } catch (Throwable t) {
+            return jsonError("touch error: " + t.getMessage());
+        }
+    }
+
+    /** /touch-release：抬起全部按住的手指。 */
+    private String handleTouchRelease() {
+        synchronized (gestureLock) {
+            try {
+                releaseAllFingersUnlocked();
+                JSONObject o = new JSONObject();
+                o.put("ok", true);
+                o.put("held", new JSONArray());
+                return o.toString();
+            } catch (Throwable t) {
+                return jsonError("touch-release error: " + t.getMessage());
+            }
+        }
+    }
+
+    /** /touch-status：查询当前按住的手指。 */
+    private String handleTouchStatus() {
+        try {
+            int[] size = screenSize();
+            JSONObject o = new JSONObject();
+            o.put("ok", true);
+            o.put("screenW", size[0]);
+            o.put("screenH", size[1]);
+            o.put("maxFingers", MAX_FINGERS);
+            o.put("holdTimeoutMs", HOLD_TIMEOUT_MS);
+            JSONArray held = new JSONArray();
+            long now = System.currentTimeMillis();
+            for (int f = 0; f < MAX_FINGERS; f++) {
+                if (fingerDown[f]) {
+                    JSONObject h = new JSONObject();
+                    h.put("finger", f);
+                    h.put("x", (int) fingerX[f]);
+                    h.put("y", (int) fingerY[f]);
+                    h.put("fx", screenW > 0 ? fingerX[f] / screenW : 0);
+                    h.put("fy", screenH > 0 ? fingerY[f] / screenH : 0);
+                    h.put("elapsedMs", now - fingerDownAt[f]);
+                    held.put(h);
+                }
+            }
+            o.put("held", held);
+            return o.toString();
+        } catch (Throwable t) {
+            return jsonError("touch-status error: " + t.getMessage());
+        }
+    }
+
+    /** /swipe：x1/y1→x2/y2（或 fx1/fy1→fx2/fy2），duration 毫秒。 */
+    private String handleSwipe(String path) {
+        try {
+            int[] size = screenSize();
+            if (screenW == 0) {
+                screenW = size[0];
+                screenH = size[1];
+            }
+            int x1 = coordFromParams(path, "x1", "fx1", screenW);
+            int y1 = coordFromParams(path, "y1", "fy1", screenH);
+            int x2 = coordFromParams(path, "x2", "fx2", screenW);
+            int y2 = coordFromParams(path, "y2", "fy2", screenH);
+            if (x1 < 0 || y1 < 0 || x2 < 0 || y2 < 0) {
+                return jsonError("swipe 需要起点(x1/y1 或 fx1/fy1)和终点(x2/y2 或 fx2/fy2)");
+            }
+            long dur = (long) parseDoubleSafe(queryParam(path, "duration"), 300);
+            JSONObject op = new JSONObject();
+            op.put("kind", "swipe");
+            op.put("x", x1);
+            op.put("y", y1);
+            op.put("x2", x2);
+            op.put("y2", y2);
+            op.put("durationMs", dur);
+            if (!queryParam(path, "finger").isEmpty()) {
+                op.put("finger", (int) parseDoubleSafe(queryParam(path, "finger"), 0));
+            }
+            JSONArray ops = new JSONArray();
+            ops.put(op);
+            return executeGesture(ops);
+        } catch (Throwable t) {
+            return jsonError("swipe error: " + t.getMessage());
+        }
+    }
+
+    /** /hold：x/y（或 fx/fy）按住 duration 毫秒后自动抬起。 */
+    private String handleHold(String path) {
+        try {
+            int[] size = screenSize();
+            if (screenW == 0) {
+                screenW = size[0];
+                screenH = size[1];
+            }
+            int x = coordFromParams(path, "x", "fx", screenW);
+            int y = coordFromParams(path, "y", "fy", screenH);
+            if (x < 0 || y < 0) return jsonError("hold 需要 x/y 或 fx/fy");
+            long dur = (long) parseDoubleSafe(queryParam(path, "duration"), 500);
+            JSONObject op = new JSONObject();
+            op.put("kind", "hold");
+            op.put("x", x);
+            op.put("y", y);
+            op.put("durationMs", dur);
+            if (!queryParam(path, "finger").isEmpty()) {
+                op.put("finger", (int) parseDoubleSafe(queryParam(path, "finger"), 0));
+            }
+            JSONArray ops = new JSONArray();
+            ops.put(op);
+            return executeGesture(ops);
+        } catch (Throwable t) {
+            return jsonError("hold error: " + t.getMessage());
+        }
+    }
+
+    // ===================== 原有路由（保留 + 增强） =====================
+
+    private String handleStatus() {
+        try {
+            JSONObject o = new JSONObject();
+            o.put("ok", true);
+            o.put("running", isRunning);
+            o.put("package", activePackage);
+            AccessibilityNodeInfo root = getRootInActiveWindow();
+            o.put("nodeCount", root == null ? 0 : countNodes(root));
+            o.put("apiLevel", Build.VERSION.SDK_INT);
+            o.put("canScreenshot", Build.VERSION.SDK_INT >= 30);
+            return o.toString();
+        } catch (Throwable t) {
+            return jsonError("status error: " + t.getMessage());
+        }
+    }
+
+    private int countNodes(AccessibilityNodeInfo root) {
+        final int[] count = {0};
+        walk(root, new NodeVisitor() {
+            @Override
+            public void visit(AccessibilityNodeInfo node, int depth) {
+                count[0]++;
+            }
+        }, 0);
+        return count[0];
+    }
+
+    private interface NodeVisitor {
+        void visit(AccessibilityNodeInfo node, int depth);
+    }
+
+    private void walk(AccessibilityNodeInfo node, NodeVisitor visitor, int depth) {
+        if (node == null || depth > MAX_DEPTH) return;
+        visitor.visit(node, depth);
+        for (int i = 0; i < node.getChildCount(); i++) {
+            try {
+                AccessibilityNodeInfo child = node.getChild(i);
+                if (child != null) {
+                    walk(child, visitor, depth + 1);
+                    child.recycle();
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+    }
+
+    /** 读取屏幕节点树，转 JSON（过滤：只保留有文本/描述/可点击/可输入/可滚动节点）。 */
+    private String handleDump() {
+        try {
+            final AccessibilityNodeInfo root = getRootInActiveWindow();
+            JSONObject o = new JSONObject();
+            o.put("ok", true);
+            if (root == null) {
+                o.put("package", activePackage);
+                o.put("count", 0);
+                o.put("truncated", false);
+                o.put("nodes", new JSONArray());
+                o.put("note", "当前没有可读取的活动窗口（可能处于锁屏或安全页面）");
+                return o.toString();
+            }
+            final JSONArray nodes = new JSONArray();
+            final int[] emitted = {0};
+            final boolean[] truncated = {false};
+            walk(root, new NodeVisitor() {
+                @Override
+                public void visit(AccessibilityNodeInfo node, int depth) {
+                    if (emitted[0] >= MAX_NODES) {
+                        truncated[0] = true;
+                        return;
+                    }
+                    if (node == null) return;
+                    try {
+                        CharSequence textCs = node.getText();
+                        CharSequence descCs = node.getContentDescription();
+                        String text = textCs == null ? "" : textCs.toString().trim();
+                        String desc = descCs == null ? "" : descCs.toString().trim();
+                        boolean clickable = node.isClickable();
+                        boolean input = node.isEditable() || "android.widget.EditText".equals(node.getClassName() != null ? node.getClassName().toString() : "");
+                        boolean scrollable = node.isScrollable();
+                        if (text.isEmpty() && desc.isEmpty() && !clickable && !input && !scrollable) return;
+                        Rect bounds = new Rect();
+                        node.getBoundsInScreen(bounds);
+                        if (bounds.width() <= 0 || bounds.height() <= 0) return;
+                        if (text.length() > MAX_TEXT_LEN) text = text.substring(0, MAX_TEXT_LEN) + "…";
+                        if (desc.length() > MAX_TEXT_LEN) desc = desc.substring(0, MAX_TEXT_LEN) + "…";
+                        JSONObject n = new JSONObject();
+                        n.put("text", text);
+                        n.put("desc", desc);
+                        n.put("cls", node.getClassName() == null ? "" : node.getClassName().toString());
+                        n.put("x", bounds.left);
+                        n.put("y", bounds.top);
+                        n.put("w", bounds.width());
+                        n.put("h", bounds.height());
+                        n.put("clickable", clickable);
+                        n.put("input", input);
+                        n.put("checked", node.isChecked());
+                        n.put("selected", node.isSelected());
+                        n.put("scrollable", scrollable);
+                        n.put("depth", depth);
+                        nodes.put(n);
+                        emitted[0]++;
+                    } catch (Throwable ignored) {
+                    }
+                }
+            }, 0);
+            o.put("package", root.getPackageName() == null ? "" : root.getPackageName().toString());
+            o.put("count", emitted[0]);
+            o.put("truncated", truncated[0]);
+            o.put("nodes", nodes);
+            // v1.7.3：无节点界面（Unity 游戏/自绘 UI）引导 AI 改用截图 + 分数坐标
+            if (emitted[0] == 0) {
+                o.put("hint", "当前界面没有可读控件（常见于 Unity/游戏/自绘界面）。请改用 android_see 截屏看图，" +
+                        "并优先用分数坐标（fx/fy，0~1）点击/滑动——截图会被模型查看器缩放，绝对像素坐标会点偏。");
+            }
+            return o.toString();
+        } catch (Throwable t) {
+            return jsonError("dump error: " + t.getMessage());
+        }
+    }
+
+    /** 从节点向上找最近的可点击祖先（含自身）；找不到返回 null。
+     *  v1.13：按钮内部常常是若干不可点击的子 TextView，直接拿最深节点做 ACTION_CLICK 会失败，
+     *  退化成投递手势——而手势会被悬浮窗（远程控制/小窗等）吃掉。向上找可点击祖先即可绕过。 */
+    private AccessibilityNodeInfo closestClickable(AccessibilityNodeInfo node) {
+        Rect nb = new Rect();
+        try { node.getBoundsInScreen(nb); } catch (Throwable t) { return null; }
+        long nArea = (long) Math.max(1, nb.width()) * Math.max(1, nb.height());
+        AccessibilityNodeInfo cur = node;
+        for (int i = 0; i < 12 && cur != null; i++) {
+            try {
+                if (cur.isClickable() && cur.isEnabled()) {
+                    if (i == 0) return cur;
+                    // 面积护栏：祖先比自己大太多（WebView / 整页容器）时不能当目标，否则 ACTION_CLICK
+                    // 会打在该容器中心（点错位置）；这种情况宁可返回 null 走手势。
+                    Rect cb = new Rect();
+                    cur.getBoundsInScreen(cb);
+                    long cArea = (long) Math.max(1, cb.width()) * Math.max(1, cb.height());
+                    if (cArea <= nArea * 6) return cur;
+                    return null;
+                }
+                cur = cur.getParent();
+            } catch (Throwable t) {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    private AccessibilityNodeInfo findNodeByText(String needle) {
+        if (needle == null || needle.isEmpty()) return null;
+        final String target = needle.trim().toLowerCase();
+        final AccessibilityNodeInfo root = getRootInActiveWindow();
+        if (root == null) return null;
+        final AccessibilityNodeInfo[] best = {null};
+        final int[] bestRank = {-1};   // 4=精确且可点击 3=包含且可点击 2=精确 1=包含
+        walk(root, new NodeVisitor() {
+            @Override
+            public void visit(AccessibilityNodeInfo node, int depth) {
+                if (node == null || bestRank[0] == 4) return;
+                CharSequence textCs = node.getText();
+                CharSequence descCs = node.getContentDescription();
+                String text = textCs == null ? "" : textCs.toString().trim().toLowerCase();
+                String desc = descCs == null ? "" : descCs.toString().trim().toLowerCase();
+                boolean exact = text.equals(target) || desc.equals(target);
+                boolean partial = !exact && ((!text.isEmpty() && text.contains(target))
+                        || (!desc.isEmpty() && desc.contains(target)));
+                if (!exact && !partial) return;
+                AccessibilityNodeInfo clickable = closestClickable(node);
+                int rank = exact ? (clickable != null ? 4 : 2) : (clickable != null ? 3 : 1);
+                if (clickable != null) {
+                    if (rank > bestRank[0]) { bestRank[0] = rank; best[0] = clickable; }
+                } else if (best[0] == null && rank > bestRank[0]) {
+                    bestRank[0] = rank;
+                    best[0] = node;
+                }
+            }
+        }, 0);
+        return best[0];
+    }
+
+    /** 包含该坐标的**最深可点击节点**（无则退回最深节点）。 */
+    private AccessibilityNodeInfo findNodeByPoint(final int x, final int y) {
+        final AccessibilityNodeInfo root = getRootInActiveWindow();
+        if (root == null) return null;
+        final AccessibilityNodeInfo[] best = {null};
+        final int[] bestDepth = {-1};
+        walk(root, new NodeVisitor() {
+            @Override
+            public void visit(AccessibilityNodeInfo node, int depth) {
+                if (node == null) return;
+                Rect bounds = new Rect();
+                try { node.getBoundsInScreen(bounds); } catch (Throwable t) { return; }
+                if (!bounds.contains(x, y)) return;
+                AccessibilityNodeInfo clickable = closestClickable(node);
+                if (clickable == null) {
+                    if (best[0] == null && depth > bestDepth[0]) { bestDepth[0] = depth; best[0] = node; }
+                    return;
+                }
+                if (depth >= bestDepth[0]) { bestDepth[0] = depth; best[0] = clickable; }
+            }
+        }, 0);
+        return best[0];
+    }
+
+    /** /tap：text/desc 按文本查找点击；x/y 或 fx/fy 按坐标点击（优先节点 ACTION_CLICK，失败手势）。 */
+    private String handleTap(String path) {
+        try {
+            String text = queryParam(path, "text");
+            String desc = queryParam(path, "desc");
+            String xStr = queryParam(path, "x");
+            String yStr = queryParam(path, "y");
+            int[] size = screenSize();
+            if (screenW == 0) {
+                screenW = size[0];
+                screenH = size[1];
+            }
+            int tapX = coordFromParams(path, "x", "fx", screenW);
+            int tapY = coordFromParams(path, "y", "fy", screenH);
+            JSONObject o = new JSONObject();
+            o.put("ok", true);
+
+            AccessibilityNodeInfo target = null;
+            String method = "";
+            if (!text.isEmpty() || !desc.isEmpty()) {
+                target = findNodeByText(!text.isEmpty() ? text : desc);
+                method = "node-text";
+            } else if (tapX >= 0 && tapY >= 0) {
+                target = findNodeByPoint(tapX, tapY);
+                method = "node-coord";
+            } else {
+                return jsonError("tap 需要 text/desc 或 x/y（或 fx/fy）参数");
+            }
+
+            if (target != null && target.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                o.put("found", true);
+                o.put("method", method);
+                target.recycle();
+                return o.toString();
+            }
+            if (tapX >= 0 && tapY >= 0) {
+                boolean gestureOk = gestureTap(tapX, tapY);
+                o.put("found", gestureOk);
+                o.put("method", gestureOk ? "gesture" : "none");
+                return o.toString();
+            }
+            o.put("found", false);
+            o.put("error", "未找到可点击的目标元素（text/desc 未匹配，或元素不可点击）");
+            return o.toString();
+        } catch (Throwable t) {
+            return jsonError("tap error: " + t.getMessage());
+        }
+    }
+
+    private boolean gestureTap(final int x, final int y) {
+        if (Build.VERSION.SDK_INT < 24) return false;
+        try {
+            Path path = new Path();
+            path.moveTo(x, y);
+            GestureDescription.StrokeDescription stroke =
+                    new GestureDescription.StrokeDescription(path, 0, 60);
+            GestureDescription gesture = new GestureDescription.Builder()
+                    .addStroke(stroke)
+                    .build();
+            return dispatchGesture(gesture, null, null);
+        } catch (Throwable t) {
+            Log.w(TAG, "gesture tap failed", t);
+            return false;
+        }
+    }
+
+    /** /input：text= 输入到当前聚焦输入框。mode=set（默认，ACTION_SET_TEXT）或 mode=paste（剪贴板粘贴，
+     * 适合 WebView/contenteditable 输入框——setText 只改无障碍节点、不触发前端 input 事件，界面不刷新）。 */
+    private String handleInput(String path) {
+        try {
+            String text = queryParam(path, "text");
+            String mode = queryParam(path, "mode");
+            JSONObject o = new JSONObject();
+            o.put("ok", true);
+            AccessibilityNodeInfo target = null;
+            AccessibilityNodeInfo root = getRootInActiveWindow();
+            if (root == null) return jsonError("当前没有活动窗口");
+            target = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT);
+            if (target == null) {
+                final AccessibilityNodeInfo[] editable = {null};
+                walk(root, new NodeVisitor() {
+                    @Override
+                    public void visit(AccessibilityNodeInfo node, int depth) {
+                        if (editable[0] != null) return;
+                        if (node != null && (node.isEditable() || node.isFocusable())) editable[0] = node;
+                    }
+                }, 0);
+                target = editable[0];
+            }
+            if (target == null) return jsonError("未找到可输入的文本框");
+            boolean ok;
+            if (!target.isFocused()) {
+                target.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
+            }
+            if ("paste".equals(mode)) {
+                // WebView/contenteditable：setText 不触发前端 input 事件 → 用剪贴板粘贴
+                android.content.ClipboardManager cm =
+                        (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("dsh-input", text));
+                ok = target.performAction(AccessibilityNodeInfo.ACTION_PASTE);
+                o.put("method", "paste");
+            } else {
+                android.os.Bundle args = new android.os.Bundle();
+                args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text);
+                ok = target.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args);
+                o.put("method", "set");
+            }
+            o.put("focused", target.isFocused());
+            o.put("error", ok ? "" : ("输入失败（" + ("paste".equals(mode) ? "粘贴未执行" : "setText 未执行") + "）"));
+            return o.toString();
+        } catch (Throwable t) {
+            return jsonError("input error: " + t.getMessage());
+        }
+    }
+
+    /** /scroll：direction=up/down/left/right（优先节点滚动）。 */
+    private String handleScroll(String path) {
+        try {
+            String direction = queryParam(path, "direction");
+            JSONObject o = new JSONObject();
+            o.put("ok", true);
+            o.put("direction", direction);
+            AccessibilityNodeInfo root = getRootInActiveWindow();
+            if (root == null) return jsonError("当前没有活动窗口");
+            final int[] action = {AccessibilityNodeInfo.ACTION_SCROLL_FORWARD};
+            if ("up".equals(direction)) action[0] = AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD;
+            else if ("down".equals(direction)) action[0] = AccessibilityNodeInfo.ACTION_SCROLL_FORWARD;
+            else if ("left".equals(direction)) action[0] = AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD;
+            else if ("right".equals(direction)) action[0] = AccessibilityNodeInfo.ACTION_SCROLL_FORWARD;
+            else return jsonError("direction 需要 up/down/left/right");
+            final AccessibilityNodeInfo[] scroller = {null};
+            walk(root, new NodeVisitor() {
+                @Override
+                public void visit(AccessibilityNodeInfo node, int depth) {
+                    if (scroller[0] != null) return;
+                    if (node != null && node.isScrollable()) scroller[0] = node;
+                }
+            }, 0);
+            if (scroller[0] != null && scroller[0].performAction(action[0])) {
+                o.put("method", "node");
+                return o.toString();
+            }
+            o.put("method", "none");
+            o.put("error", "未找到可滚动的区域");
+            return o.toString();
+        } catch (Throwable t) {
+            return jsonError("scroll error: " + t.getMessage());
+        }
+    }
+
+    private String handleGlobalAction(int action) {
+        try {
+            JSONObject o = new JSONObject();
+            o.put("ok", performGlobalAction(action));
+            return o.toString();
+        } catch (Throwable t) {
+            return jsonError("global action error: " + t.getMessage());
+        }
+    }
+
+    /** 无障碍截图输出目录：优先外部共享目录 <sdcard>/<pkgRoot>/screenshots/。
+     *  原因：截图与读取虽同属 DSH，但多套同源包（正式版/Lite/兼容版）共用同一份插件时，
+     *  一旦请求落到另一个包的实例上，路径就落在对方的 /data/user/0/<pkg>/ 私有目录里 —— 按 UID
+     *  隔离必然 EACCES，整个"看图"能力挂掉。写到外部目录后任何包都能读，这类失败从结构上消失。
+     *  外部目录不可用（未授权存储等）时回退私有 filesDir，同包内读写仍然正常。 */
+    private File screenshotDir() {
+        try {
+            File ext = android.os.Environment.getExternalStorageDirectory();
+            if (ext != null) {
+                String p = getPackageName();
+                String root = p.contains("beta") ? "DeepSeekHarnessLite"
+                        : p.contains("compat") ? "DeepSeekHarnessCompat"
+                        : "DeepSeekHarness";
+                File d = new File(new File(ext, root), "screenshots");
+                if (d.exists() || d.mkdirs()) return d;
+            }
+        } catch (Throwable ignored) {}
+        File fallback = new File(getFilesDir(), "screenshots");
+        if (!fallback.exists()) fallback.mkdirs();
+        return fallback;
+    }
+
+    /** /screenshot：Android 11+ 无障碍截图，存 PNG 到外部共享目录 <sdcard>/<pkgRoot>/screenshots/，返回路径。
+     *  grid=4/8 叠加网格线（帮模型按行列定位）；返回屏幕/图片尺寸与换算系数。 */
+    private String handleScreenshot(String path) {
+        if (Build.VERSION.SDK_INT < 30) {
+            return jsonError("截图需要 Android 11+（当前 API " + Build.VERSION.SDK_INT + "）；低版本请用 /dump 读屏幕文本");
+        }
+        final String gridStr = queryParam(path, "grid");
+        final int grid = "8".equals(gridStr) ? 8 : ("4".equals(gridStr) || "true".equals(gridStr) ? 4 : 0);
+        // 虚拟屏支持（v1.8）：?display=N 截指定显示（overlay 虚拟屏等）；缺省截主屏
+        final String displayStr = queryParam(path, "display");
+        int displayId = Display.DEFAULT_DISPLAY;
+        if (displayStr != null && !displayStr.isEmpty()) {
+            try {
+                displayId = Integer.parseInt(displayStr.trim());
+            } catch (NumberFormatException e) {
+                displayId = Display.DEFAULT_DISPLAY;
+            }
+        }
+        final CountDownLatch latch = new CountDownLatch(1);
+        final String[] result = {null};
+        Executor executor = new Executor() {
+            @Override
+            public void execute(Runnable r) {
+                new Handler(Looper.getMainLooper()).post(r);
+            }
+        };
+        try {
+            takeScreenshot(displayId, executor, new TakeScreenshotCallback() {
+                @Override
+                public void onSuccess(ScreenshotResult screenshotResult) {
+                    try {
+                        // API 30-33：ScreenshotResult 提供 HardwareBuffer（+ColorSpace），包成 Bitmap 再转软件位图
+                        android.hardware.HardwareBuffer hb = screenshotResult.getHardwareBuffer();
+                        Bitmap bmp = Bitmap.wrapHardwareBuffer(hb, screenshotResult.getColorSpace());
+                        if (bmp == null) {
+                            result[0] = jsonError("截图位图为空");
+                        } else {
+                            Bitmap soft = bmp.copy(Bitmap.Config.ARGB_8888, true); // isMutable=true：后面要叠网格（new Canvas 需要可变位图）
+                            bmp.recycle();
+                            if (hb != null) hb.close();
+                            // 网格叠加（半透明细线，帮模型按行列定位）
+                            if (grid > 0 && soft.getWidth() > 0) {
+                                Canvas cv = new Canvas(soft);
+                                Paint paint = new Paint();
+                                paint.setColor(0x66FFFFFF);
+                                paint.setStrokeWidth(2f);
+                                for (int i = 1; i < grid; i++) {
+                                    float gx = soft.getWidth() * i / (float) grid;
+                                    cv.drawLine(gx, 0, gx, soft.getHeight(), paint);
+                                    float gy = soft.getHeight() * i / (float) grid;
+                                    cv.drawLine(0, gy, soft.getWidth(), gy, paint);
+                                }
+                            }
+                            File dir = screenshotDir();
+                            File out = new File(dir, "screen-" + System.currentTimeMillis() + ".png");
+                            FileOutputStream fos = new FileOutputStream(out);
+                            soft.compress(Bitmap.CompressFormat.PNG, 100, fos);
+                            fos.flush();
+                            fos.close();
+                            int[] size = screenSize();
+                            JSONObject o = new JSONObject();
+                            o.put("ok", true);
+                            o.put("path", out.getAbsolutePath());
+                            o.put("width", soft.getWidth());
+                            o.put("height", soft.getHeight());
+                            // 坐标系对齐：屏幕物理尺寸 / 截图尺寸 / 换算系数
+                            o.put("screenW", size[0]);
+                            o.put("screenH", size[1]);
+                            o.put("imageW", soft.getWidth());
+                            o.put("imageH", soft.getHeight());
+                            o.put("scaleX", soft.getWidth() > 0 ? (double) size[0] / soft.getWidth() : 1.0);
+                            o.put("scaleY", soft.getHeight() > 0 ? (double) size[1] / soft.getHeight() : 1.0);
+                            o.put("grid", grid);
+                            o.put("bytes", out.length());
+                            result[0] = o.toString();
+                        }
+                    } catch (Throwable t) {
+                        result[0] = jsonError("截图保存失败: " + t.getMessage());
+                    } finally {
+                        latch.countDown();
+                    }
+                }
+
+                @Override
+                public void onFailure(int errorCode) {
+                    result[0] = jsonError("截图失败（错误码 " + errorCode + "，安全页面/未授权截图时常见）");
+                    latch.countDown();
+                }
+            });
+        } catch (Throwable t) {
+            return jsonError("截图调用失败: " + t.getMessage());
+        }
+        try {
+            if (!latch.await(6000, TimeUnit.MILLISECONDS)) {
+                return jsonError("截图超时");
+            }
+        } catch (InterruptedException e) {
+            return jsonError("截图被中断");
+        }
+        return result[0] == null ? jsonError("截图无结果") : result[0];
+    }
+
+    // ===================== 通知捕获（v1.23） =====================
+    // 契约：selfbuild/notes/notif-contract.md —— 10 个字段名两端一致，不许改；仅内存，进程重启即清空。
+    // 原理：无障碍服务在 onServiceConnected 里给自身追加 TYPE_NOTIFICATION_STATE_CHANGED 事件类型
+    // （运行时改 ServiceInfo），不改 AndroidManifest —— 本机没有 aapt2，改清单/资源也白改。
+
+    /** 一条通知记录：字段名与契约（= 最终 JSON 的 key）一一对应。 */
+    private static class NotifEntry {
+        long seq;
+        long time;
+        String pkg;
+        String title;
+        String text;
+        String bigText;
+        String subText;
+        String ticker;
+        String category;
+        boolean ongoing;
+    }
+
+    /** 订阅通知事件；失败只记 Log，绝不影响服务其余能力。 */
+    private void subscribeNotificationEvents() {
+        try {
+            AccessibilityServiceInfo info = getServiceInfo();
+            if (info == null) {
+                notifEnabled = false;
+                Log.w(TAG, "getServiceInfo() returned null, notification events not subscribed");
+                return;
+            }
+            // 注：本机 android.jar 的 AccessibilityServiceInfo 里已经没有 TYPE_NOTIFICATION_STATE_CHANGED
+            // （该常量在较新 API 只保留在 AccessibilityEvent 上），契约示例里的写法编不过；
+            // 这里用等价常量，值同为 0x10。
+            info.eventTypes |= AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED;
+            setServiceInfo(info);
+            notifEnabled = true;
+            Log.i(TAG, "notification event subscribed");
+        } catch (Throwable t) {
+            notifEnabled = false;
+            Log.w(TAG, "subscribe notification events failed", t);
+        }
+    }
+
+    /** CharSequence → String：null 一律变空串（契约要求字段始终是字符串）。 */
+    private static String cs2str(CharSequence cs) {
+        return cs == null ? "" : cs.toString();
+    }
+
+    private long parseLongSafe(String s, long def) {
+        if (s == null) return def;
+        try {
+            return Long.parseLong(s.trim());
+        } catch (Throwable t) {
+            return def;
+        }
+    }
+
+    /** event → NotifEntry：10 个字段全部显式初始化，取不到就是空串 / false。 */
+    private void captureNotification(AccessibilityEvent event) {
+        try {
+            NotifEntry e = new NotifEntry();
+            // v1.23.1：event.getEventTime() 是 SystemClock.uptimeMillis()（开机以来的毫秒），
+            // 直接当时间戳会渲染成 1970 年 —— 对"验证码 5 分钟内有效"这类判断完全无用。
+            // 改为捕获时刻的墙上时钟；两者差值在事件路径上可忽略。
+            e.time = System.currentTimeMillis();
+            CharSequence pn = event.getPackageName();
+            e.pkg = pn == null ? "" : pn.toString();
+            e.title = "";
+            e.text = "";
+            e.bigText = "";
+            e.subText = "";
+            e.ticker = "";
+            e.category = "";
+            e.ongoing = false;
+
+            Notification n = null;
+            try {
+                android.os.Parcelable pd = event.getParcelableData();
+                if (pd instanceof Notification) n = (Notification) pd;
+            } catch (Throwable ignored) {
+            }
+            if (n != null) {
+                android.os.Bundle extras = n.extras;
+                if (extras != null) {
+                    e.title = cs2str(extras.getCharSequence(Notification.EXTRA_TITLE));
+                    e.text = cs2str(extras.getCharSequence(Notification.EXTRA_TEXT));
+                    e.bigText = cs2str(extras.getCharSequence(Notification.EXTRA_BIG_TEXT));
+                    e.subText = cs2str(extras.getCharSequence(Notification.EXTRA_SUB_TEXT));
+                }
+                e.ticker = cs2str(n.tickerText);
+                e.category = n.category == null ? "" : n.category;
+                e.ongoing = (n.flags & Notification.FLAG_ONGOING_EVENT) != 0;
+            }
+            if (e.text.length() == 0) {
+                // 取不到 EXTRA_TEXT：退回 event.getText() 拼接（契约兜底路径）
+                List<CharSequence> texts = event.getText();
+                if (texts != null) {
+                    StringBuilder sb = new StringBuilder();
+                    for (int i = 0; i < texts.size(); i++) {
+                        CharSequence cs = texts.get(i);
+                        if (cs == null) continue;
+                        if (sb.length() > 0) sb.append(' ');
+                        sb.append(cs.toString());
+                    }
+                    e.text = sb.toString();
+                }
+            }
+            synchronized (notifLock) {
+                notifSeq++;
+                e.seq = notifSeq;
+                notifRing.add(e);
+                while (notifRing.size() > NOTIF_MAX) notifRing.remove(0);
+                notifLock.notifyAll();  // 唤醒 /notifications-wait 的等待者
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "capture notification failed", t);
+        }
+    }
+
+    /** 取 seq > since、包名匹配、最多 limit 条（调用方必须持 notifLock）。 */
+    private List<NotifEntry> pickNotifs(long since, int limit, String pkg) {
+        List<NotifEntry> picked = new ArrayList<NotifEntry>();
+        for (int i = 0; i < notifRing.size(); i++) {
+            NotifEntry e = notifRing.get(i);
+            if (e.seq <= since) continue;
+            if (pkg != null && pkg.length() > 0 && !pkg.equals(e.pkg)) continue;
+            picked.add(e);
+            if (picked.size() >= limit) break;
+        }
+        return picked;
+    }
+
+    /** 单条 → JSON：固定 10 个字段，一个不多一个不少（JSONObject 负责转义，换行自动成 \n）。 */
+    private JSONObject notifItemJson(NotifEntry e) throws Exception {
+        JSONObject o = new JSONObject();
+        o.put("seq", e.seq);
+        o.put("time", e.time);
+        o.put("package", e.pkg);
+        o.put("title", e.title);
+        o.put("text", e.text);
+        o.put("bigText", e.bigText);
+        o.put("subText", e.subText);
+        o.put("ticker", e.ticker);
+        o.put("category", e.category);
+        o.put("ongoing", e.ongoing);
+        return o;
+    }
+
+    private JSONArray notifItemsJson(List<NotifEntry> list) throws Exception {
+        JSONArray arr = new JSONArray();
+        for (int i = 0; i < list.size(); i++) arr.put(notifItemJson(list.get(i)));
+        return arr;
+    }
+
+    /** GET /notifications?since=&limit=&pkg=&clear=1（clear=1：读取后清空整个缓冲）。 */
+    private String handleNotifications(String path) {
+        try {
+            long since = parseLongSafe(queryParam(path, "since"), 0L);
+            int limit = (int) parseDoubleSafe(queryParam(path, "limit"), 20);
+            if (limit <= 0) limit = 20;
+            if (limit > NOTIF_MAX) limit = NOTIF_MAX;
+            String pkg = queryParam(path, "pkg");
+            String clearStr = queryParam(path, "clear");
+            boolean clear = "1".equals(clearStr) || "true".equalsIgnoreCase(clearStr);
+            List<NotifEntry> picked;
+            long cur;
+            synchronized (notifLock) {
+                picked = pickNotifs(since, limit, pkg);
+                cur = notifSeq;
+                if (clear) notifRing.clear();
+            }
+            JSONObject o = new JSONObject();
+            o.put("ok", true);
+            o.put("count", picked.size());
+            o.put("seq", cur);
+            o.put("items", notifItemsJson(picked));
+            return o.toString();
+        } catch (Throwable t) {
+            return jsonError("notifications 失败: " + t.getMessage());
+        }
+    }
+
+    /** GET /notifications-wait?since=&timeout=&pkg=：阻塞本连接线程，超时也算 ok:true。 */
+    private String handleNotificationsWait(String path) {
+        try {
+            String sinceStr = queryParam(path, "since");
+            boolean hasSince = sinceStr != null && sinceStr.trim().length() > 0;
+            String pkg = queryParam(path, "pkg");
+            long timeout = (long) parseDoubleSafe(queryParam(path, "timeout"), 20000);
+            if (timeout <= 0) timeout = 20000;
+            if (timeout > 60000) timeout = 60000;
+            long deadline = System.currentTimeMillis() + timeout;
+            List<NotifEntry> picked = new ArrayList<NotifEntry>();
+            long cur;
+            synchronized (notifLock) {
+                // since 缺省 = 当前最大 seq（只看「从现在起」的新条目）
+                long since = hasSince ? parseLongSafe(sinceStr, 0L) : notifSeq;
+                while (true) {
+                    picked = pickNotifs(since, NOTIF_MAX, pkg);
+                    if (picked.size() > 0) break;
+                    long remain = deadline - System.currentTimeMillis();
+                    if (remain <= 0) {
+                        picked = new ArrayList<NotifEntry>();
+                        break;
+                    }
+                    try {
+                        notifLock.wait(remain);
+                    } catch (InterruptedException ie) {
+                        picked = new ArrayList<NotifEntry>();  // 被中断按超时处理，不抛
+                        break;
+                    }
+                }
+                cur = notifSeq;
+            }
+            JSONObject o = new JSONObject();
+            o.put("ok", true);
+            o.put("timeout", picked.size() == 0);
+            o.put("count", picked.size());
+            o.put("seq", cur);
+            o.put("items", notifItemsJson(picked));
+            return o.toString();
+        } catch (Throwable t) {
+            return jsonError("notifications-wait 失败: " + t.getMessage());
+        }
+    }
+
+    /** GET /notifications-clear：清空缓冲，seq 不重置（永不复用）。 */
+    private String handleNotificationsClear() {
+        try {
+            int n;
+            long cur;
+            synchronized (notifLock) {
+                n = notifRing.size();
+                notifRing.clear();
+                cur = notifSeq;
+            }
+            JSONObject o = new JSONObject();
+            o.put("ok", true);
+            o.put("cleared", n);
+            o.put("seq", cur);
+            return o.toString();
+        } catch (Throwable t) {
+            return jsonError("notifications-clear 失败: " + t.getMessage());
+        }
+    }
+
+    /** GET /notifications-status：enabled = 事件类型已订阅且服务在运行。 */
+    private String handleNotificationsStatus() {
+        try {
+            int n;
+            long cur;
+            synchronized (notifLock) {
+                n = notifRing.size();
+                cur = notifSeq;
+            }
+            JSONObject o = new JSONObject();
+            o.put("ok", true);
+            o.put("enabled", notifEnabled && isRunning);
+            o.put("count", n);
+            o.put("seq", cur);
+            o.put("max", NOTIF_MAX);
+            return o.toString();
+        } catch (Throwable t) {
+            return jsonError("notifications-status 失败: " + t.getMessage());
+        }
+    }
+}

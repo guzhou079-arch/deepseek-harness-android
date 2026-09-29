@@ -1,0 +1,22 @@
+{
+  "name": "dsh-android-ui",
+  "version": "0.1.0",
+  "private": true,
+  "description": "安卓壳界面适配插件：自定义背景图（原 dsh-bg / open-in-app 注入），后续并入移动端适配",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": { "inject": [], "platform": "web" }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh": ">=0.1.7-rc.1 <0.3.0-0",
+    "@deepseek-ai/cordis": "^4.0.1"
+  },
+  "files": ["lib/index.js", "lib/client.js", "cordis.patch.yml", "README.md"]
+}

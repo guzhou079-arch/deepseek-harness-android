@@ -1,0 +1,41 @@
+{
+  "name": "whale-shota",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DSH 皮肤 + 傲娇正太桌宠（自用版，不对外分发）",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./skin.json": "./skin.json",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [],
+      "platform": "web"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh": ">=0.1.7-rc.1 <0.3.0-0",
+    "@deepseek-ai/cordis": "^4.0.1"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/client.js",
+    "cordis.patch.yml",
+    "skin.json",
+    "locale",
+    "assets",
+    "preview",
+    "README.md",
+    "NOTICE"
+  ],
+  "scripts": {
+    "test": "node --test tests/state-machine.test.mjs"
+  }
+}

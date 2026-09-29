@@ -1,0 +1,12 @@
+# dsh-android-ui —— 安卓壳界面适配插件
+#
+# 取代原来的两处「改内核」做法：
+#   ① 往 @deepseek-ai/dsh-client-ui-open-in-app/lib/client.js 里塞注入代码
+#   ② 往 dsh-web-frontend/dist/ 里塞 dsh-bg.css
+#
+# 现在这两件事都由本插件自己做（CSS 直接内联在 lib/client.js 里，注入由 client 半边完成）。
+# 本插件住在 $DSH_HOME/profiles/web/node_modules/ —— 内核升级不重解压 dshhome，
+# 所以它不会被内核更新覆盖，也不会遮蔽任何上游代码。
+- insert:
+    - id: ui-android-ui
+      name: 'dsh-android-ui'

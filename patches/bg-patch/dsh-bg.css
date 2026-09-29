@@ -1,0 +1,83 @@
+/* ============================================================
+   deepdive 背景图 v1 —— 「给自己换背景图」
+   ------------------------------------------------------------
+   是谁加载它的：@deepseek-ai/dsh-client-ui-open-in-app/lib/client.js 的
+   factory 顶部有一段 deepdive 注入（ensure <link id="dsh-user-bg"
+   href="/dsh-bg.css?rev=…">）。选它是因为：不在 APK 白名单里（重启不被覆盖）、
+   不是 bootstrap 模块（client-hmr 能真热替换 → 改完约 1 秒就生效，不必刷新页面）、
+   且本机不渲染任何 UI（热替换不会动界面）。细节见 bg-patch/README.md。
+   为什么不放进 mobile.css：mobile.css / mobile.js / index.html 在 APK 的
+   FORCE_OVERWRITE_PREFIXES 白名单里，App 每次启动都会被 payload 覆盖；
+   dist/dsh-bg.css + dist/dsh-bg.svg + open-in-app 里那几行注入都不在白名单里，
+   所以**重启 App 也还在**（换内核大版本、dshroot 整体重解压时才会没，
+   那时把本文件与 dsh-bg.svg 拷回去 + 重新打那几行注入即可）。
+
+   想换图，三种改法（从易到难）：
+     1) 直接替换 dist/dsh-bg.svg（保持文件名，随手用别的 SVG 覆盖即可）；
+     2) 用照片：把照片放到 dist/ 下（如 dist/mybg.jpg），
+        再把下面 --dsh-user-bg-image 改成 url("/mybg.jpg")；
+     3) 不喜欢鲸鱼水印/配色：改 dsh-bg.svg 里的 <defs> 渐变即可。
+
+   可读性由两层保证：图本身是低对比深蓝，再叠一层跟随主题的
+   bg-base 半透明遮罩（深色主题=近黑，浅色主题=近白）。
+   ============================================================ */
+
+:root {
+  /* 当前用的是用户 2026-09-29 发来的那张鲸鱼抱枕插画（PNG 1254²，1.4MB）。
+     ?v= 是给图的缓存版本号：换图就 +1（CSS 本身由注入代码带 ?rev= 时间戳，不受缓存影响）。
+     想换回自带的深蓝星空矢量图：改成 url("/dsh-bg.svg?v=1") 即可。 */
+  --dsh-user-bg-image: url("/dsh-bg-user.png?v=1");
+  /* 遮罩：这张图偏亮，深色主题下需要压暗才保证正文可读；浅色主题同样用暗罩
+     （图本身亮，罩成暗底 + 深色正文反而更清楚）。 */
+  --dsh-user-bg-scrim-top: rgba(4, 8, 16, 0.60);
+  --dsh-user-bg-scrim-bottom: rgba(4, 8, 16, 0.76);
+  /* 模糊（CSS px）：0 = 原图清晰；1~3 会明显更好读，像壁纸 */
+  --dsh-user-bg-blur: 0px;
+}
+
+/* ---------- 全窗口铺图 ----------
+   图与遮罩全部放在 .ZTP-Xa_frame::before 里（AppFrame 根容器，原样式
+   background:var(--dsw-alias-bg-base)，无 !important，这里压得住）。
+   ::before 是绝对定位（脱离 grid 布局），z-index:-1 → 画在本容器背景之上、
+   所有内容之下；正文/控件因此不受 filter/模糊影响。
+   ⚠ 不要同时给 .ZTP-Xa_frame 自己也铺一份图：::before 是半透明的，
+     两层叠加会把图和遮罩各画两遍 → 灰蒙蒙。所以这里把根容器背景置空。 */
+.ZTP-Xa_frame {
+  background: transparent !important;
+}
+.ZTP-Xa_frame::before {
+  content: "";
+  position: absolute;
+  inset: -10px;                 /* 盖住模糊溢出的边，避免出现一圈亮边 */
+  background-image:
+    linear-gradient(180deg, var(--dsh-user-bg-scrim-top), var(--dsh-user-bg-scrim-bottom)),
+    var(--dsh-user-bg-image);
+  background-size: cover, cover;
+  background-position: center center, center center;
+  background-repeat: no-repeat, no-repeat;
+  filter: blur(var(--dsh-user-bg-blur));
+  z-index: -1;
+  pointer-events: none;
+}
+
+/* ---------- 会话列透明，让图透出来 ----------
+   否则 .D_tfqW_root 的实色 bg-base 会把整列盖成一块死黑，图只在侧栏缝隙里露边。 */
+.D_tfqW_root,
+.D_tfqW_embeddedBody {
+  background: transparent !important;
+}
+
+/* ---------- 输入栏底部渐隐别糊一条实色 ----------
+   原规则把底部渐变收到实色 bg-base（36px 以下全不透明）→ 图片在底部被切断。
+   改成半透明，既保住输入栏上的文字可读性，也不切断背景。 */
+.D_tfqW_root[data-phase="active"] .D_tfqW_composerSeat,
+.D_tfqW_embeddedBody[data-content-phase="active"] .D_tfqW_composerSeat {
+  background: linear-gradient(180deg,
+    transparent 0px,
+    color-mix(in srgb, var(--dsw-alias-bg-base, #0b0f1a) 84%, transparent) 36px) !important;
+}
+
+/* ---------- 空会话/新会话页的卡片别整块盖住图 ---------- */
+.D_tfqW_root [data-empty-state] {
+  background: transparent !important;
+}

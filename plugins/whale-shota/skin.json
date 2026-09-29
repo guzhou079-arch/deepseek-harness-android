@@ -1,0 +1,30 @@
+{
+  "id": "whale-shota",
+  "name": "傲娇鲸鱼正太",
+  "nameEn": "Tsundere Whale Shota",
+  "author": "self-use",
+  "tagline": "哼！我超聪明的",
+  "taglineEn": "Hmph! I am super smart",
+  "description": "圆贴纸桌宠：从插画裁出的正太贴纸 + 五态气泡（哼！／你们还不懂…／其实我早就想到了…／我超聪明的！），自用版。",
+  "tags": [
+    "anime",
+    "whale",
+    "shota",
+    "tsundere",
+    "navy",
+    "pet"
+  ],
+  "accent": "#5484cc",
+  "bodyAttr": "data-dsh-whale-shota",
+  "dshCompatibility": "0.2.0rc1",
+  "package": "whale-shota",
+  "wiring": {
+    "id": "ui-skin-whale-shota",
+    "bundleWired": false
+  },
+  "preview": {
+    "light": "preview/light.webp",
+    "dark": "preview/dark.webp"
+  },
+  "order": 9
+}
