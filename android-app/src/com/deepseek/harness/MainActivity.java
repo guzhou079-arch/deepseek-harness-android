@@ -925,7 +925,7 @@ public class MainActivity extends Activity {
         new Thread(new Runnable() {
             @Override public void run() {
                 try {
-                    URL url = new URL("https://gitee.com/api/v5/repos/zhou-gu24/deepseek-harness-android/releases/latest");
+                    URL url = new URL("https://api.github.com/repos/guzhou079-arch/deepseek-harness-android/releases/latest");
                     HttpURLConnection c = (HttpURLConnection) url.openConnection();
                     c.setConnectTimeout(5000);
                     c.setReadTimeout(5000);
@@ -967,7 +967,7 @@ public class MainActivity extends Activity {
                                             "去下载", new Runnable() { @Override public void run() {
                                                 try {
                                                     startActivity(new Intent(Intent.ACTION_VIEW,
-                                                            Uri.parse("https://gitee.com/zhou-gu24/deepseek-harness-android/releases")));
+                                                            Uri.parse("https://github.com/guzhou079-arch/deepseek-harness-android/releases")));
                                                 } catch (Throwable ignored) {}
                                             }}, "稍后");
                                 } catch (Throwable ignored) {}
