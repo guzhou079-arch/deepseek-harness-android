@@ -45,6 +45,13 @@ DSH 皮肤 + 傲娇鲸鱼正太**圆贴纸桌宠**。**自用版**，不对外�
 改完重跑 `python3 tools/render-sticker.py` 刷新预览（脚本里三个常量要同步改）。
 ⚠️ 预览图只是本地产物，**不要提交进仓库**。
 
+> 本仓库的 `skin.json` 里**没有** `preview` 字段（因为预览图未入库，指过去就是坏链）。
+> 你自己重新生成预览后，想让它出现在皮肤选择器里，就把这段补回去：
+>
+> ```json
+> "preview": { "light": "preview/light.webp", "dark": "preview/dark.webp" },
+> ```
+
 ## 纪律
 
 - 浮层 `z-index: 900`（DSH 契约：menu 100 / Modal 1000 / portal 1100，一律 < 1000）

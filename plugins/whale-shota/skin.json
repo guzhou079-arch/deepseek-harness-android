@@ -22,9 +22,5 @@
     "id": "ui-skin-whale-shota",
     "bundleWired": false
   },
-  "preview": {
-    "light": "preview/light.webp",
-    "dark": "preview/dark.webp"
-  },
   "order": 9
 }
