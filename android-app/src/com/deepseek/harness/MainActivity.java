@@ -329,7 +329,19 @@ public class MainActivity extends Activity {
                 try {
                     Intent ext = new Intent(Intent.ACTION_VIEW, u);
                     ext.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                    startActivity(ext);
+                    // dsh-android-patch v5 (2026-09-30)：改为「让用户选浏览器」，不直接用默认浏览器。
+                    //
+                    // 背景：账户登录的回调是环回地址 http://127.0.0.1:<port>/oauth/callback，
+                    // 由引擎本地的 HTTP 服务接收。不同浏览器对环回地址的处理差别极大：
+                    //   · Chrome / 系统浏览器：正常跳转 ✓
+                    //   · UC / 夸克 / QQ浏览器 / 部分厂商浏览器：把 127.0.0.1 当危险地址拦截、
+                    //     或当成搜索词、或跳到白页 → 引擎永远收不到 code → 登录卡在"等待中"
+                    // 直接 startActivity 会强制用默认浏览器，用户被默认浏览器坑了也无从选择。
+                    // 改成选择器后，用户可以换一个能跑通的浏览器重试。
+                    // 回滚：把下面三行 chooser 换回 startActivity(ext)。
+                    Intent chooser = Intent.createChooser(ext, "选择浏览器完成登录");
+                    chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    startActivity(chooser);
                     return true;
                 } catch (Throwable t) {
                     // 没有能处理该地址的应用（或系统拒绝）→ 退回原地加载，避免白屏
@@ -354,6 +366,12 @@ public class MainActivity extends Activity {
                 }
             }
             //#endregion
+
+            @Override
+            public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
+                super.onPageStarted(view, url, favicon);
+                injectAbortSignalAny(view);
+            }
 
             @Override
             public void onReceivedError(WebView view, android.webkit.WebResourceRequest request,
@@ -421,6 +439,41 @@ public class MainActivity extends Activity {
         // 附件/文件选择：官方前端用 <input type="file"> 选文件，Android WebView 必须实现
         // onShowFileChooser 才会弹系统文件选择器，否则点「添加附件」没有任何反应。
         webView.setWebChromeClient(new WebChromeClient() {
+            // dsh-android-patch v6b (2026-09-30)：给 WebView 补上 onJsPrompt。
+            // WebView 默认不实现它（返回 false = 网页调 prompt() 什么都不显示），
+            // 这里接一个原生输入框，把这个通用能力补齐。
+            // 注：本方法最初是为一个"手动粘贴登录回调地址"的方案加的，
+            //     该方案经实测无效已作废；但 onJsPrompt 本身通用，故保留。
+            @Override
+            public boolean onJsPrompt(WebView view, String url, String message,
+                                      String defaultValue, final android.webkit.JsPromptResult result) {
+                try {
+                    final android.widget.EditText input = new android.widget.EditText(MainActivity.this);
+                    input.setText(defaultValue == null ? "" : defaultValue);
+                    input.setSingleLine(false);
+                    input.setHint("http://127.0.0.1:.../oauth/callback?code=...&state=...");
+                    new AlertDialog.Builder(MainActivity.this)
+                            .setTitle("粘贴回调地址")
+                            .setMessage(message)
+                            .setView(input)
+                            .setPositiveButton("提交", new DialogInterface.OnClickListener() {
+                                @Override public void onClick(DialogInterface d, int w) {
+                                    result.confirm(input.getText().toString().trim());
+                                }
+                            })
+                            .setNegativeButton("取消", new DialogInterface.OnClickListener() {
+                                @Override public void onClick(DialogInterface d, int w) { result.cancel(); }
+                            })
+                            .setOnCancelListener(new DialogInterface.OnCancelListener() {
+                                @Override public void onCancel(DialogInterface d) { result.cancel(); }
+                            })
+                            .show();
+                } catch (Throwable t) {
+                    result.cancel();
+                }
+                return true;
+            }
+
             @Override
             public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback,
                                              FileChooserParams params) {
@@ -539,10 +592,13 @@ public class MainActivity extends Activity {
     private String pendingScheduledTask = null;
 
     // ============ WebView 兼容检测（老安卓 WebView 缺失/过旧） ============
-    /** DSH 前端是 Vite 构建的现代应用（<script type="module"> + 可选链/nullish），
-     *  需要 Chromium 80+ 才能渲染；Android 7/8 出厂 WebView（Chromium 51/59）或长期未更新的
-     *  系统 WebView 会白屏，用户误以为「引擎启动失败」。检测到过旧版本时弹提示引导，
-     *  不阻断启动（引擎本身与 WebView 无关，node 进程照常拉起）。 */
+    /** DSH 前端需要较新的 Chromium：
+     *  · 80+  才能渲染（<script type="module"> + 可选链/nullish）
+     *  · 116+ 才有 AbortSignal.any()，DSH 的"选择工作区目录"等功能直接调它，
+     *         低版本会抛「AbortSignal.any is not a function」→ 界面卡在"重新连接中"
+     *         （2026-09-30 实机反馈：两台新装的机器都卡在这里，报错就是这一条）
+     *  阈值取 116。检测到过旧时弹提示引导，不阻断启动
+     *  （引擎本身与 WebView 无关，node 进程照常拉起）。 */
     private void checkWebViewCompat() {
         try {
             int chrome = parseChromeMajor(webView.getSettings().getUserAgentString());
@@ -555,7 +611,7 @@ public class MainActivity extends Activity {
                     }
                 } catch (Throwable ignored) {}
             }
-            if (chrome <= 0 || chrome >= 80) return; // 拿不到版本或够新 → 不打扰
+            if (chrome <= 0 || chrome >= 116) return; // 拿不到版本或够新 → 不打扰
             final int ver = chrome;
             ui.post(new Runnable() {
                 @Override public void run() {
@@ -563,10 +619,16 @@ public class MainActivity extends Activity {
                         new AlertDialog.Builder(MainActivity.this)
                                 .setTitle("系统 WebView 版本过旧")
                                 .setMessage("检测到系统 WebView 内核为 Chromium " + ver
-                                        + "（DSH 界面需要 80 以上）。\n\n"
-                                        + "界面可能无法正常显示（白屏/无法交互），引擎本身不受影响。\n\n"
-                                        + "建议：① 更新\"Android System WebView\"后重试；"
-                                        + "② 安装「DeepSeek Harness 兼容版」（专为老设备优化）。")
+                                        + "（较新版本为 116 以上）。\n\n"
+                                        + "先直接点「继续尝试」—— 本版已内置兼容补丁，"
+                                        + "多数情况可以直接正常使用。\n\n"
+                                        + "如果点完仍卡在「重新连接中」，再考虑更新系统组件：\n"
+                                        + "① 到手机自带的应用商店搜「Android System WebView」更新；\n"
+                                        + "② 商店里搜不到：设置→应用管理→右上角「显示系统程序」→"
+                                        + "搜 WebView→点进去，看有没有「应用商店/更新」入口；\n"
+                                        + "③ 装了 Chrome 或其他较新 Chromium 内核浏览器的，"
+                                        + "可在 开发者选项→WebView 实现 里改选它。\n\n"
+                                        + "⚠️ 不要点「卸载更新」—— 那是退回出厂预装版本，只会更旧。")
                                 .setPositiveButton("去更新", new DialogInterface.OnClickListener() {
                                     @Override public void onClick(DialogInterface d, int w) { openWebViewUpdate(); }
                                 })
@@ -576,6 +638,50 @@ public class MainActivity extends Activity {
                 }
             });
         } catch (Throwable ignored) {}
+    }
+
+    /**
+     * 给老 WebView 补上 AbortSignal.any（Chromium 116+ 才有）。
+     *
+     * DSH 前端大量使用它（工作区目录、侧栏文件、文档预览、账户等 6 个 client 包，
+     * 服务端另有 75 个文件在用），缺失时界面直接抛
+     * 「AbortSignal.any is not a function」并卡在「重新连接中」。
+     *
+     * 实机案例：2026-09-30，用户设备 Chromium 97，装上后一直连不上，
+     * 「选择工作区目录」对话框里报的就是这一条 —— 引擎完全正常，纯粹是前端跑不起来。
+     *
+     * 这里在每次页面开始加载时注入一段等价实现（幂等：已有则直接返回）。
+     * 回滚：删除本方法与 WebViewClient 里的 onPageStarted 覆写。
+     */
+    private void injectAbortSignalAny(WebView view) {
+        if (view == null) return;
+        final String js =
+            "(function(){try{" +
+            "if(typeof AbortSignal!=='undefined'){" +
+            "if(!AbortSignal.any)AbortSignal.any=function(sigs){" +
+            "var c=new AbortController();var a=Array.prototype.slice.call(sigs||[]);" +
+            "function f(e){var r=e&&e.target?e.target.reason:undefined;" +
+            "try{c.abort(r)}catch(_){try{c.abort()}catch(__){}}}" +
+            "for(var i=0;i<a.length;i++){var s=a[i];if(!s)continue;" +
+            "if(s.aborted){f({target:s});break}s.addEventListener('abort',f,{once:true})}" +
+            "return c.signal};" +
+            "if(!AbortSignal.prototype.throwIfAborted)AbortSignal.prototype.throwIfAborted=function(){" +
+            "if(this.aborted)throw this.reason};" +
+            "if(!AbortSignal.timeout)AbortSignal.timeout=function(ms){var c=new AbortController();" +
+            "setTimeout(function(){try{c.abort(new DOMException('TimeoutError','TimeoutError'))}" +
+            "catch(_){c.abort()}},ms);return c.signal};}" +
+            "if(typeof structuredClone!=='function'){window.structuredClone=function(v){" +
+            "return JSON.parse(JSON.stringify(v))};}" +
+            "var AP=Array.prototype;" +
+            "if(!AP.toSorted)AP.toSorted=function(c){return this.slice().sort(c)};" +
+            "if(!AP.toReversed)AP.toReversed=function(){return this.slice().reverse()};" +
+            "if(!AP.with)AP.with=function(i,v){var a=this.slice();a[i<0?a.length+i:i]=v;return a};" +
+            "if(!Promise.withResolvers)Promise.withResolvers=function(){var r,j;" +
+            "var p=new Promise(function(a,b){r=a;j=b});return{promise:p,resolve:r,reject:j}};" +
+            "if(typeof URL!=='undefined'&&!URL.canParse)URL.canParse=function(u,b){try{new URL(u,b);return true}" +
+            "catch(_){return false}};" +
+            "}catch(e){}})();";
+        try { view.evaluateJavascript(js, null); } catch (Throwable ignored) {}
     }
 
     /** 从 UA（"... Chrome/51.0.2704.81 ..."）或版本名（"80.0.3987.149"）解析主版本号。 */
@@ -925,7 +1031,7 @@ public class MainActivity extends Activity {
         new Thread(new Runnable() {
             @Override public void run() {
                 try {
-                    URL url = new URL("https://api.github.com/repos/guzhou079-arch/deepseek-harness-android/releases/latest");
+                    URL url = new URL("https://gitee.com/api/v5/repos/zhou-gu24/deepseek-harness-android/releases/latest");
                     HttpURLConnection c = (HttpURLConnection) url.openConnection();
                     c.setConnectTimeout(5000);
                     c.setReadTimeout(5000);
@@ -967,7 +1073,7 @@ public class MainActivity extends Activity {
                                             "去下载", new Runnable() { @Override public void run() {
                                                 try {
                                                     startActivity(new Intent(Intent.ACTION_VIEW,
-                                                            Uri.parse("https://github.com/guzhou079-arch/deepseek-harness-android/releases")));
+                                                            Uri.parse("https://gitee.com/zhou-gu24/deepseek-harness-android/releases")));
                                                 } catch (Throwable ignored) {}
                                             }}, "稍后");
                                 } catch (Throwable ignored) {}
@@ -2558,6 +2664,11 @@ public class MainActivity extends Activity {
                     int sp1 = h.indexOf(' ');
                     int sp2 = sp1 >= 0 ? h.indexOf(' ', sp1 + 1) : -1;
                     if (sp1 >= 0 && sp2 > sp1) path = h.substring(sp1 + 1, sp2);
+                    // 修复：/usage 与 /overlay 的处理函数内部要用 queryField(path,"days"/"action")
+                    // 读查询参数，但下面会把 "?" 之后砍掉 → 参数永远是空、永远走默认值
+                    // （现象：android_overlay show/hide 全部无效，一直返回 status）。
+                    // 故先留一份带 query 的原始路径，路由判断仍用砍过的。
+                    final String fullPath = path;
                     int qIdx = path.indexOf('?');
                     if (qIdx >= 0) path = path.substring(0, qIdx);
                     int clIdx = h.toLowerCase().indexOf("content-length:");
@@ -2596,9 +2707,9 @@ public class MainActivity extends Activity {
                     } else if (path.startsWith("/schedule")) {
                         respBody = handleScheduleRequest(body.toString());
                     } else if (path.startsWith("/usage")) {
-                        respBody = handleUsageRequest(path, body.toString());
+                        respBody = handleUsageRequest(fullPath, body.toString());
                     } else if (path.startsWith("/overlay")) {
-                        respBody = handleOverlayRequest(path, body.toString());
+                        respBody = handleOverlayRequest(fullPath, body.toString());
                     } else if (path.startsWith("/status")) {
                         respBody = handleStatusRequest();
                     } else if (path.startsWith("/lan")) {
@@ -3074,12 +3185,30 @@ public class MainActivity extends Activity {
             if (action.isEmpty()) action = queryField(path, "action");
             if (action.isEmpty()) action = "status";
             if (action.equals("status")) {
+                // v1.38/1.39：补 visible/appForeground/debug —— "服务在跑但小鲸鱼没露脸"是真实报障，
+                // 以前只能 dumpsys 猜，现在一个 GET 就能分清是"没显示"还是"显示了但被挡"。
                 return "{\"ok\":true,\"running\":" + OverlayService.isRunning
                         + ",\"engineUp\":" + OverlayService.engineUp
+                        + ",\"visible\":" + OverlayService.visible
+                        + ",\"appForeground\":" + overlayForeground
+                        + ",\"debug\":" + OverlayService.debugState()
                         + ",\"granted\":" + (Build.VERSION.SDK_INT < 23 || Settings.canDrawOverlays(this)) + "}";
             }
             if (Build.VERSION.SDK_INT >= 23 && !Settings.canDrawOverlays(this)) {
                 return "{\"ok\":false,\"error\":\"未授予悬浮窗权限，请在权限引导页/系统设置里开启\"}";
+            }
+            // v1.54：/overlay?action=panel&show=1|0 —— 直接开关小鲸鱼面板，**不依赖悬浮窗触摸**。
+            // 触摸回归修好之前，这是用户/AI 都能用的可靠入口（也能被 android_input 之外的路径触发）。
+            if (action.equals("panel")) {
+                String sv = jsonField(raw, "show");
+                if (sv.isEmpty()) sv = queryField(path, "show");
+                if (sv.isEmpty()) sv = "1";
+                boolean show = !("0".equals(sv) || "false".equalsIgnoreCase(sv));
+                String rf = jsonField(raw, "refresh");
+                if (rf.isEmpty()) rf = queryField(path, "refresh");
+                boolean refresh = !("0".equals(rf) || "false".equalsIgnoreCase(rf));
+                if (!OverlayService.isRunning) startOverlayService();
+                return OverlayService.togglePanelFromBridge(show, refresh);
             }
             if (action.equals("show") || action.equals("toggle")) {
                 if (OverlayService.isRunning) {

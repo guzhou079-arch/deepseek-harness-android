@@ -61,6 +61,23 @@ public class AccessibilityService extends android.accessibilityservice.Accessibi
 
     /** 服务是否已连接（用户已在系统设置开启无障碍）。 */
     public static volatile boolean isRunning = false;
+    /**
+     * v1.49：服务实例（供 OverlayService 借它的 context 创建
+     * TYPE_ACCESSIBILITY_OVERLAY 覆盖窗 —— 只有无障碍服务的 context 才能拿到该窗口类型，
+     * 而那是绕开 Android 12+ "第三方 overlay 触摸被遮挡保护吞掉" 的官方解法）。
+     */
+    private static volatile AccessibilityService instance = null;
+
+    /** 取当前无障碍服务实例；未连接返回 null。 */
+    public static AccessibilityService getInstance() { return instance; }
+
+    /** 借无障碍服务的 WindowManager（创建无障碍覆盖窗必须用它）。 */
+    public static WindowManager accessibilityWindowManager() {
+        AccessibilityService s = instance;
+        if (s == null) return null;
+        try { return (WindowManager) s.getSystemService(WINDOW_SERVICE); } catch (Throwable t) { return null; }
+    }
+
     /** 当前活跃窗口的包名。 */
     public static volatile String activePackage = "";
 
@@ -114,6 +131,7 @@ public class AccessibilityService extends android.accessibilityservice.Accessibi
     @Override
     public void onServiceConnected() {
         isRunning = true;
+        instance = this;   // v1.49：供 OverlayService 借 context 建无障碍覆盖窗
         Log.i(TAG, "accessibility service connected");
         // 端口必须由包名决定，不能信 dsh_prefs 里的 a11y_port：该 pref 跨版本持久化，升级后旧包
         // 写下的 3181 仍会被读到 → 正式版与 Lite 的无障碍服务都往 3181 绑，后连的那个 bind 失败
