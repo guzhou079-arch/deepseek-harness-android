@@ -12,7 +12,8 @@
 # ============================================================================
 set -e
 F=/data/user/0/com.deepseek.harness/files
-SB=/storage/emulated/0/Download/Operit/dsh_own_app/selfbuild
+R="${DSH_PROJECT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+SB="$R/selfbuild"
 D=/storage/emulated/0/Download/Operit/dsh-toolchain
 NODE=$F/payload/runtime/bin/node
 APK="$1"

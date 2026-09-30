@@ -13,8 +13,9 @@
 // 残留风险：令牌走明文 HTTP，同网段可嗅探 → 只在可信网络使用。
 const fs = require('fs'), path = require('path'), cp = require('child_process');
 const N = process.env.DSH_KERNEL_DIR || '/data/user/0/com.deepseek.harness/files/payload/dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai';
-const SB = '/storage/emulated/0/Download/Operit/dsh_own_app/selfbuild';
-const OVL = '/storage/emulated/0/Download/Operit/dsh_own_app/v118/dsh-patches/overlay';
+const R = process.env.DSH_PROJECT || path.join(__dirname, '../..')
+const SB = path.join(R, 'selfbuild');
+const OVL = path.join(R, 'v118/dsh-patches/overlay');
 const REL = 'dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai';
 const REL2 = 'lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai';
 const PKG = 'dsh-web-app', FILE = 'lib/startup.js';

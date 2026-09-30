@@ -11,7 +11,8 @@
 # 「Host/Origin 围栏 + 逐进程签名 cookie」，没有 loopback 免检后门 → 无令牌设备只能拿 401/403。
 # 但 HTTP 是明文，令牌在 URL 里：不用就关掉，别把 URL 外传。
 # ============================================================================
-SB=/storage/emulated/0/Download/Operit/dsh_own_app/selfbuild
+R="${DSH_PROJECT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+SB="$R/selfbuild"
 CURL=/data/user/0/com.deepseek.harness/files/payload/runtime/bin/curl
 NODE=/data/user/0/com.deepseek.harness/files/payload/runtime/bin/node
 PREFS=/data/user/0/com.deepseek.harness/shared_prefs/dsh_prefs.xml

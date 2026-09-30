@@ -25,15 +25,38 @@
 :root {
   /* 当前用的是用户 2026-09-29 发来的那张鲸鱼抱枕插画（PNG 1254²，1.4MB）。
      ?v= 是给图的缓存版本号：换图就 +1（CSS 本身由注入代码带 ?rev= 时间戳，不受缓存影响）。
-     想换回自带的深蓝星空矢量图：改成 url("/dsh-bg.svg?v=1") 即可。 */
+     想换回自带的深蓝星空矢量图：改成 url("/dsh-bg.svg?v=1") 即可。
+     ⚠️ 发行包（make-dist-apk.sh）会把这一行换成 /dsh-bg.svg —— 别忘了那边也要一致。 */
   --dsh-user-bg-image: url("/dsh-bg-user.png?v=1");
-  /* 遮罩：这张图偏亮，深色主题下需要压暗才保证正文可读；浅色主题同样用暗罩
-     （图本身亮，罩成暗底 + 深色正文反而更清楚）。 */
-  --dsh-user-bg-scrim-top: rgba(4, 8, 16, 0.60);
-  --dsh-user-bg-scrim-bottom: rgba(4, 8, 16, 0.76);
+
+  /* ---------- 遮罩必须跟随主题（2026-09-30 修）----------
+     ⚠️ 这里曾经写死成近黑（rgba(4,8,16,0.60/0.76)），注释却说"跟随主题"。
+     后果：浅色主题下前端正文是**深色**，压在近黑底上 → 黑底黑字看不见。
+     好几个用户反馈"屏幕太黑、字也是黑的"就是这个。
+     实测对比度：修复前 1.23:1（看不见）→ 修复后 10.2:1（AAA）。
+
+     现在：:root = 默认（前端没在 body 上挂 data-ds-dark-theme，即**浅色主题**）
+           body[data-ds-dark-theme] = 深色主题（见下面那条覆盖）
+     前端就是用 body[data-ds-dark-theme] 这个属性切深浅色的，与它保持一致。 */
+  --dsh-user-bg-scrim-top: rgba(247, 249, 253, 0.82);
+  --dsh-user-bg-scrim-bottom: rgba(247, 249, 253, 0.90);
+
+  /* 深色主题遮罩：**按当前这张图来定**，不能一套值走天下 ——
+     这张插画偏亮，必须压得够暗，浅色正文才读得清（这就是 0.60/0.76 的来历）。
+     发行版会把背景换成自带深蓝矢量图，那时图本身就暗，只需轻压 ——
+     make-dist-apk.sh 会把下面这两个值改成 0.18/0.36。 */
+  --dsh-user-bg-scrim-top-dark: rgba(4, 8, 16, 0.60);
+  --dsh-user-bg-scrim-bottom-dark: rgba(4, 8, 16, 0.76);
+
   /* 模糊（CSS px）：0 = 原图清晰；1~3 会明显更好读，像壁纸 */
   --dsh-user-bg-blur: 0px;
 }
+
+body[data-ds-dark-theme] {
+  --dsh-user-bg-scrim-top: var(--dsh-user-bg-scrim-top-dark);
+  --dsh-user-bg-scrim-bottom: var(--dsh-user-bg-scrim-bottom-dark);
+}
+
 
 /* ---------- 全窗口铺图 ----------
    图与遮罩全部放在 .ZTP-Xa_frame::before 里（AppFrame 根容器，原样式

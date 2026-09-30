@@ -13,8 +13,9 @@
 #
 # 只读、无副作用、不碰主屏；保留也无害（也可 revert 后再构建一次）。
 # ============================================================================
-SB=/storage/emulated/0/Download/Operit/dsh_own_app/selfbuild
-SRC=/storage/emulated/0/Download/Operit/dsh_own_app/v118/android-app/src/com/deepseek/harness/AccessibilityService.java
+R="${DSH_PROJECT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+SB="$R/selfbuild"
+SRC="$R/v118/android-app/src/com/deepseek/harness/AccessibilityService.java"
 NODE=/data/user/0/com.deepseek.harness/files/payload/runtime/bin/node
 MARK='selfbuild-ping'
 

@@ -16,8 +16,9 @@ const fs = require('fs')
 const path = require('path')
 
 const N = process.env.DSH_KERNEL_DIR || '/data/user/0/com.deepseek.harness/files/payload/dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai'
-const SB = '/storage/emulated/0/Download/Operit/dsh_own_app/selfbuild'
-const PLUG = '/storage/emulated/0/Download/Operit/dsh_own_app/plugins/dsh-android-ui/lib/client.js'
+const R = process.env.DSH_PROJECT || path.join(__dirname, '../..')
+const SB = path.join(R, 'selfbuild')
+const PLUG = '' + R + '/plugins/dsh-android-ui/lib/client.js'
 const OVL = `${SB}/build-overlay/dshhome/profiles/web/node_modules/dsh-android-ui/lib/client.js`
 const BEGIN = '// @dsh-bg-classes:begin'
 const END = '// @dsh-bg-classes:end'

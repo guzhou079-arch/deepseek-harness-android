@@ -11,8 +11,9 @@
 #   DSH_KERNEL_FILE=<文件> sh apply.sh            # 打指定文件（如 staging 里的新内核）
 set -e
 TGT="${DSH_KERNEL_FILE:-/data/user/0/com.deepseek.harness/files/payload/dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-settings-account/lib/client.js}"
-SB=/storage/emulated/0/Download/Operit/dsh_own_app/selfbuild
-OVL=/storage/emulated/0/Download/Operit/dsh_own_app/v118/dsh-patches/overlay
+R="${DSH_PROJECT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+SB="$R/selfbuild"
+OVL="$R/v118/dsh-patches/overlay"
 REL=dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-settings-account/lib/client.js
 REL2=lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-settings-account/lib/client.js
 

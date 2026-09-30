@@ -33,7 +33,8 @@
 # ============================================================================
 set -e
 
-REPO=/storage/emulated/0/Download/Operit/dsh_own_app
+R="${DSH_PROJECT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+REPO=$R
 SB=$REPO/selfbuild
 SRC=$REPO/v118/android-app/src
 LIBS=$REPO/v118/android-app/libs
@@ -78,10 +79,10 @@ rm -rf "$SB/work/appbuild/classes" "$SB/work/appbuild/dex" \
 # 同时准备两份路径：APP_SRCS=Android 视角（给本脚本检查/生成 R），APP_SRCS_P=proot 视角
 APP_SRCS=""; APP_SRCS_P=""
 for c in MainActivity EngineService AlarmReceiver ScheduleExecutor OverlayService \
-         UsageStatsHelper AccessibilityService VsreenBridgeService LogShareProvider NfcStore; do
+         UsageStatsHelper AccessibilityService VsreenBridgeService LogShareProvider NfcStore BuildEnvInstaller; do
   [ -f "$HARNESS/$c.java" ] || { echo "✗ 缺少源码 $HARNESS/$c.java" >&2; exit 1; }
   APP_SRCS="$APP_SRCS $HARNESS/$c.java"
-  APP_SRCS_P="$APP_SRCS_P /sdcard/Download/Operit/dsh_own_app/v118/android-app/src/com/deepseek/harness/$c.java"
+  APP_SRCS_P="$APP_SRCS_P $R/v118/android-app/src/com/deepseek/harness/$c.java"
 done
 VSC_SRCS=$(ls "$VSC"/*.java 2>/dev/null || true)
 [ -n "$VSC_SRCS" ] || { echo "✗ $VSC 下没有 .java" >&2; exit 1; }

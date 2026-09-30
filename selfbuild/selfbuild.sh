@@ -27,7 +27,8 @@
 # ============================================================================
 set -e
 
-SB=/storage/emulated/0/Download/Operit/dsh_own_app/selfbuild
+R="${DSH_PROJECT:-$(cd "$(dirname "$0")/.." && pwd)}"
+SB="$R/selfbuild"
 WORK=$SB/work
 OUT=$SB/out
 NODE=/data/user/0/com.deepseek.harness/files/payload/runtime/bin/node
@@ -37,7 +38,7 @@ PY=/data/user/0/com.deepseek.harness/files/payload/bin/python3
 TC=/data/user/0/com.deepseek.harness/files/toolchain
 KEYS=/data/user/0/com.deepseek.harness/files/keys
 PAYLOAD_DIR=/data/user/0/com.deepseek.harness/files/payload
-BASE=$WORK/base-v1.20.apk
+BASE=${DSH_BASE:-$WORK/base-v1.20.apk}
 PAY_OLD=$WORK/payload-old.zip
 PAY_NEW=$WORK/payload-new.zip
 UNSIGNED=$WORK/unsigned.apk
@@ -59,6 +60,13 @@ payload)
 patch)
   [ -f "$PAY_OLD" ] || { echo "✗ 先跑 payload"; exit 1; }
   "$NODE" "$SB/lib/selfbuild.js" payload-patch "$PAY_OLD" "$PAY_NEW" "$SB/build-overlay"
+
+  # ⚠️ 门禁：overlay 里的 open-in-app/lib/client.js 是"上游干净版"，
+  #    而背景图靠这个文件里的一段本地注入才会加载。overlay 一覆盖，
+  #    注入就没了 → 装上去背景图完全不显示。
+  #    2026-10-01 就是这么把已发布的 v1.27 弄坏的（实测 v1.26 有注入、v1.27 = 0）。
+  #    这里一应用完 overlay 就验，缺了直接让出包失败。
+  "$NODE" "$SB/scripts/check-bg-injection.js"     "$SB/build-overlay/dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-open-in-app/lib/client.js"
   ;;
 pack)
   # 用法: pack [--dex <classes.dex>]     # 没跑 patch 时 payload 保持原样

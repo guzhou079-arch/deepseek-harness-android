@@ -1,3 +1,4 @@
+const path = require('path');
 // set-apk-version.js —— 改 APK 内 AndroidManifest.xml 的 versionName / versionCode
 //
 // 为什么需要：selfbuild.sh 的设计是「复用骨架 APK，资源/清单原样搬运」（不需要 aapt2），
@@ -16,7 +17,7 @@
 
 const fs = require('node:fs');
 const zlib = require('node:zlib');
-const { readZip, writeZip, crc32 } = require('/sdcard/Download/Operit/dsh_own_app/selfbuild/lib/ziptool.js');
+const { readZip, writeZip, crc32 } = require(path.join(__dirname, '../lib/ziptool.js'));
 
 const MANIFEST = 'AndroidManifest.xml';
 const RES_XML_TYPE = 0x0003, RES_STRING_POOL_TYPE = 0x0001;

@@ -4,7 +4,8 @@
 # 所以「账户 UI + 启动器按钮」这套客户端补丁**重启后必丢**，重启完跑一下本脚本即可。
 #   生效方式：刷新页面（客户端 bundle 的 rev 随内容变）。
 set -e
-SRC=/sdcard/Download/Operit/dsh_own_app/selfbuild/build-overlay/dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-settings-account/lib/client.js
+R="${DSH_PROJECT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+SRC="$R/selfbuild/build-overlay/dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-settings-account/lib/client.js"
 DST=/data/user/0/com.deepseek.harness/files/payload/dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-settings-account/lib/client.js
 [ -f "$SRC" ] || { echo "✗ 找不到补丁源 $SRC"; exit 1; }
 grep -q 'dsh-android-patch v3' "$DST" 2>/dev/null && { echo "✓ 已经打过（v3 在）"; exit 0; }

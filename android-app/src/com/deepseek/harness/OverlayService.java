@@ -76,8 +76,12 @@ public class OverlayService extends Service {
     private static final long PROBE_MS = 2000L;
     /** 贴边时离屏幕边缘留多少 dp（v1.38：不再半藏，留出余量躲开系统边缘手势热区）。 */
     private static final int EDGE_GAP_DP = 6;
-    /** 静置半藏时露在外面的比例（v1.61 起四边都适用）。 */
-    private static final float TUCK_VISIBLE_FRACTION = 0.45f;
+    /**
+     * 静置半藏时露在外面的比例（v1.61 起左/右/上适用）。
+     * v1.65：0.45 → 0.68。露得太少手指不好抓（用户实测反馈"点不着"），
+     * 露大半既不明显碍事、又能一眼看见、随手可点。
+     */
+    private static final float TUCK_VISIBLE_FRACTION = 0.68f;
     /** v1.64：上边半藏时向下露出的量（dp）。窗口 y 相对状态栏下沿，收太多会钻进状态栏。 */
     private static final int TUCK_TOP_DP = 34;
     /** v1.62：拖到屏幕最底这一条内松手 = 隐藏（原来 84dp 全算隐藏，和底边半藏打架）。 */
@@ -1152,11 +1156,6 @@ public class OverlayService extends Service {
                         touchX = ev.getRawX(); touchY = ev.getRawY();
                         startX = lp.x; startY = lp.y;
                         dragging = false;
-                        // v1.55 关键实测：把"手指的屏幕坐标"和"我算出来的圆位置"同时记下来。
-                        // 用户反馈"必须按住白色圆最底部才行" → 说明可触摸区相对圆整体偏下。
-                        // 有了这两组数就能算出准确偏移量（不用再靠截图估），
-                        // 然后按实测值把窗口上移同样的量。
-                        logTouchProbe(ev);
                         return true;
                     case MotionEvent.ACTION_MOVE:
                         if (Math.abs(ev.getRawX() - touchX) > dp(8) || Math.abs(ev.getRawY() - touchY) > dp(8)) {
@@ -1261,6 +1260,22 @@ public class OverlayService extends Service {
      */
     private void syncVisibilityFromForeground() {
         try {
+            // v1.65：用**无障碍看到的真实前台包名**纠正 MainActivity 的生命周期标志。
+            // 为什么必须这样：foregroundWantsHidden 是"服务实例里的状态"，由 onStart/onStop 维护；
+            // 一旦时序错位（重装、服务被桥拉起、Activity 提前 onStart），它就会永久卡住 ——
+            // 实测现象就是"回到桌面了、鲸鱼还是不显示"（用户报"悬浮球不见了"）。
+            // 无障碍服务的 activePackage 是系统事件直接给的，不会卡。
+            if (AccessibilityService.isRunning) {
+                String fg = AccessibilityService.activePackage;
+                if (fg != null && !fg.isEmpty()) {
+                    boolean dshInFront = fg.equals(getPackageName());
+                    if (dshInFront == foregroundWantsHidden) {
+                        // 与生命周期标志不一致 → 以真实前台为准
+                        foregroundWantsHidden = dshInFront;
+                        logVis("fg-heal: activePackage=" + fg + " -> fgHidden=" + dshInFront);
+                    }
+                }
+            }
             boolean wantVisible = !foregroundWantsHidden && !userHidden;
             if (wantVisible != visible) {
                 logVis("selfheal: want=" + wantVisible + " visible=" + visible

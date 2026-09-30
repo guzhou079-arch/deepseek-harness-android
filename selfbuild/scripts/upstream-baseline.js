@@ -22,7 +22,8 @@ const os = require('node:os')
 const path = require('node:path')
 const { execFileSync } = require('node:child_process')
 
-const SB = '/storage/emulated/0/Download/Operit/dsh_own_app/selfbuild'
+const R = process.env.DSH_PROJECT || path.join(__dirname, '../..')
+const SB = path.join(R, 'selfbuild')
 const PAYLOAD = '/data/user/0/com.deepseek.harness/files/payload'
 const MANIFEST = path.join(SB, 'checks.manifest')
 const BASELINE_ROOT = path.join(SB, 'upstream-baseline')

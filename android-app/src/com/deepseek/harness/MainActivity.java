@@ -200,7 +200,13 @@ public class MainActivity extends Activity {
     private FrameLayout engineRoot;                // WebView + 启动浮层 + 控制台的共同根容器
     private ScrollView consoleLayer;               // 控制台覆盖层
     private LinearLayout consoleBody;              // 当前页内容容器
-    private int consolePage = 0;                   // 0 控制台 / 1 权限 / 2 插件 / 3 日志
+    private int consolePage = 0;                   // 0 控制台 / 1 权限 / 2 插件 / 3 日志 / 4 自建环境
+    // v1.28 自建环境（按需下载构建环境，让用户能在手机上自己出包）
+    private boolean beInstalling = false;
+    private String beStage = "";
+    private java.util.List<BuildEnvInstaller.Source> beSources = null;   // null=还没查
+    private boolean beResolving = false;
+    private String beResolveErr = "";
     private boolean consoleVisible = false;
     private boolean consoleDetailOpen = false;      //「已解压」那一行是否展开
     private boolean extracting = false;            // 正在解压（控制台进度）
@@ -1026,56 +1032,99 @@ public class MainActivity extends Activity {
         }
     }
 
-    // ⑧ 更新提示：后台查 GitHub Releases 最新 tag，与本地 versionName 比对，有新版弹提示
+    // ⑧ 更新提示：**两个仓库对等并行**，各查各的，谁更新用谁。
+    //   ⚠️ 2026-09-30 重写：原来只查 Gitee，文案却写「前往 GitHub Releases」、
+    //   按钮又打开 Gitee —— 等于把 GitHub 写成了附庸。用户明确要求：
+    //   两个仓库是**并行对等**的，谁也不是谁的镜像/备胎，两边都要照顾到。
+    //   现在：两边都查、两个链接都列出来且都可点、按钮打开"报出更新版本"的那一边
+    //   （并列时固定取 GitHub —— 那只是确定性取舍，不代表优先级）。
+    private static final String GH_RELEASES_API =
+            "https://api.github.com/repos/guzhou079-arch/deepseek-harness-android/releases/latest";
+    private static final String GH_RELEASES_PAGE =
+            "https://github.com/guzhou079-arch/deepseek-harness-android/releases";
+    private static final String GI_RELEASES_API =
+            "https://gitee.com/api/v5/repos/zhou-gu24/deepseek-harness-android/releases/latest";
+    private static final String GI_RELEASES_PAGE =
+            "https://gitee.com/zhou-gu24/deepseek-harness-android/releases";
+
+    /** 查一个 release 端点要 tag_name；失败返回 null。两个仓库**对等**调用，谁也不特殊。 */
+    private String fetchLatestTag(String api) {
+        HttpURLConnection c = null;
+        try {
+            c = (HttpURLConnection) new URL(api).openConnection();
+            c.setConnectTimeout(5000);
+            c.setReadTimeout(5000);
+            c.setRequestProperty("User-Agent", "dsh-android");
+            c.setRequestProperty("Accept", "application/json");
+            if (c.getResponseCode() != 200) return null;
+            InputStream in = c.getInputStream();
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] b = new byte[4096];
+            int n;
+            while ((n = in.read(b)) > 0) out.write(b, 0, n);
+            in.close();
+            String json = new String(out.toByteArray(), "UTF-8");
+            int ti = json.indexOf("\"tag_name\"");
+            if (ti < 0) return null;
+            int q1 = json.indexOf('"', ti + 10);
+            int q2 = q1 >= 0 ? json.indexOf('"', q1 + 1) : -1;
+            return (q1 >= 0 && q2 > q1) ? json.substring(q1 + 1, q2) : null;
+        } catch (Throwable t) {
+            return null;
+        } finally {
+            if (c != null) { try { c.disconnect(); } catch (Throwable ignored) {} }
+        }
+    }
+
+    /** tag → 纯版本号（去掉 v 前缀与 -lite/-beta 后缀）。 */
+    private static String normalizeTag(String tag) {
+        return tag == null ? "" : tag.replace("v", "").replace("-lite", "").replace("-beta", "");
+    }
+
     private void checkForUpdate(final boolean manual) {
         new Thread(new Runnable() {
             @Override public void run() {
                 try {
-                    URL url = new URL("https://gitee.com/api/v5/repos/zhou-gu24/deepseek-harness-android/releases/latest");
-                    HttpURLConnection c = (HttpURLConnection) url.openConnection();
-                    c.setConnectTimeout(5000);
-                    c.setReadTimeout(5000);
-                    c.setRequestProperty("User-Agent", "dsh-android");
-                    int code = c.getResponseCode();
-                    if (code != 200) { c.disconnect(); if (manual) ui.post(new Runnable() { @Override public void run() { conToast("检查更新失败（网络）"); } }); return; }
-                    InputStream in = c.getInputStream();
-                    ByteArrayOutputStream out = new ByteArrayOutputStream();
-                    byte[] b = new byte[4096];
-                    int n;
-                    while ((n = in.read(b)) > 0) out.write(b, 0, n);
-                    in.close();
-                    c.disconnect();
-                    String json = new String(out.toByteArray(), "UTF-8");
-                    // 解析 "tag_name":"vX.Y.Z"
-                    String tag = null;
-                    int ti = json.indexOf("\"tag_name\"");
-                    if (ti >= 0) {
-                        int q1 = json.indexOf('"', ti + 10);
-                        int q2 = q1 >= 0 ? json.indexOf('"', q1 + 1) : -1;
-                        if (q1 >= 0 && q2 > q1) tag = json.substring(q1 + 1, q2);
-                    }
-                    if (tag == null || tag.isEmpty()) {
-                        if (manual) ui.post(new Runnable() { @Override public void run() { conToast("检查更新失败（响应异常）"); } });
+                    // 两个渠道**对等**：各查各的，一个挂了不影响另一个
+                    String ghTag = fetchLatestTag(GH_RELEASES_API);
+                    String giTag = fetchLatestTag(GI_RELEASES_API);
+                    if (ghTag == null && giTag == null) {
+                        if (manual) ui.post(new Runnable() { @Override public void run() { conToast("检查更新失败（两个仓库都没连上）"); } });
                         return;
                     }
-                    String latest = tag.replace("v", "").replace("-lite", "").replace("-beta", "");
+                    String tag = ghTag != null ? ghTag : giTag;
+                    String page = ghTag != null ? GH_RELEASES_PAGE : GI_RELEASES_PAGE;
+                    if (giTag != null && (ghTag == null || isNewerVersion(normalizeTag(giTag), normalizeTag(ghTag)))) {
+                        tag = giTag;
+                        page = GI_RELEASES_PAGE;
+                    }
+                    final String ftag = tag;
+                    final String fpage = page;
+                    final boolean ghOk = ghTag != null, giOk = giTag != null;
                     String local = "";
                     try { local = getPackageManager().getPackageInfo(getPackageName(), 0).versionName; } catch (Throwable ignored) {}
-                    // 只比较主版本号（数字部分），忽略后缀
                     final String fLocal = local;
-                    if (isNewerVersion(latest, fLocal)) {
-                        final String ftag = tag;
+                    if (isNewerVersion(normalizeTag(tag), fLocal)) {
                         ui.post(new Runnable() {
                             @Override public void run() {
                                 try {
-                                    conDialog("发现新版本 " + ftag,
-                                            "当前版本 " + fLocal + "，最新 " + ftag + "。\n\n前往 GitHub Releases 下载更新（正式版 / Lite 共存版可选）。",
-                                            "去下载", new Runnable() { @Override public void run() {
-                                                try {
-                                                    startActivity(new Intent(Intent.ACTION_VIEW,
-                                                            Uri.parse("https://gitee.com/zhou-gu24/deepseek-harness-android/releases")));
-                                                } catch (Throwable ignored) {}
-                                            }}, "稍后");
+                                    // 正文里**两条链接都列、都可点** —— 不把任何一家做成唯一入口
+                                    String html = "当前版本 " + fLocal + "，最新 " + ftag + "。<br><br>"
+                                            + "两个仓库并行发布同一版本，任选其一：<br>"
+                                            + "· <a href=\"" + GH_RELEASES_PAGE + "\">GitHub Releases</a>"
+                                            + (ghOk ? "" : "（本次没连上）") + "<br>"
+                                            + "· <a href=\"" + GI_RELEASES_PAGE + "\">Gitee Releases</a>"
+                                            + (giOk ? "" : "（本次没连上）");
+                                    android.widget.TextView tv = cText("", 12.5f, cSub(), false);
+                                    tv.setText(android.text.Html.fromHtml(html));
+                                    tv.setMovementMethod(android.text.method.LinkMovementMethod.getInstance());
+                                    conDialogView("发现新版本 " + ftag, tv, "打开更新页", new Runnable() {
+                                        @Override public void run() {
+                                            try {
+                                                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(fpage)));
+                                            } catch (Throwable ignored) {}
+                                        }
+                                    }, "稍后");
                                 } catch (Throwable ignored) {}
                             }
                         });
@@ -5270,6 +5319,7 @@ public class MainActivity extends Activity {
         if (consolePage == 1) { renderConsolePerm(); return; }
         if (consolePage == 2) { renderConsolePlug(); return; }
         if (consolePage == 3) { renderConsoleLog(); return; }
+        if (consolePage == 4) { renderConsoleBuildEnv(); return; }
         renderConsoleMain();
     }
 
@@ -5391,6 +5441,8 @@ public class MainActivity extends Activity {
         col.addView(cNavRow("授予权限", "存储 · 通知 · 悬浮窗 · 电池 · root · Shizuku · 无障碍", conPermSummary(), 1));
         col.addView(cSep(0));
         col.addView(cNavRow("插件", "关掉用不到的，省上下文", conPlugSummary(), 2));
+        // 这个项目的核心价值是"能在手机上自己编译自己出包"，那套环境 342MB 不塞进主包，按需下载
+        col.addView(cNavRow("自建环境", "在手机上自己编译 / 打包 / 签名（可选，约 193MB）", conBuildEnvSummary(), 4));
         col.addView(cSep(0));
         LinearLayout logActs = new LinearLayout(this);
         logActs.setOrientation(LinearLayout.HORIZONTAL);
@@ -6447,6 +6499,116 @@ public class MainActivity extends Activity {
             @Override public void onClick(View v) { conRestartEngine(); }
         });
         col.addView(apply, cTop(dp(14)));
+    }
+
+
+    // ---------- 自建环境页（v1.28）----------
+    // 为什么单开一页：这个项目的价值不在功能，在"能在手机上自己编译自己出包"。
+    // 但完整构建环境（proot+Alpine+OpenJDK+四个 jar）有 342MB，塞进主包对只想用 AI
+    // 的人是纯负担 → 按需下载（方案 B）。两个仓库对等，各放同样的分卷，任选其一。
+    private String conBuildEnvSummary() {
+        if (beInstalling) return "安装中…";
+        return BuildEnvInstaller.isInstalled(this) ? "已就绪" : "未安装";
+    }
+
+    private void renderConsoleBuildEnv() {
+        LinearLayout col = consoleBody;
+        col.addView(conBackRow("自建环境"));
+        col.addView(cText("装上它之后，你可以在这台手机上自己编译、打包、签名、安装这个 App —— 也就是这个项目本来的核心能力。",
+                12f, cText(), false), cTop(dp(12)));
+        col.addView(cText("主包不含这部分（约 193MB），所以按需下载。GitHub 与 Gitee 都放了同样的分卷，任选其一。",
+                11f, cSub(), false), cTop(dp(8)));
+
+        col.addView(cSep(dp(14)));
+        col.addView(cText(BuildEnvInstaller.statusText(this), 12.5f, cText(), false), cTop(dp(14)));
+        if (beInstalling && beStage.length() > 0) {
+            col.addView(cText(beStage, 11.5f, cAccent(), false), cTop(dp(10)));
+        }
+        col.addView(cSep(dp(14)));
+
+        if (beInstalling) {
+            Button c = cButton("取消安装", false);
+            c.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) { BuildEnvInstaller.cancel(); }
+            });
+            col.addView(c, cTop(dp(14)));
+        } else if (beResolving) {
+            col.addView(cText("正在查两个仓库…", 12f, cSub(), false), cTop(dp(14)));
+        } else if (beSources == null || beSources.isEmpty()) {
+            if (beResolveErr.length() > 0) col.addView(cText(beResolveErr, 11.5f, cSub(), false), cTop(dp(14)));
+            Button r = cButton("重新查询", true);
+            r.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) { conBuildEnvResolve(); }
+            });
+            col.addView(r, cTop(dp(12)));
+        } else {
+            // 对等：有几个来源就列几个按钮，谁也不做谁的兜底
+            for (int i = 0; i < beSources.size(); i++) {
+                final BuildEnvInstaller.Source s = beSources.get(i);
+                boolean ready = BuildEnvInstaller.isInstalled(this);
+                Button b = cButton((ready ? "用 " : "从 ") + s.label + (ready ? " 重新安装 / 修复" : " 下载安装"),
+                        i == 0);
+                b.setOnClickListener(new View.OnClickListener() {
+                    @Override public void onClick(View v) { startBuildEnvInstall(s); }
+                });
+                col.addView(b, cTop(i == 0 ? dp(14) : dp(8)));
+            }
+            Button re = cButton("重新查询两个仓库", false);
+            re.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) { conBuildEnvResolve(); }
+            });
+            col.addView(re, cTop(dp(12)));
+        }
+
+        col.addView(cText("⚠️ 解压必须落在内部存储 —— /sdcard 是 FUSE，存不了 rootfs 里的符号链接（918 个）。\n"
+                + "分卷会留在 /sdcard/DeepSeekHarness/buildenv，重装 App 后不用重新下载，重新解压即可。",
+                11f, cSub(), false), cTop(dp(12)));
+    }
+
+    private void conBuildEnvResolve() {
+        if (beResolving) return;
+        beResolving = true;
+        beResolveErr = "";
+        renderConsole();
+        new Thread(new Runnable() {
+            @Override public void run() {
+                final java.util.List<BuildEnvInstaller.Source> got = BuildEnvInstaller.resolveSources();
+                ui.post(new Runnable() {
+                    @Override public void run() {
+                        beResolving = false;
+                        beSources = got;
+                        if (got.isEmpty()) beResolveErr = "两个仓库都没查到自建环境（可能是网络不通，或还没发布）。";
+                        if (consoleVisible && consolePage == 4) renderConsole();
+                    }
+                });
+            }
+        }, "buildenv-resolve").start();
+    }
+
+    private void startBuildEnvInstall(final BuildEnvInstaller.Source src) {
+        beInstalling = true;
+        beStage = "准备中…";
+        renderConsole();
+        BuildEnvInstaller.install(this, src, new BuildEnvInstaller.Cb() {
+            @Override public void onStage(final String stage, final int pct) {
+                ui.post(new Runnable() {
+                    @Override public void run() {
+                        beStage = stage;
+                        if (consoleVisible && consolePage == 4) renderConsole();
+                    }
+                });
+            }
+            @Override public void onDone(final boolean ok, final String msg) {
+                ui.post(new Runnable() {
+                    @Override public void run() {
+                        beInstalling = false;
+                        beStage = "";
+                        if (consoleVisible) renderConsole();
+                        conToast(msg);
+                    }
+                });
+            }
+        });
     }
 
     // ---------- 日志页 ----------

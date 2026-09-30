@@ -12,7 +12,8 @@
 #   5) 校验包名与正文标记
 # 退出码 = 失败项数。
 # ============================================================================
-SB=/storage/emulated/0/Download/Operit/dsh_own_app/selfbuild
+R="${DSH_PROJECT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+SB="$R/selfbuild"
 CURL=/data/user/0/com.deepseek.harness/files/payload/runtime/bin/curl
 NODE=/data/user/0/com.deepseek.harness/files/payload/runtime/bin/node
 PREFS=/data/user/0/com.deepseek.harness/shared_prefs/dsh_prefs.xml

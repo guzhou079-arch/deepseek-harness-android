@@ -17,7 +17,8 @@
 # 退出码 0 = 可以装机；非 0 = 禁止装机。
 # ============================================================================
 F=/data/user/0/com.deepseek.harness/files
-SB=/storage/emulated/0/Download/Operit/dsh_own_app/selfbuild
+R="${DSH_PROJECT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+SB="$R/selfbuild"
 NODE=$F/payload/runtime/bin/node
 CURL=$F/payload/runtime/bin/curl
 LIVE=$F/payload/dshroot
