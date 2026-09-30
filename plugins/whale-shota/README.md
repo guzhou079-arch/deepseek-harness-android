@@ -2,15 +2,20 @@
 
 DSH 皮肤 + 傲娇鲸鱼正太**圆贴纸桌宠**。**自用版**，不对外分发。
 
+> ⚠️ **本仓库只含原创代码，不含美术资源。**
+> 桌宠用的插画（`assets/`）、由它派生的抠像分层（`archive-2.5d/layers/`）与预览图（`preview/`）
+> **均未入库** —— 该插画来源不明且含他人商标，按 `NOTICE` 的边界不得随包分发。
+> 所以本插件**克隆下来不能直接跑**：请自备一张图放到 `assets/whale-shota.png`。
+
 ## 是什么
 
 一个纯 JS 客户端插件（无 TypeScript、无 tsdown、无构建步骤）。
 
-桌宠 = **从你那张插画里裁出来的圆形贴纸**。用 CSS 的 `background-size/position`
-直接从本机已在对外提供的 `/dsh-bg-user.png` 裁出脸部区域：
+桌宠 = **从一张插画里裁出来的圆形贴纸**。用 CSS 的 `background-size/position`
+直接从宿主已在对外提供的 `/dsh-bg-user.png` 裁出脸部区域：
 
 - **零新增字节**（不复制图片、不内联 base64）
-- **画风天然 100% 一致**（就是你那张图本身）
+- **画风天然一致**（就是那张图本身）
 - 图挂了还有一层渐变兜底（`background-image` 的第二层）
 
 ### 桌宠五态
@@ -38,6 +43,7 @@ DSH 皮肤 + 傲娇鲸鱼正太**圆贴纸桌宠**。**自用版**，不对外�
 | D 近全身 | .060 | .000 | .880 |
 
 改完重跑 `python3 tools/render-sticker.py` 刷新预览（脚本里三个常量要同步改）。
+⚠️ 预览图只是本地产物，**不要提交进仓库**。
 
 ## 纪律
 
@@ -57,8 +63,8 @@ whale-shota/
 ├─ lib/index.js         node 半边（纯展示，空实现）
 ├─ lib/client.js        浏览器半边：全部逻辑
 ├─ locale/{zh,en}.json  插件菜单本地化
-├─ preview/             预览图
-├─ assets/              源插画（自用，勿分发）
+├─ assets/              源插画（⚠️ 未入库 —— 自备一张图放这里）
+├─ preview/             预览图（⚠️ 未入库，本地产物）
 ├─ tools/render-sticker.py  预览渲染
 ├─ archive-2.5d/        走过的弯路：抠像 + 头/身分层 + 呼吸歪头
 └─ NOTICE               素材来源与使用边界
@@ -66,7 +72,7 @@ whale-shota/
 
 `archive-2.5d/` 里是之前那版 2.5D 分层（抠像、头/身分层、呼吸+歪头动效，
 `tools/build-layers.py` / `render-motion.py` / `build-client.py` 一整套）。
-**没删，留着备用**，但它不参与现行包。
+代码**留着备用**，但它不参与现行包；`layers/` 下的分层输出**未入库**。
 
 ## 装法（待隔离实例验证后再动真 profile）
 
