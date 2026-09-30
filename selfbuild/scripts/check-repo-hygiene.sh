@@ -64,6 +64,15 @@ H=$(hits "$FORBIDDEN")
 [ -n "$H" ] && add "不可分发的素材（见 plugins/whale-shota/NOTICE）：
 $(printf '%s\n' "$H" | sed 's/^/      /')"
 
+# ---------------------------------------------------------------- 1b. 个人数据
+# 记忆库、会话导出、凭据等**个人内容** —— 永远不进公开仓库。
+# （记忆系统真相源在 /sdcard/DeepSeekHarness/memory/，本来就在项目外；
+#   这条防的是"整目录搬运"把外部数据一起拖进来 —— 2026-09-30 的教训。）
+PERSONAL='(^|/)DeepSeekHarness/|(^|/)memory/(entries|lessons|handoff|archive|log)/|tombstone[.]jsonl$'
+H=$(hits "$PERSONAL")
+[ -n "$H" ] && add "个人数据（记忆库/会话/凭据），不进公开仓库：
+$(printf '%s\n' "$H" | sed 's/^/      /')"
+
 # ---------------------------------------------------------------- 2. 密钥/证书
 H=$(hits '\.(keystore|jks|p12|pfx|pem|key)$|(^|/)id_(rsa|ed25519|ecdsa)|(^|/)\.credentials')
 [ -n "$H" ] && add "密钥/证书绝不能入库：
