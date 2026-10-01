@@ -36,6 +36,10 @@ fi
 PASS=$(cat "$PASSFILE")
 echo "  发行钥匙: $KEY（口令在 $PASSFILE，600 权限）"
 
+# 出包脚本自己负责改 overlay 的 CSS（换 SVG、换发行遮罩值），
+# 所以要让 selfbuild.sh **别**把它自动同步回去。
+export DSH_SKIP_BG_SYNC=1
+
 # ── 2. 临时改注入集：摘掉个人壁纸 ──────────────────────────────────────
 BK=$F/tmp/dist-bk; rm -rf "$BK"; mkdir -p "$BK"
 
@@ -222,6 +226,16 @@ for path in mine + outer:
         m = re.search(p, s)
         if m:
             print(f"     ⚠ {label}: {name} → 「{m.group()[:40]}」"); bad += 1
+# ⚠️ 硬判据：发行包的背景图**必须**是自带矢量图，不能指向个人壁纸。
+#    2026-10-01 踩到：selfbuild.sh 的 bg 自动同步把 make-dist-apk.sh 刚改好的 CSS
+#    覆盖回个人版 → 打出来的包指向 /dsh-bg-user.png，而壁纸文件已被移走 → 用户那边背景是坏的。
+#    当时这段只"报告"没"拦截"，等于门禁形同虚设。
+_css2 = inner.read('dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/dsh-bg.css').decode('utf-8', 'ignore')
+_usg2 = [l.strip() for l in _css2.split('\n') if '--dsh-user-bg-image:' in l]
+if not _usg2 or 'dsh-bg.svg' not in _usg2[0]:
+    print("     ❌ 背景图不是 /dsh-bg.svg —— 不要分发")
+    print("        （多半是 selfbuild.sh 的 bg 自动同步，把 make-dist-apk.sh 改好的 CSS 覆盖回去了）")
+    bad += 1
 print(f"  结果: {'❌ 有个人内容，不要分发' if bad else '✅ 干净，可以分发'}")
 
 # 附加信息：背景是否已指向通用图

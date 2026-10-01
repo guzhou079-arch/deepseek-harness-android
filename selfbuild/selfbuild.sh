@@ -41,6 +41,24 @@ PAYLOAD_DIR=/data/user/0/com.deepseek.harness/files/payload
 BASE=${DSH_BASE:-$WORK/base-v1.20.apk}
 PAY_OLD=$WORK/payload-old.zip
 PAY_NEW=$WORK/payload-new.zip
+
+# ── 背景图 CSS：**唯一源**是 ../bg-patch/dsh-bg.css ──────────────────────
+# ⚠️ 但出包实际用的是 build-overlay 里那份**副本**。两份不同步 = 改了源却没生效
+#    （2026-10-01 真踩到：源码改好了、v1.29 包里却还是旧遮罩值，白打一版）。
+#    这是"本地改动 vs 构建用副本"这一类坑的第三次，所以不再靠人记 ——
+#    脚本一启动就同步，之后没有"哪份才算数"的问题。
+BG_SRC="$R/bg-patch/dsh-bg.css"
+BG_DST="$SB/build-overlay/dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/dsh-bg.css"
+# ⚠️ make-dist-apk.sh 会**先**改 overlay 的 CSS（换 SVG + 换发行遮罩值）**再**调本脚本，
+#    所以那条路径下必须跳过自动同步，否则会把它刚改好的覆盖回去 —— 2026-10-01 真踩到，
+#    打出来的包背景图变成了个人壁纸（而壁纸文件已被移走 → 用户那边是坏的）。
+if [ -z "${DSH_SKIP_BG_SYNC:-}" ] && [ -f "$BG_SRC" ]; then
+  mkdir -p "$(dirname "$BG_DST")"
+  if ! cmp -s "$BG_SRC" "$BG_DST"; then
+    cp "$BG_SRC" "$BG_DST"
+    echo "  ↻ 背景 CSS 已从 bg-patch/ 同步到 build-overlay/（原本两份不一致）"
+  fi
+fi
 UNSIGNED=$WORK/unsigned.apk
 mkdir -p "$WORK" "$OUT"
 
