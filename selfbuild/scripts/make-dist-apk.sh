@@ -68,6 +68,17 @@ cp "$DIST/dsh-bg.css" "$BK/dsh-bg.css"
 #   只剩那层遮罩，比自带图还黑（用户反馈"屏幕太黑"有一部分就来自它）。
 #   现在按注释的本意改成指向自带的 /dsh-bg.svg。
 sed -i 's#url("/dsh-bg-user.png?v=1")#url("/dsh-bg.svg?v=1")#' "$DIST/dsh-bg.css"
+
+# 遮罩有**两套四个值**（主题 × 图亮度），发行版要**全部**改掉 ——
+# 个人版：浅色 0.55/0.70、深色 0.60/0.76（针对那张亮插画）
+# 发行版：浅色 0.70/0.82、深色 0.18/0.36（针对自带的深蓝矢量图，底色 #0a1020）
+#
+# ⚠️ 用**变量名**当锚点，不要用数值当锚点 —— 0.70 在浅色里出现两次，
+#    按数值 sed 会连环误伤（先改一个、下一个 sed 又把它当目标）。
+sed -i 's#\(--dsh-user-bg-scrim-top-light:\) *rgba([^)]*)#\1 rgba(247, 249, 253, 0.70)#' "$DIST/dsh-bg.css"
+sed -i 's#\(--dsh-user-bg-scrim-bottom-light:\) *rgba([^)]*)#\1 rgba(247, 249, 253, 0.82)#' "$DIST/dsh-bg.css"
+sed -i 's#\(--dsh-user-bg-scrim-top-dark:\) *rgba([^)]*)#\1 rgba(4, 8, 16, 0.18)#' "$DIST/dsh-bg.css"
+sed -i 's#\(--dsh-user-bg-scrim-bottom-dark:\) *rgba([^)]*)#\1 rgba(4, 8, 16, 0.36)#' "$DIST/dsh-bg.css"
 # 深色主题遮罩也要跟着换：个人壁纸偏亮 → 需要 0.60/0.76 压暗；
 # 自带 SVG 本身就是深蓝低对比 → 只轻压，否则图形被盖死成纯黑（"图是黑的"）。
 sed -i 's#--dsh-user-bg-scrim-top-dark: rgba(4, 8, 16, 0.60)#--dsh-user-bg-scrim-top-dark: rgba(4, 8, 16, 0.18)#' "$DIST/dsh-bg.css"
