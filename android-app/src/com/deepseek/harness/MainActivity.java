@@ -4507,14 +4507,16 @@ public class MainActivity extends Activity {
         // 注意：Android 兼容补丁（禁用 llm-pi-ai/sandbox/bash-sandbox 的 cordis.patch.yml）
         // 位于 $DSH_HOME/cordis.patch.yml，由 dsh profile-boot 的 homePatches 自动加载，
         // 无需 --patch 参数（重复传入会导致 duplicate loader entry 崩溃）。
-        // v1.24：局域网访问**暂不实现**（原 v1.22-lan 的 host 开关已移除）。
-        // 原因（实测，见 selfbuild/notes/lan-security.md）：
-        //   ① 上游硬闸：dsh-web-app/lib/startup.js:40 对 `--host 0.0.0.0` 直接 program.error
-        //      （"would expose remote code execution to the network"），传了引擎会**退出、GUI 全挂**；
-        //   ② 要绕过它只能改内核包/patch overlay，而当前还有三处「无鉴权可读」的面
-        //      （/plugins/<id>/client.js + .js.map、/plugins/events 模块图、含用户个人图的非 index 静态资源）；
-        //   ③ 令牌走明文 HTTP，同网段可嗅探。
-        // → 结论：在①②③解决之前，3080 固定只绑本机。`/lan` 路由仍保留，只做状态自述与拒绝开启。
+        // ⚠️ 历史注记（**已作废，别再照它判断**）：v1.24 曾在此写下"局域网访问暂不实现"。
+        // 那个结论的三个前提已在 v1.30 + v1.32 全部解决，**结论已不成立**：
+        //   ① 上游硬闸（startup.js:40 拒绝 --host 0.0.0.0）已由 payload 补丁 patch-lan-optin.js
+        //      改成"仅当 DSH_ALLOW_LAN=1 才放行"；
+        //   ② v1.30 已关掉当时那三处「无鉴权可读」的面（/plugins/<id>/client.js 与 .js.map、
+        //      /plugins/events 模块图、含用户个人图的非 index 静态资源），无 cookie 一律 401；
+        //   ③ 残余风险只剩"HTTP 明文、令牌在 URL 里" → 所以默认关、由用户显式开启、用完可关。
+        // → 现行为：默认仍绑 127.0.0.1；用户显式开启后才绑 0.0.0.0（见紧接下面的 v1.32 分支）。
+        // 当时的实测记录仍在 selfbuild/notes/lan-security.md，但结论以记忆条目
+        // fact-lan-access-implemented 为准。
         // 3181（无障碍）/ 8999（虚拟屏）/ 3081（notify+特权）三个本地桥一如既往固定 127.0.0.1。
         String bindHost = "127.0.0.1";
         java.util.List<String> extraArgs = new java.util.ArrayList<String>();
