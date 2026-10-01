@@ -2328,13 +2328,18 @@ public class MainActivity extends Activity {
             getSharedPreferences("dsh_prefs", MODE_PRIVATE)
                     .edit().putInt("engine_port", enginePort).apply();
         } catch (Throwable ignored) {}
-        // v1.14：不再自动拉起小鲸鱼悬浮窗（用户明确不需要）。
-        // 它是个独立的 foreground service（自己还会挂一条常驻通知），去掉自动拉起后：
-        //   · 退后台不再弹悬浮窗；
-        //   · 少一条常驻通知；
-        //   · 保活不受影响 —— 仍由上面的 startKeepAliveService()（EngineService）负责。
-        // 需要时仍可用 android_overlay 工具手动 show / hide（startOverlayService() 保留未删）。
-        // 原代码：if (Build.VERSION.SDK_INT < 23 || Settings.canDrawOverlays(this)) startOverlayService();
+        // v1.14：去掉"无条件自动拉起"（用户明确不需要 —— 退后台不弹窗、少一条常驻通知）。
+        // v1.66：改成**记住用户意图** —— 用户开过就恢复，没开过就保持关闭。
+        //   背景：悬浮球是个独立 foreground service，App 每次重启（含装机）都不会自己回来，
+        //   用户每次都得手动 show，2026-10-01 一天报障两次。
+        //   写 pref 的地方在 handleOverlayRequest()：show/toggle/panel→true，hide/toggle关→false。
+        try {
+            boolean wantOverlay = getSharedPreferences("dsh_prefs", MODE_PRIVATE)
+                    .getBoolean("overlay_wanted", false);
+            if (wantOverlay && (Build.VERSION.SDK_INT < 23 || Settings.canDrawOverlays(this))) {
+                startOverlayService();
+            }
+        } catch (Throwable ignored) {}
         // v1.10（Operit 方案）：不再请求 MediaProjection 授权（用户反感弹窗；Operit 主 App 也不用）。
         // 虚拟屏承载外部 App 内容由 PUBLIC|PRESENTATION 建屏实现（真机 Android 15 验证）。
         new Thread(new Runnable() {
@@ -3257,17 +3262,25 @@ public class MainActivity extends Activity {
                 if (rf.isEmpty()) rf = queryField(path, "refresh");
                 boolean refresh = !("0".equals(rf) || "false".equalsIgnoreCase(rf));
                 if (!OverlayService.isRunning) startOverlayService();
+                setOverlayWanted(true);   // v1.66：显式开面板 = 想要悬浮球，下次启动自动恢复
                 return OverlayService.togglePanelFromBridge(show, refresh);
             }
             if (action.equals("show") || action.equals("toggle")) {
                 if (OverlayService.isRunning) {
-                    if (action.equals("toggle")) { stopOverlayService(); return "{\"ok\":true,\"running\":false}"; }
+                    if (action.equals("toggle")) {
+                        stopOverlayService();
+                        setOverlayWanted(false);
+                        return "{\"ok\":true,\"running\":false}";
+                    }
+                    setOverlayWanted(true);
                     return "{\"ok\":true,\"running\":true,\"msg\":\"已在运行\"}";
                 }
+                setOverlayWanted(true);
                 startOverlayService();
                 return "{\"ok\":true,\"running\":true}";
             }
             if (action.equals("hide")) {
+                setOverlayWanted(false);
                 stopOverlayService();
                 return "{\"ok\":true,\"running\":false}";
             }
@@ -3275,6 +3288,17 @@ public class MainActivity extends Activity {
         } catch (Throwable t) {
             return "{\"ok\":false,\"error\":\"" + String.valueOf(t.getMessage()).replace("\"", "'") + "\"}";
         }
+    }
+
+    /**
+     * v1.66：记住"用户是否想要悬浮球"，供下次启动自动恢复（读的地方见 startEngine）。
+     * 只由 /overlay 桥的显式开/关调用；App 正常退出、服务被系统杀都不算"用户不想要"。
+     */
+    private void setOverlayWanted(boolean wanted) {
+        try {
+            getSharedPreferences("dsh_prefs", MODE_PRIVATE)
+                    .edit().putBoolean("overlay_wanted", wanted).apply();
+        } catch (Throwable ignored) {}
     }
 
     /** 启动小鲸鱼悬浮窗（需已授予悬浮窗权限；权限引导页里会调用）。 */
