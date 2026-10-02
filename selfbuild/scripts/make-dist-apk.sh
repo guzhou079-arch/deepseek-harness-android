@@ -60,7 +60,7 @@ trap restore_dist EXIT
 echo "== 摘掉个人壁纸（临时改动，出包后还原）=="
 if [ -f "$DIST/dsh-bg-user.png" ]; then mv "$DIST/dsh-bg-user.png" "$BK/"; echo "  移出 dsh-bg-user.png"; fi
 # ⚠️ overlay 里的 dshhome 是**开发者私人 profile 的所在地**（package.json 里带
-#   `link:/sdcard/Download/Operit/...`，只在本机存在）。发行包应当继承骨架里那份干净的 profile
+#   `link:/sdcard/Download/<私人目录>/...`，只在开发机上存在）。发行包应当继承骨架里那份干净的 profile
 #   —— 线上 v1.26 / v1.29 就是这么发的。
 #
 # ⚠️ 2026-10-02 两次修正：
@@ -68,7 +68,7 @@ if [ -f "$DIST/dsh-bg-user.png" ]; then mv "$DIST/dsh-bg-user.png" "$BK/"; echo 
 #      但现在 dshhome 下还放着**要随包分发的技能**（dshhome/skills/），整目录搬走
 #      = 发行包里静默没有技能。
 #   ② 只搬 `profiles` 又是**黑名单思路**：以后谁往 dshhome 下丢一个新目录
-#      （笔记 / 草稿 / review.json…）都会静默进包。跨模型会审专门点了这条。
+#      （笔记 / 草稿 / review.json…）都会静默进包。
 #   → 改成**白名单**：dshhome 下只有名单里的目录允许进包，其余一律搬走并打印。
 DHOME_ALLOW="skills"
 if [ -d "$OVL/dshhome" ]; then
@@ -259,12 +259,12 @@ for root, _, files in os.walk(ovl):
         mine.append(os.path.join(root, f))
 outer = ['assets/mobile.css', 'assets/mobile.js', 'AndroidManifest.xml']
 pats = {'手机号': r'1[3-9]\d{9}', '邮箱': r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.(com|cn|net)',
-        '游戏/私用包名': r'sgzzlb|aweme\.lite', '绝对私密路径': r'/sdcard/Download/Operit',
-        # 2026-10-02 加（个人数据清查）：开发机路径 / 密钥形态。
+        '游戏/私用包名': r'sgzzlb|aweme\.lite', '绝对私密路径': r'/sdcard/Download/(?!DeepSeekHarness/)',
+        # 开发机路径 / 密钥形态。
         # ⚠️ 素材名（whale-shota/dsh-bg-user）**只做文件名层检查**，不做内容层 ——
         #    文档里解释"为什么不随包分发"、以及静态门禁代码里引用这两条路径，都是正常内容，
         #    内容层扫它们只会误报（实测踩过：CHANGELOG + dsh-host-frontend-static 两处误报）。
-        '开发机路径': r'dsh_own_app|fluidcard-mock|/sdcard/Download/Operit',
+        '开发机路径': r'dsh_own_app|fluidcard-mock|/sdcard/Download/(?!DeepSeekHarness/)',
         '密钥形态': r'\bsk-[A-Za-z0-9_-]{16,}|\bghp_[A-Za-z0-9]{20,}|\bgithub_pat_'}
 for path in mine + outer:
     if path.startswith(ovl):

@@ -74,7 +74,7 @@ if (checkOnly) {
 const keep = new Set(es.map((e) => e.name));
 const finalNames = new Set([...keep].filter((n) => !(n.startsWith(LIB) && drop.has(n.slice(LIB.length)))));
 
-// ⚠️ 链条解析（跨模型会审 2026-10-02 指出的真缺陷）：
+// ⚠️ 链条解析（防连锁断链）：
 //   旧 LINKS.txt 里可能有 `A → B`，而这一轮 B 又被判定成 C 的副本（B 被删）。
 //   若只按「目标不存在就丢行」处理，A 这条声明会被扔掉 → **A 也失去链接**（连锁断链）。
 //   正确做法：跟着 drop 表把目标一路追到最终真身，写成 `A → C`。

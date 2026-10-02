@@ -179,7 +179,7 @@ public class VsreenBridgeService extends Service {
             previewLp.x = getResources().getDisplayMetrics().widthPixels - dp(260) - dp(24);
             previewLp.y = dp(120);
 
-            // v1.13.12 重做（用户要求）：控件全部挪到**显示区域外面**的边框上，
+            // v1.13.12 重做（用户需求）：控件全部挪到**显示区域外面**的边框上，
             // 形态就是用户截图里的"小条"——一条居中的小圆角短横。
             // 点小条 = 收起到小鲸鱼；销毁功能移进小鲸鱼面板（预览窗上不再放 ✕）。
             LinearLayout shell = new LinearLayout(this);

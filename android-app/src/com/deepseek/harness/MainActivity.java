@@ -160,7 +160,7 @@ public class MainActivity extends Activity {
         "dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-fs-search/",
         // v1.36：账户 UI —— 放开上游的「桌面独占」门禁（apply 首行 `if (!("dshDesktop" in globalThis)) return;`）。
         // 刻意**不注入全局 dshDesktop**：那会让 dsh-client-ui-settings-models 的 API Key 引导消失。
-        // 详见 /sdcard/Download/Operit/dsh_own_app/PATCH-NOTES-account-ui-enable.md
+        // 详见 patches/account-ui-enable/ 与 README 的「来源与许可」一节
         "dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-settings-account/lib/client.js",
         "dshroot/lib/node_modules/@deepseek-ai/dsh/package.json",
         // v1.71：随包分发的**官方技能**（桌宠/文档/手机自动化那套）。
@@ -299,7 +299,7 @@ public class MainActivity extends Activity {
         installCrashHandler();
         checkAbiCompat(); // ② ABI 检测：非 arm64 设备引擎可能无法运行，弹提示
         checkBatteryOptimization(); // ④ 电池优化引导：被限制时提示（挂后台可能被杀）
-        // v1.12：不再在启动时自动检查更新（用户要求）；改为控制台底部的「检查更新」手动触发。
+        // v1.12：不再在启动时自动检查更新（用户需求）；改为控制台底部的「检查更新」手动触发。
 
         webView = new WebView(this);
         WebSettings ws = webView.getSettings();
@@ -996,7 +996,7 @@ public class MainActivity extends Activity {
             // 非 arm64 设备：引擎（node arm64 二进制）无法原生运行，提示但不阻止。
             // 用 Toast 轻提示且只提示一次（SharedPreferences 记录）：原来是模态 AlertDialog，
             // 真机 arm64 根本不会触发，而 x86_64 模拟器上每次切主题/旋转重建 Activity 都弹一次，
-            // 遮住操作还很吵（用户要求改成 Toast 式提示）。
+            // 遮住操作还很吵（用户需求改成 Toast 式提示）。
             // 位宽用 Process.is64Bit() 如实描述（API 23+，minSdk 24 可直接用），别猜。
             SharedPreferences sp = getSharedPreferences(PREFS, MODE_PRIVATE);
             if (sp.getBoolean("abi_warned", false)) return;
@@ -3999,7 +3999,7 @@ public class MainActivity extends Activity {
             }
 
             // v1.13.11：用户文件（settings.yaml / .credentials.yaml）任何模式都只在缺失时写入。
-            // 「重新解压」走的是 mode="internal"（无 skipIfExists 保护）→ 会把模型配置覆盖回开发机模板，
+            // 「重新解压」走的是 mode="internal"（无 skipIfExists 保护）→ 会把模型配置覆盖回内置模板，
             // 这就是「每次重新解压丢配置」的直接原因。
             if (!skipIfExists && isDshhomeUserFile(name) && target.exists()) skipIfExists = true;
 
@@ -4113,8 +4113,8 @@ public class MainActivity extends Activity {
     // dshhome 里随 APK 更新的官方配置文件（凭证 .credentials.yaml、会话数据 storages/ 等不在内）。
     // ⚠ settings.yaml **不在此列**：它存的是用户自己填的模型/供应商配置
     //   （llm-pi-ai.providers.*、agent-default-model 等），属用户数据。
-    //   曾被列在这里 → 每次「重新解压」/覆盖安装都被 APK 里的开发机模板覆盖掉，
-    //   表现为「模型配置莫名为空、要重填」（用户实测报障）。
+    //   曾被列在这里 → 每次「重新解压」/覆盖安装都被 APK 里的内置模板覆盖掉，
+    //   表现为「模型配置莫名为空、要重填」（用户反馈）。
     private static final String[] DSHHOME_CONFIG_PATHS = {
         "dshhome/cordis.patch.yml",
         // ⚠ 0.1.7 起 profiles/<name>/cordis.patch.yml 不再是空壳模板，而是**用户配置文档**：
@@ -4549,8 +4549,7 @@ public class MainActivity extends Activity {
         //      /plugins/events 模块图、含用户个人图的非 index 静态资源），无 cookie 一律 401；
         //   ③ 残余风险只剩"HTTP 明文、令牌在 URL 里" → 所以默认关、由用户显式开启、用完可关。
         // → 现行为：默认仍绑 127.0.0.1；用户显式开启后才绑 0.0.0.0（见紧接下面的 v1.32 分支）。
-        // 当时的实测记录仍在 selfbuild/notes/lan-security.md，但结论以记忆条目
-        // fact-lan-access-implemented 为准。
+        // 详见 selfbuild/notes/lan-security.md。
         // 3181（无障碍）/ 8999（虚拟屏）/ 3081（notify+特权）三个本地桥一如既往固定 127.0.0.1。
         String bindHost = "127.0.0.1";
         java.util.List<String> extraArgs = new java.util.ArrayList<String>();

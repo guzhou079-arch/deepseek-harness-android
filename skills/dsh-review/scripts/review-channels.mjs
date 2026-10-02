@@ -87,7 +87,7 @@ function parseProviders(text) {
 const YMLTEXT = fs.readFileSync(YML, 'utf8');
 const providers = parseProviders(YMLTEXT);
 const totalModels = providers.reduce((n, p) => n + p.models.length, 0);
-// ⚠️ 跨模型会审 2026-10-02 指出：正则解析 YAML 是「靠每层 2 空格」的脆弱假设。
+// ⚠️ 正则解析 YAML 是「靠每层 2 空格」的脆弱假设。
 //    一旦格式变了，脚本会**静默解析出空清单**，然后报「模型不在授权清单」——把人带偏。
 //    → 解析不到东西时**硬失败**，并把「解析到几个 provider / 几个模型」打出来。
 //    但还有一种完全正常的情况：**新装的 App 里根本没有 providers 段**
@@ -160,7 +160,7 @@ for (const e of entries) {
   e.fail = s ? s.fail : null;
   e.empty = s ? s.empty : null;
   e.perCall = e.model ? perCall(e.model) : null;
-  // ⚠️ 会审指出：没查到状态（unknown / 未在监控清单）**不能算通过** ——
+  // ⚠️ 没查到状态（unknown / 未在监控清单）**不能算通过** ——
   //    那只是「未验证」。只有明确 green 才算过；没配监控站时是「静态通过」，
   //    结论里必须写明「运行状态未验证」。
   e.ok = e.entitled && (!hasMonitor || e.status === 'green');

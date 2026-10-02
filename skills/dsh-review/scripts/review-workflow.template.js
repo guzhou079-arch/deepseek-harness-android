@@ -24,8 +24,8 @@ const QUESTION = `<<<TODO-2: 这次要回答的具体问题（越具体越有用
 // ⚠️ 每条通道的 prompt 必须**完全相同**（同题），所以"额外侧面"是**公共常量**，
 //    不是每家各问一句 —— 提示一不同，两份答案就不能严格比较，共识/分歧也算不准。
 const SIDES = [
-  { vendor: 'claude', model: '逆[kiro5-次-0.04￥]claude-opus-5-5' },
-  { vendor: 'gpt', model: '逆[codex1-量-0.2x]gpt-5.6-sol' },
+  { vendor: 'claude', model: '<你的 claude 模型 id>' },
+  { vendor: 'gpt', model: '<你的 gpt 模型 id>' },
   // 第三家（可选）：两家结论相反 / 只有一家提到时最有用
   // { vendor: 'gemini', model: '<gemini id>' },
 ];

@@ -86,7 +86,7 @@ NODEOK=$(env -i HOME="$F" TMPDIR="$F/tmp" LD_LIBRARY_PATH="$ISO/payload/runtime/
   "$ISO/payload/runtime/bin/node" -e 'require("zlib");require("crypto");require("fs");console.log("node-ok")' 2>&1)
 echo "$NODEOK" | grep -q node-ok && ok "node 原生模块正常" || bad "node 起不来：$NODEOK"
 
-# ⚠️ 2026-10-02 加（跨模型会审指出）：光"文件在包里"不等于"技能能用"。
+# ⚠️ 光"文件在包里"不等于"技能能用"。
 #    这里**真的跑一次**随包脚本，任何语法/路径错误都会在这里暴露。
 #    ⚠️ 位置必须在"建链接"**之后** —— 实测：node 自己就依赖 libz.so.1 这个别名，
 #       链接没建之前跑 node 会 CANNOT LINK（这本身也反证了精简确实依赖 LINKS.txt/applyLinks）。
