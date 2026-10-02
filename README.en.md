@@ -6,6 +6,17 @@ packaged as an APK you can simply install.
 **No Termux. No root. No environment setup.** Terminal, file access and command
 execution all run inside the app.
 
+| What you get | |
+|---|---|
+| 🐳 **Floating ball / desktop pet** | Tap it and it "talks": lines, account balance, today's spend, last turn's spend, peak/off-peak pricing hints |
+| ☁️ **Fluid-cloud reply card** | While the AI is writing, a capsule appears at the top; tap to expand into a card, scroll it by hand |
+| 📱 **Phone automation** | Screen reading, taps, typing, notification capture, scheduled tasks, virtual display |
+| 🔧 **Build it on the phone** | javac → dex → pack → sign → release, no PC needed (build environment is an in-app on-demand download) |
+| 🧩 **Bundled skills** | `dsh-mobile` (phone automation) · `doc-tidy` (Office files) · `dsh-review` (cross-vendor model review) |
+
+**Download**: see this repository's **Releases**. GitHub and Gitee are **two peer
+repositories** — same tag, same APK, identical content (neither mirrors the other).
+
 ---
 
 > ## ⚠️ Read before updating — only update from this repository's Releases
