@@ -26,10 +26,11 @@ execution all run inside the app.
 > overwrite an app signed with a different key.
 >
 > If you then choose to *uninstall and reinstall*, **all app-private data is wiped**
-> — session history, runtime environment, settings. It cannot be recovered.
+> — session history, runtime environment, settings. Without a backup it is usually gone for good.
 >
 > **Seeing that error means your data is being protected. Do not uninstall.**
-> Back up first: `sh selfbuild/scripts/backup-dshhome.sh`
+> Back up first: in the app, Console → Rescue → "Export all data"
+> (developers can also use `selfbuild/scripts/backup-dshhome.sh`).
 >
 > Full guide (Chinese) → [docs/升级与救援.md](docs/升级与救援.md)
 
@@ -40,12 +41,12 @@ execution all run inside the app.
 | Part | Origin | License |
 |---|---|---|
 | Android shell skeleton | [woaiys3/deepseek-harness-android-app](https://github.com/woaiys3/deepseek-harness-android-app) | MIT |
-| `@deepseek-ai/dsh` engine | DeepSeek | © DeepSeek |
+| `@deepseek-ai/dsh` engine | [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) | MIT |
 | Virtual display (vscreen) | [AAswordman/Operit](https://github.com/AAswordman/Operit) | LGPL-3.0 |
 
-Released under the **MIT license** — see [`LICENSE`](LICENSE).
-See [README.md](README.md) for the full attribution and license texts
-(`LICENSE`, `licenses/`, `THIRD_PARTY_NOTICES.md`).
+The code added by this project is released under the **MIT license** — see [`LICENSE`](LICENSE).
+Bundled third-party components keep their own licenses (`@deepseek-ai/dsh` is MIT;
+the virtual-display part is LGPL-3.0) — see [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
 ---
 
@@ -60,7 +61,7 @@ So it is an **on-demand download**:
 > **Console → "Build environment"** → pick GitHub or Gitee → ~193MB, verified
 > (sha256, per part *and* whole) and extracted automatically.
 >
-> Both repositories host **the same split archives** — neither is a fallback for the other.
+> Both repositories host **the same split archives**.
 >
 > The archives stay in `/sdcard/DeepSeekHarness/buildenv`, so **reinstalling the app
 > only needs a re-extract, not a re-download**.
