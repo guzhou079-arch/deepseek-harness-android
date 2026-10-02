@@ -19,9 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----
-本仓库包含来自以下项目的部分，版权归其各自作者：
-  · deepseek-harness-android-app (woaiys3) — MIT
-  · Operit (AAswordman) — LGPL-3.0（虚拟屏部分）
-  · @deepseek-ai/dsh (DeepSeek) — 版权归原作者
