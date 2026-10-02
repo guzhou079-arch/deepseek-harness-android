@@ -14,8 +14,7 @@ execution all run inside the app.
 | 🔧 **Build it on the phone** | javac → dex → pack → sign → release, no PC needed (build environment is an in-app on-demand download) |
 | 🧩 **Bundled skills** | `dsh-mobile` (phone automation) · `doc-tidy` (Office files) · `dsh-review` (cross-vendor model review) |
 
-**Download**: see this repository's **Releases**. GitHub and Gitee are **two peer
-repositories** — same tag, same APK, identical content (neither mirrors the other).
+**Download**: see this repository's **Releases** (GitHub and Gitee carry identical content — either one works).
 
 ---
 
