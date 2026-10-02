@@ -16,6 +16,8 @@ execution all run inside the app.
 
 **Download**: see this repository's **Releases** (GitHub and Gitee carry identical content — either one works).
 
+**Docs** (Chinese): [Install & requirements](docs/安装与要求.md) · [Permissions & privacy](docs/权限与隐私.md) · [FAQ](docs/常见问题.md) · [Upgrade & rescue](docs/升级与救援.md) · [Build it yourself](docs/自建环境与出包.md)
+
 ---
 
 > ## ⚠️ Read before updating — only update from this repository's Releases
