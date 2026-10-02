@@ -44,7 +44,7 @@ repositories** — same tag, same APK, identical content (neither mirrors the ot
 | `@deepseek-ai/dsh` engine | DeepSeek | © DeepSeek |
 | Virtual display (vscreen) | [AAswordman/Operit](https://github.com/AAswordman/Operit) | LGPL-3.0 |
 
-This package is provided **free of charge, for non-commercial use**.
+Released under the **MIT license** — see [`LICENSE`](LICENSE).
 See [README.md](README.md) for the full attribution and license texts
 (`LICENSE`, `licenses/`, `THIRD_PARTY_NOTICES.md`).
 

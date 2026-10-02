@@ -7,15 +7,15 @@
 
 ---
 
-## 0. 前置：上游骨架与引擎内核（本项目的来源）
+## 0. 上游骨架与引擎内核（本项目的来源）
 
 | 项 | 内容 |
 |---|---|
 | 安卓壳骨架 | **deepseek-harness-android-app** — 作者 [woaiys3](https://github.com/woaiys3)，仓库 <https://github.com/woaiys3/deepseek-harness-android-app>，**MIT License**，Copyright (c) 2026 woaiys3（本项目在其 WebView + Service 结构、payload 打包、权限引导之上做了大量适配与增强） |
 | 引擎内核 | **@deepseek-ai/dsh**（DeepSeek Harness）— 版权归 **DeepSeek**；本包内含其构建产物，**本项目不对其主张任何权利** |
 
-> MIT 要求保留版权声明与许可文本：本项目 [`LICENSE`](LICENSE) 为**未被改动的 MIT 原文**，
-> 上游骨架与引擎内核的归属集中写在本节（原先曾附在 `LICENSE` 末尾，会干扰 GitHub 的许可证识别）。
+> MIT 要求保留版权声明与许可文本：本项目 [`LICENSE`](LICENSE) 为 MIT 原文；
+> 上游骨架与引擎内核的归属写在本节。
 
 ---
 
