@@ -126,7 +126,7 @@ public class MainActivity extends Activity {
         "dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-host-frontend-static/",
         // v1.30：/plugins/<id>/client.js 与 /plugins/events 的门禁（此前完全无鉴权）。
         // ⚠ 历史教训：v1.28 用「改 inject」的方式做同一件事 → 两个 required 插件激活失败、
-        // 引擎起不来（PATCH-NOTES-v1.28-postmortem.md）。v1.30 换成**懒取 connection**
+        // 引擎起不来。v1.30 换成**懒取 connection**
         // （handler 里 ctx.get("connection")，不改 inject、拿不到就 fail-open），
         // 并已通过 preflight 隔离验证：无 cookie→401、带 cookie→200、无 "connection service unavailable"。
         // 详见 selfbuild/scripts/patch-plugin-auth-lazy.js。
