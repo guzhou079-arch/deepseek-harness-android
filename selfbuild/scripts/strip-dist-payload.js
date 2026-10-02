@@ -35,6 +35,10 @@ const BAD = [
   [/(^|\/)AGENTS\.md$/i, '全局指令'],
   [/(^|\/)\.credentials/i, '登录凭据'],
   [/sessions\/session-|session\.v4\.jsonl/i, '会话数据'],
+  // 2026-10-02 加（跨模型会审指出）：本机的会审配置（监控站地址 / 默认通道）属个人数据，
+  // 它住在 dshhome 根下 —— 别指望"它不在 overlay 里"这种运气。
+  [/(^|\/)review\.json(\..*)?$/i, '本机会审配置'],
+  [/(^|\/)skills-local\//i, '本机私有技能'],
 ];
 
 const es = readZip(zip);

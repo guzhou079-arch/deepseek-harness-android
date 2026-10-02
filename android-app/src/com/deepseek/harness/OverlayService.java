@@ -108,6 +108,10 @@ public class OverlayService extends Service {
     private Button destroyBtn;
     // v1.9 虚拟屏预览：悬浮窗实时显示虚拟屏画面（用户可看 AI 操作）
     private ImageView vscreenImageView = null;
+    // v1.67：面板里的输入框引用（收起面板时要主动还焦点/关输入法/恢复 NOT_FOCUSABLE）
+    private android.widget.EditText chatInputView = null;
+    // v1.67 诊断：当前球上是不是桌宠图（false = 兜底 ic_whale_black）
+    private volatile boolean iconIsPet = false;
     // v1.25 读回复：面板里可滚动的回复区 + 等待/刷新状态
     private android.widget.ScrollView replyScroll = null;
     private TextView replyText = null;
@@ -200,6 +204,9 @@ public class OverlayService extends Service {
         enginePort = enginePort(this);
         wm = pickWindowManager();
         startForegroundCompat();
+        loadPetConfig();   // v1.71：先说 pet.json（球大小/裁剪/台词），再建视图
+        loadBalanceState();   // v1.75：恢复「今日已用」的记账（自然日/起点余额）
+        loadCardPrefs();      // v1.83：用户自己对「流体云」的开关（优先于 pet.json 的默认值）
         buildOverlay();
         addToWindow();
         // v1.54：启动时**默认显示**小鲸鱼。
@@ -246,6 +253,11 @@ public class OverlayService extends Service {
             applyVisibleNow();
             wiggle();
         }
+        // v1.84：通知栏「流体云:开/关」
+        if (intent != null && ACTION_TOGGLE_FLUID.equals(intent.getAction())) {
+            setFluid(!cardAutoShow);
+            try { startForegroundCompat(); } catch (Throwable ignored) {}   // 刷新通知上那行文字
+        }
         // v1.43：通知栏「开关面板」—— 悬浮窗收不到触摸时的固定入口
         if (intent != null && ACTION_TOGGLE_PANEL.equals(intent.getAction())) {
             try {
@@ -273,6 +285,8 @@ public class OverlayService extends Service {
         if (instance == this) instance = null;
         stopVscreenPreview();
         handler.removeCallbacksAndMessages(null);
+        hideBubble();   // v1.71：气泡是第二个窗口，必须一起 remove
+        hideCard();     // v1.77：回复卡是第三个窗口，同样要 remove
         if (rootView != null && wm != null) {
             try { wm.removeView(rootView); } catch (Throwable ignored) {}
         }
@@ -323,6 +337,13 @@ public class OverlayService extends Service {
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         try { b.addAction(new Notification.Action.Builder(null, "开关面板", togglePi).build()); }
         catch (Throwable ignored) {}
+        // v1.84（用户要求）：把「流体云:开/关」也放到通知栏这一排，和小鲸鱼开关在一起
+        Intent fluid = new Intent(this, OverlayService.class);
+        fluid.setAction(ACTION_TOGGLE_FLUID);
+        PendingIntent fluidPi = PendingIntent.getService(this, 3, fluid,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        try { b.addAction(new Notification.Action.Builder(null, fluidLabel(), fluidPi).build()); }
+        catch (Throwable ignored) {}
         return b.setContentTitle("🐋 DeepSeek Harness 运行中")
                 .setContentText("引擎状态：" + (engineUp ? "运行中（端口 " + enginePort + "）" : "未运行"))
                 .setSmallIcon(R.drawable.ic_launcher)
@@ -366,13 +387,1203 @@ public class OverlayService extends Service {
             c.drawBitmap(crop, null, new android.graphics.RectF(0, 0, sizePx, sizePx), p); // 缩放贴入
             p.setXfermode(null);
             p.setStyle(android.graphics.Paint.Style.STROKE);
-            p.setStrokeWidth(Math.max(2f, sizePx * 0.045f));
+            p.setStrokeWidth(Math.max(2f, sizePx * petStrokeRatio));
             p.setColor(0xFFFFFFFF); // 白描边，压在深色壁纸上也能看清轮廓
             c.drawCircle(r, r, r - p.getStrokeWidth() / 2f, p);
             return out;
         } catch (Throwable t) {
             return null;
         }
+    }
+
+    // ===================== v1.71 桌宠：pet.json 驱动 + 台词气泡 =====================
+    //
+    // 设计与决策（2026-09-30 拍板，本版首次实现）见 notes/桌宠加功能-设计与决策-20260930.md：
+    //   · 单击悬浮球 → 吐一句台词（气泡）；点那个气泡 → 展开面板。⛔ 不用双击（半藏小圆上双击＝老"点不中"的坑）。
+    //   · **气泡必须是第二个悬浮窗**：图标窗只有图标那么大，把它撑大后多出来的空白区会吃掉触摸
+    //     —— 正是 v1.60「点不中悬浮球」的同类坑。
+    //   · 🔴 监听**绝不挂在 iconView 上**（见 buildOverlay 里的警告）；气泡是新窗口，挂 OnClickListener 没问题。
+    //   · 配置挂 payload/pet/pet.json（与形象图同目录）→ 改台词/换皮**不用重新出包**。
+    //     ⛔ 形象图不随包（授权仅限本机自用）；pet.json 是我们原创文本，可以随包。
+
+    private volatile boolean petJsonOk = false;
+    private int petBallDp = 40;
+    private int petSample = 4;
+    private float petCropX = 0.45f, petCropY = 0.34f;
+    private float petStrokeRatio = 0.045f;
+    private volatile String[] petLines = {};
+    private int petLineIdx = 0;
+    private int petAutoHideMs = 3000;   // v1.72（用户指定）：3 秒没有下一步动作 → 气泡自动消失；另一点是「点气泡与球以外」
+    private float petMaxWidthFrac = 0.72f;
+    private int petBgColor = 0xE6101A2B, petTextColor = 0xFFFFFFFF;
+    private int petRadiusDp = 12, petPadHdp = 10, petPadVdp = 7, petGapDp = 8;
+    private String petOnBubble = "panel";
+
+    private TextView bubbleView = null;
+    private WindowManager.LayoutParams bubbleLp = null;
+    private boolean bubbleVisible = false;
+    // v1.73：气泡相对球窗的偏移（拖动时靠它跟随，不必每帧重量尺寸）
+    private int bubbleDx = 0, bubbleDy = 0;
+    private final Handler bubbleHandler = new Handler(Looper.getMainLooper());
+    private final Runnable bubbleHider = new Runnable() {
+        @Override public void run() { hideBubble(); }
+    };
+
+    /** 读 payload/pet/pet.json。**任何异常都回退内置默认值** —— 配置坏了不能连累悬浮球。 */
+    private void loadPetConfig() {
+        try {
+            java.io.File f = new java.io.File(getFilesDir(), "payload/pet/pet.json");
+            if (!f.exists()) return;
+            JSONObject o = new JSONObject(readFileUtf8(f));
+            JSONObject ap = o.optJSONObject("appearance");
+            if (ap != null) {
+                petBallDp = Math.max(24, ap.optInt("ballDp", petBallDp));
+                petSample = Math.max(1, ap.optInt("sample", petSample));
+                petCropX = (float) ap.optDouble("cropCenterX", petCropX);
+                petCropY = (float) ap.optDouble("cropCenterY", petCropY);
+                petStrokeRatio = (float) ap.optDouble("strokeRatio", petStrokeRatio);
+            }
+            JSONObject tp = o.optJSONObject("tap");
+            if (tp != null) {
+                petAutoHideMs = tp.optInt("bubbleAutoHideMs", petAutoHideMs);
+                petOnBubble = tp.optString("onBubble", petOnBubble);
+            }
+            JSONObject bb = o.optJSONObject("bubble");
+            if (bb != null) {
+                petMaxWidthFrac = (float) bb.optDouble("maxWidthFrac", petMaxWidthFrac);
+                petBgColor = parseColorSafe(bb.optString("bgColor", ""), petBgColor);
+                petTextColor = parseColorSafe(bb.optString("textColor", ""), petTextColor);
+                petRadiusDp = bb.optInt("radiusDp", petRadiusDp);
+                petPadHdp = bb.optInt("padHdp", petPadHdp);
+                petPadVdp = bb.optInt("padVdp", petPadVdp);
+                petGapDp = bb.optInt("gapDp", petGapDp);
+            }
+            org.json.JSONArray ls = o.optJSONArray("lines");
+            if (ls != null && ls.length() > 0) {
+                String[] arr = new String[ls.length()];
+                for (int i = 0; i < ls.length(); i++) arr[i] = ls.optString(i, "");
+                petLines = arr;
+            }
+            org.json.JSONArray bs = o.optJSONArray("bubbles");
+            if (bs != null && bs.length() > 0) {
+                java.util.ArrayList<String> seq = new java.util.ArrayList<String>();
+                for (int i = 0; i < bs.length(); i++) {
+                    JSONObject b = bs.optJSONObject(i);
+                    if (b == null) continue;
+                    String kind = b.optString("kind", "line");
+                    int w = Math.max(1, Math.min(20, b.optInt("weight", 1)));
+                    for (int j = 0; j < w; j++) seq.add(kind);
+                }
+                if (!seq.isEmpty()) bubbleSeq = seq.toArray(new String[0]);
+            }
+            JSONObject bal = o.optJSONObject("balance");
+            if (bal != null) {
+                balanceEndpoint = bal.optString("endpoint", balanceEndpoint);
+                balanceKeyRef = bal.optString("keyRef", balanceKeyRef);
+                balanceRefreshSec = Math.max(30, bal.optInt("refreshSec", balanceRefreshSec));
+                balanceLowWarn = bal.optDouble("lowWarn", balanceLowWarn);
+                balanceDayBudget = bal.optDouble("dayBudget", balanceDayBudget);
+            }
+            JSONObject pr = o.optJSONObject("pricing");
+            if (pr != null) {
+                pricingTz = pr.optString("tz", pricingTz);
+                org.json.JSONArray ws = pr.optJSONArray("peakWindows");
+                if (ws != null && ws.length() > 0) {
+                    java.util.ArrayList<String[]> tmp = new java.util.ArrayList<String[]>();
+                    for (int i = 0; i < ws.length(); i++) {
+                        org.json.JSONArray w = ws.optJSONArray(i);
+                        if (w != null && w.length() >= 2) tmp.add(new String[]{w.optString(0), w.optString(1)});
+                    }
+                    if (!tmp.isEmpty()) pricingPeakWindows = tmp.toArray(new String[tmp.size()][]);
+                }
+                org.json.JSONArray hs = pr.optJSONArray("holidays");
+                if (hs != null) {
+                    String[] arr = new String[hs.length()];
+                    for (int i = 0; i < hs.length(); i++) arr[i] = hs.optString(i, "");
+                    pricingHolidays = arr;
+                }
+            }
+            JSONObject cd = o.optJSONObject("card");
+            if (cd != null) {
+                cardMaxWidthFrac = (float) cd.optDouble("maxWidthFrac", cardMaxWidthFrac);
+                cardMaxHeightFrac = (float) cd.optDouble("maxHeightFrac", cardMaxHeightFrac);
+                cardRadiusDp = cd.optInt("radiusDp", cardRadiusDp);
+                cardGapDp = cd.optInt("gapDp", cardGapDp);
+                cardBgTop = parseColorSafe(cd.optString("bgTop", ""), cardBgTop);
+                cardBgBottom = parseColorSafe(cd.optString("bgBottom", ""), cardBgBottom);
+                cardTextColor = parseColorSafe(cd.optString("textColor", ""), cardTextColor);
+                cardHoldMs = cd.optInt("holdMs", cardHoldMs);
+                cardPollMs = Math.max(400, cd.optInt("pollMs", cardPollMs));
+                cardAtTop = cd.optBoolean("atTop", cardAtTop);
+                cardTopOffsetDp = cd.optInt("topOffsetDp", cardTopOffsetDp);
+                cardSideMarginDp = cd.optInt("sideMarginDp", cardSideMarginDp);
+                cardAutoShow = cd.optBoolean("autoShow", cardAutoShow);
+                cardGuiPollMs = Math.max(800, cd.optInt("guiPollMs", cardGuiPollMs));
+                cardShowClose = cd.optBoolean("showClose", cardShowClose);
+                cardAnimMs = Math.max(80, cd.optInt("animMs", cardAnimMs));
+                cardRiseDp = cd.optInt("riseDp", cardRiseDp);
+                cardCapsule = cd.optBoolean("capsule", cardCapsule);
+                cardCapsuleMaxWidthDp = cd.optInt("capsuleMaxWidthDp", cardCapsuleMaxWidthDp);
+                cardExpandOnTap = cd.optBoolean("expandOnTap", cardExpandOnTap);
+                cardDismissOnOutside = cd.optBoolean("dismissOnOutside", cardDismissOnOutside);
+            }
+            petJsonOk = true;
+            logVis("pet.json ok: lines=" + petLines.length + " ballDp=" + petBallDp
+                    + " crop=" + petCropX + "," + petCropY + " autoHide=" + petAutoHideMs);
+        } catch (Throwable t) {
+            logVis("pet.json load failed: " + t);
+        }
+    }
+
+    private static String readFileUtf8(java.io.File f) throws Exception {
+        java.io.FileInputStream in = new java.io.FileInputStream(f);
+        try {
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) > 0) bos.write(buf, 0, n);
+            return new String(bos.toByteArray(), "UTF-8");
+        } finally {
+            try { in.close(); } catch (Throwable ignored) {}
+        }
+    }
+
+    private static int parseColorSafe(String s, int def) {
+        try { return (s == null || s.isEmpty()) ? def : android.graphics.Color.parseColor(s); }
+        catch (Throwable t) { return def; }
+    }
+
+    /**
+     * v1.71：单击悬浮球。
+     * 面板开着 → 收面板（保留一条**触摸**出口，因为「收起」现在只收那块长的对话区，不再关面板）；
+     * 面板没开 → 吐一句台词气泡。
+     */
+    private void onBallTap() {
+        try {
+            if (panelVisible) {
+                ballTucked = true;   // 点球收面板 = 回静置半藏（v1.69 的老手感）
+                setPanelVisible(false, true);
+                return;
+            }
+            showBubble(nextBubbleText());
+        } catch (Throwable ignored) {}
+    }
+
+    private String nextPetLine() {
+        try {
+            if (petLines.length == 0) return "我在。";
+            String s = petLines[petLineIdx % petLines.length];
+            petLineIdx++;
+            return s;
+        } catch (Throwable t) {
+            return "我在。";
+        }
+    }
+
+    // ===================== v1.74 阶段 2：余额泡泡 =====================
+    // 设计出处：9-30 文档「bubbles[] 并列加权（台词 / 余额 / 今日 / 峰谷 / 图片）」的第一种非文本泡泡。
+    // 数据源：$DSH_HOME/.credentials.yaml 的 refs.<keyRef>（默认 DEEPSEEK_API_KEY）
+    //         → GET https://api.deepseek.com/user/balance（Authorization: Bearer <key>）。
+    // ⛔ 钥匙只在本进程内存里用：**不写日志、不进任何随包文件**；泡泡上只显示金额本身。
+
+    private volatile String[] bubbleSeq = {"line", "line", "line", "balance"};  // 加权展开后的序列
+    private int bubbleSeqIdx = 0;
+    private volatile String balanceEndpoint = "https://api.deepseek.com/user/balance";
+    private volatile String balanceKeyRef = "DEEPSEEK_API_KEY";
+    private volatile int balanceRefreshSec = 300;
+    private volatile double balanceLowWarn = 10;
+    private volatile String balanceText = null;     // 已格式化文案（null=还没查到）
+    private volatile long balanceAt = 0L;
+    private volatile boolean balanceFetching = false;
+
+    /** 按 bubbles[] 加权选下一条泡泡内容。**不阻塞**：余额用缓存，过期了在后台刷。 */
+    private String nextBubbleText() {
+        try {
+            if (bubbleSeq.length == 0) return nextPetLine();
+            String kind = bubbleSeq[bubbleSeqIdx % bubbleSeq.length];
+            bubbleSeqIdx++;
+            if ("balance".equals(kind)) return balanceBubbleText();
+            if ("today".equals(kind)) return todaySpentText();
+            if ("turn".equals(kind)) return turnSpentText();
+            if ("peak".equals(kind)) return peakBubbleText();
+            return nextPetLine();
+        } catch (Throwable t) {
+            return nextPetLine();
+        }
+    }
+
+    private String balanceBubbleText() {
+        long age = System.currentTimeMillis() - balanceAt;
+        if (balanceAt == 0L || age > balanceRefreshSec * 1000L) fetchBalanceAsync(false);
+        if (balanceText != null && !balanceText.isEmpty()) return balanceText;
+        return balanceFetching ? "余额查询中…" : "余额没查到（网络或钥匙）";
+    }
+
+    private void fetchBalanceAsync(boolean force) {
+        if (balanceFetching) return;
+        if (!force && balanceAt != 0L
+                && System.currentTimeMillis() - balanceAt <= balanceRefreshSec * 1000L) return;   // 缓存还新
+        balanceFetching = true;
+        new Thread(new Runnable() { @Override public void run() {
+            String txt = null;
+            try {
+                String key = readCredentialRef(balanceKeyRef);
+                if (key == null || key.isEmpty()) {
+                    logVis("balance: 没有钥匙引用 " + balanceKeyRef);
+                } else {
+                    java.net.HttpURLConnection c = (java.net.HttpURLConnection)
+                            new URL(balanceEndpoint).openConnection();
+                    c.setRequestMethod("GET");
+                    c.setRequestProperty("Authorization", "Bearer " + key);
+                    c.setConnectTimeout(10000);
+                    c.setReadTimeout(15000);
+                    int code = c.getResponseCode();
+                    if (code == 200) {
+                        JSONObject o = new JSONObject(readStreamUtf8(c.getInputStream()));
+                        org.json.JSONArray infos = o.optJSONArray("balance_infos");
+                        if (infos != null && infos.length() > 0) {
+                            JSONObject b = infos.optJSONObject(0);
+                            String cur = b.optString("currency", "CNY");
+                            String sym = "CNY".equals(cur) ? "¥" : (cur + " ");
+                            double total = Double.parseDouble(b.optString("total_balance", "0"));
+                            if (!"CNY".equals(cur)) { txt = "余额 " + sym + String.format(java.util.Locale.US, "%.2f", total); }
+                            else { txt = applyBalance(total); }   // v1.75：跨天重置/持久化/本轮结算都在里面
+                        }
+                    } else {
+                        logVis("balance: http " + code);
+                    }
+                    try { c.disconnect(); } catch (Throwable ignored) {}
+                }
+            } catch (Throwable t) {
+                logVis("balance 查询失败: " + t);   // ⚠️ 只记异常，绝不记 key
+            }
+            if (txt != null) { balanceText = txt; balanceAt = System.currentTimeMillis(); }
+            balanceFetching = false;
+        }}, "ovl-balance").start();
+    }
+
+    private static String readStreamUtf8(java.io.InputStream in) throws Exception {
+        try {
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            byte[] buf = new byte[4096];
+            int n;
+            while ((n = in.read(buf)) > 0) bos.write(buf, 0, n);
+            return new String(bos.toByteArray(), "UTF-8");
+        } finally {
+            try { in.close(); } catch (Throwable ignored) {}
+        }
+    }
+
+    // ===================== v1.75 阶段 3：今日已用 / 上一轮消耗 =====================
+    // ⚠️ 口径（必须诚实，不许写成精确账单）：余额只有**我们查的时候**才知道，
+    //    所以「今日已用」是**按余额差估算**；「上一轮」只统计**从球里发出去**的那一轮
+    //    （GUI 里发的轮次没有起点，不计）。
+    private static final String PREF_BAL_DAY = "ovl_bal_day";   // 记账日（本地时区 yyyy-MM-dd）
+    private static final String PREF_BAL_REF = "ovl_bal_ref";   // 当日起点余额
+    private volatile String balDay = null;
+    private volatile double balRef = -1;
+    private volatile double balLast = -1;
+    private volatile double turnPre = -1;     // 本轮开始前记下的余额
+    private volatile double turnSpent = -1;   // 上一轮消耗
+    private volatile boolean turnArmed = false;
+
+    // ===================== v1.76 阶段 4：峰谷时段 + 预算预警 =====================
+    // 官方口径（2026-10-02 抓 https://api-docs.deepseek.com/quick_start/pricing 核实）：
+    //   高峰 = UTC 01:00-04:00 与 06:00-10:00 的**周一至周五**（不含中国法定节假日）；
+    //   其余全部空闲（周末与节假日**整日**空闲）。北京时间(UTC+8) → 09:00-12:00 与 14:00-18:00。
+    // ⛔ 时段一律从 pet.json 读，**别在代码里写死**（官方会调整，节假日表我们也不掌握）。
+    private volatile String pricingTz = "Asia/Shanghai";
+    private volatile String[][] pricingPeakWindows = {{"09:00", "12:00"}, {"14:00", "18:00"}};
+    private volatile String[] pricingHolidays = {};
+    private volatile double balanceDayBudget = 0;   // 0 = 不预警
+
+    private static int hm2min(String hm) {
+        try {
+            String[] p = hm.split(":");
+            return Integer.parseInt(p[0].trim()) * 60 + Integer.parseInt(p[1].trim());
+        } catch (Throwable t) {
+            return -1;
+        }
+    }
+
+    private java.util.Calendar nowInPricingTz() {
+        return java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone(pricingTz));
+    }
+
+    /** 现在是高峰吗？（周末与配置里的节假日整日算空闲） */
+    private boolean isPeakNow() {
+        try {
+            java.util.Calendar c = nowInPricingTz();
+            int dow = c.get(java.util.Calendar.DAY_OF_WEEK);
+            if (dow == java.util.Calendar.SATURDAY || dow == java.util.Calendar.SUNDAY) return false;
+            String ymd = String.format(java.util.Locale.US, "%04d-%02d-%02d",
+                    c.get(java.util.Calendar.YEAR),
+                    c.get(java.util.Calendar.MONTH) + 1,
+                    c.get(java.util.Calendar.DAY_OF_MONTH));
+            for (String h : pricingHolidays) if (ymd.equals(h)) return false;
+            int mins = c.get(java.util.Calendar.HOUR_OF_DAY) * 60 + c.get(java.util.Calendar.MINUTE);
+            for (String[] w : pricingPeakWindows) {
+                int a = hm2min(w[0]), b = hm2min(w[1]);
+                if (a < 0 || b < 0) continue;
+                if (a <= b ? (mins >= a && mins < b) : (mins >= a || mins < b)) return true;
+            }
+        } catch (Throwable ignored) {}
+        return false;
+    }
+
+    /** 下一次切换时刻（定价时区 HH:MM）；今天没有了就返回空串。 */
+    private String nextSwitchHm() {
+        try {
+            java.util.Calendar c = nowInPricingTz();
+            int mins = c.get(java.util.Calendar.HOUR_OF_DAY) * 60 + c.get(java.util.Calendar.MINUTE);
+            int best = Integer.MAX_VALUE;
+            for (String[] w : pricingPeakWindows) {
+                for (String b : new String[]{w[0], w[1]}) {
+                    int m = hm2min(b);
+                    if (m > mins && m < best) best = m;
+                }
+            }
+            if (best == Integer.MAX_VALUE) return "";
+            return String.format(java.util.Locale.US, "%02d:%02d", best / 60, best % 60);
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
+    /** 泡泡：现在高峰还是空闲 + 下一次切换。 */
+    private String peakBubbleText() {
+        boolean peak = isPeakNow();
+        String t = peak ? "现在高峰（全价）" : "现在空闲（半价）";
+        String nx = nextSwitchHm();
+        if (!nx.isEmpty()) t += "，" + nx + " 转" + (peak ? "空闲" : "高峰");
+        return t;
+    }
+
+    // ===================== v1.77 阶段 5：流体云式回复卡（逐字流式） =====================
+    // 设计出处：9-30 文档「流体云 —— 只做视觉仿」。视觉取自 /sdcard/Download/fluidcard-mock/index.html：
+    //   品牌蓝 #4D6BFE、深蓝渐变卡面、大圆角、闪烁光标；原稿的 backdrop-filter 模糊在 Android 悬浮窗上
+    //   **做不了真模糊**（那要模糊"身后的东西"）→ 这里用半透明渐变近似，别写"已实现模糊"。
+    // ⚠️「逐字」的实现方式：引擎是**边生成边往会话文件落盘**的，所以我们用**密集轮询**（默认 1.2s）
+    //   把快照一次次贴到卡片上 —— 不是 SSE/真流式。轮询要跑 node 解压会话文件，**有 CPU 代价**，
+    //   所以：只在卡片可见时密集轮询、连续两次读到的内容不再变长就收尾（上限 40 次）。
+
+    private LinearLayout cardView = null;
+    private TextView cardText = null;
+    private MaxHeightScrollView cardScroll = null;
+    // v1.89（用户实测）：手动往上翻时**不要**被自动下滑拽回去
+    private volatile boolean cardUserTouching = false;   // 手指还在卡上
+    private volatile boolean cardFollowTail = true;      // 是否"跟着最新内容走"（翻上去后暂停，滑回底部恢复）   // v1.88：限高 + 自动往下滚（用户报"文字停在这、后面直接省略号"）
+    private WindowManager.LayoutParams cardLp = null;
+    private boolean cardVisible = false;
+    private String lastStreamText = null;
+    private int streamAttempts = 0;
+    private String cardBody = "";
+    private boolean cursorOn = true;
+    private volatile boolean cardStreaming = false;
+    private volatile int cardPollMs = 1200;
+    private volatile int cardHoldMs = 6000;
+    private volatile float cardMaxWidthFrac = 0.78f, cardMaxHeightFrac = 0.32f;
+    private volatile int cardRadiusDp = 20, cardGapDp = 10;
+    private volatile int cardBgTop = 0xF2141B2E, cardBgBottom = 0xF20B0F1A, cardTextColor = 0xFFCFD8EA;
+    private volatile boolean cardAtTop = true;          // v1.78：默认贴顶部状态栏下沿（草图口径）
+    private volatile int cardTopOffsetDp = 34, cardSideMarginDp = 12;
+    private TextView cardState = null;                  // 头部右上角状态字（生成中 / 已完成）
+    private ImageView cardAvatar = null;
+    private View cardProg = null;
+    // v1.79（用户选 A）：不管消息从 GUI 还是从球里发出去，只要 AI 在写就飘卡。
+    private volatile boolean cardAutoShow = true;
+    private volatile int cardGuiPollMs = 1500;
+    private volatile String streamSessionId = null;
+    // v1.83（用户报"没新内容也循环播报上一条"）：记住已播报过的内容 + 防重入 + 开关持久化
+    private volatile String lastBroadcastHash = null;   // v1.84：内容指纹（String.valueOf(t.hashCode())）
+    private volatile boolean cardBroadcasting = false;
+    private static final String PREF_FLUID = "ovl_fluid";
+    private static final String PREF_LAST_BCAST = "ovl_last_bcast";   // v1.84：已播报内容的指纹（持久化）
+    /** v1.84：通知栏上的「流体云:开/关」动作（用户要求与小鲸鱼开关放一起）。 */
+    private static final String ACTION_TOGGLE_FLUID = "com.deepseek.harness.overlay.TOGGLE_FLUID";
+    private Button fluidBtn = null;
+    // v1.80（用户指定）：流体感（向上升入）+ 关闭键 + 顶到电量那一栏
+    private volatile boolean cardShowClose = true;
+    private volatile int cardAnimMs = 240;
+    private volatile int cardRiseDp = 30;
+    // v1.81（用户给的参考 = 酷狗音乐流体云）：**两态** —— 状态栏小胶囊 ↔ 点开成卡片 ↔ 点别处消失
+    private volatile boolean cardCapsule = true;
+    private volatile int cardCapsuleMaxWidthDp = 170;
+    private volatile boolean cardExpandOnTap = true;
+    private volatile boolean cardDismissOnOutside = true;
+    private LinearLayout capsuleRow = null;      // 收起态：小胶囊（头像 + 短状态）
+    private TextView capsuleText = null;
+    private LinearLayout cardFull = null;        // 展开态：整张卡（头部 + 正文 + 进度条）
+    private volatile boolean cardExpanded = false;
+    private volatile long cardShownAt = 0L;   // v1.85：卡片亮起的时刻（用于过滤"刚亮就被摸掉"）
+    private final Handler cardHandler = new Handler(Looper.getMainLooper());
+    private final Runnable cardHider = new Runnable() { @Override public void run() { hideCard(); } };
+    private final Runnable cursorBlink = new Runnable() {
+        @Override public void run() {
+            try {
+                if (!cardVisible || cardText == null) return;
+                cursorOn = !cursorOn;
+                renderCardText();
+                cardHandler.postDelayed(this, 500);
+            } catch (Throwable ignored) {}
+        }
+    };
+
+    /** 起一张流式回复卡（发送成功后调用）。 */
+    private void showCard(String initial) {
+        try {
+            if (cardView == null) {
+                cardView = new LinearLayout(this);
+                cardView.setOrientation(LinearLayout.VERTICAL);
+                // ---- 收起态：小胶囊（头像 + 短状态），点它展开 ----
+                capsuleRow = new LinearLayout(this);
+                capsuleRow.setOrientation(LinearLayout.HORIZONTAL);
+                capsuleRow.setGravity(Gravity.CENTER_VERTICAL);
+                ImageView cav = new ImageView(this);
+                android.graphics.Bitmap cb = loadPetIcon(dp(18));
+                if (cb != null) cav.setImageBitmap(cb);
+                else cav.setImageResource(R.drawable.ic_whale_black);
+                LinearLayout.LayoutParams calp = new LinearLayout.LayoutParams(dp(18), dp(18));
+                calp.rightMargin = dp(6);
+                cav.setLayoutParams(calp);
+                capsuleRow.addView(cav);
+                capsuleText = new TextView(this);
+                capsuleText.setTextColor(cardTextColor);
+                capsuleText.setTextSize(TypedValue.COMPLEX_UNIT_PX,
+                        getResources().getDimension(R.dimen.text_caption));
+                capsuleText.setMaxLines(1);
+                capsuleText.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                capsuleText.setMaxWidth(dp(cardCapsuleMaxWidthDp));
+                capsuleText.setText("生成中…");
+                capsuleRow.addView(capsuleText);
+                capsuleRow.setOnClickListener(new View.OnClickListener() {
+                    @Override public void onClick(View v) { if (cardExpandOnTap) expandCard(); }
+                });
+                cardView.addView(capsuleRow);
+                cardFull = new LinearLayout(this);
+                cardFull.setOrientation(LinearLayout.VERTICAL);
+                cardView.addView(cardFull);
+                cardFull.setVisibility(View.GONE);
+                // 点"别处"→ 消失（参考里的行为；与气泡同一个坑：带 WATCH_OUTSIDE_TOUCH 还得自己写 ACTION_OUTSIDE）
+                cardView.setOnTouchListener(new View.OnTouchListener() {
+                    @Override public boolean onTouch(View v, MotionEvent ev) {
+                        if (ev.getAction() == MotionEvent.ACTION_OUTSIDE) {
+                            // ⚠️ v1.85 实测：本机的 ACTION_OUTSIDE **不是"用户点了别处"** ——
+                            //   用户只要在屏幕上任何地方碰一下（滚动/打字/看消息），我们的窗就会收到它；
+                            //   而且坐标常常是 (0,0)。上一版照单全收，于是卡片刚飘起来就被自己的手指秒关，
+                            //   用户看到的现象就是"压根没看到流体云"（日志：card show 后 0.1~0.2s 必有一条 outside-hide）。
+                            //   ⇒ 只认"**坐标真实** 且 **卡片已经亮了 1.5 秒以上**"的窗外点击，其余忽略。
+                            boolean real = (ev.getRawX() != 0f || ev.getRawY() != 0f);
+                            boolean settled = (System.currentTimeMillis() - cardShownAt) > 1500L;
+                            if (cardVisible && cardDismissOnOutside && real && settled) {
+                                logVis("card outside-tap -> hide at(" + (int) ev.getRawX() + "," + (int) ev.getRawY() + ")");
+                                hideCard();
+                            } else {
+                                logVis("card outside-ignored real=" + real + " settled=" + settled);
+                            }
+                            return true;
+                        }
+                        return false;
+                    }
+                });
+                // v1.78：按草图做"一眼认得出"的流体云卡 —— 头部（品牌点+标题+状态）+ 正文行（桌宠头像+文字+光标）+ 品牌色进度条
+                LinearLayout head = new LinearLayout(this);
+                head.setOrientation(LinearLayout.HORIZONTAL);
+                head.setGravity(Gravity.CENTER_VERTICAL);
+                View dot = new View(this);
+                GradientDrawable dg = new GradientDrawable();
+                dg.setColor(0xFF4D6BFE);
+                dg.setCornerRadius(dp(4));
+                dot.setBackground(dg);
+                LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(dp(8), dp(8));
+                dlp.rightMargin = dp(7);
+                dot.setLayoutParams(dlp);
+                head.addView(dot);
+                TextView title = new TextView(this);
+                title.setText("DSH 桌宠");
+                title.setTextColor(0xFF9DB4FF);
+                title.setTextSize(TypedValue.COMPLEX_UNIT_PX, getResources().getDimension(R.dimen.text_caption));
+                title.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+                head.addView(title);
+                cardState = new TextView(this);
+                cardState.setTextColor(0xFF8B98A9);
+                cardState.setTextSize(TypedValue.COMPLEX_UNIT_PX, getResources().getDimension(R.dimen.text_caption));
+                cardState.setText("生成中");
+                head.addView(cardState);
+                if (cardShowClose) {
+                    // v1.80（用户指定）：**手动关闭键** —— 之前卡片只能等自己超时，用户明确说"无法关闭"。
+                    TextView close = new TextView(this);
+                    close.setText("✕");
+                    close.setTextColor(0xFFB9C6E8);
+                    close.setTextSize(TypedValue.COMPLEX_UNIT_PX,
+                            getResources().getDimension(R.dimen.text_caption));
+                    LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(dp(26), dp(26));
+                    clp.leftMargin = dp(6);
+                    close.setLayoutParams(clp);
+                    close.setGravity(Gravity.CENTER);
+                    close.setOnClickListener(new View.OnClickListener() {
+                        @Override public void onClick(View v) { collapseCard(); }   // v1.87：✕ = 收回胶囊，不是关掉整个流体云
+                    });
+                    head.addView(close);
+                }
+                head.setPadding(0, 0, 0, dp(7));
+                cardFull.addView(head);
+
+                LinearLayout body = new LinearLayout(this);
+                body.setOrientation(LinearLayout.HORIZONTAL);
+                cardAvatar = new ImageView(this);
+                android.graphics.Bitmap av = loadPetIcon(dp(26));
+                if (av != null) cardAvatar.setImageBitmap(av);
+                else cardAvatar.setImageResource(R.drawable.ic_whale_black);
+                LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(dp(26), dp(26));
+                alp.rightMargin = dp(9);
+                cardAvatar.setLayoutParams(alp);
+                body.addView(cardAvatar);
+                cardText = new TextView(this);
+                cardText.setTextColor(cardTextColor);
+                cardText.setTextSize(TypedValue.COMPLEX_UNIT_PX,
+                        getResources().getDimension(R.dimen.text_caption));
+                cardText.setLineSpacing(dp(2), 1f);
+                cardText.setLayoutParams(new android.widget.FrameLayout.LayoutParams(
+                        android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                        android.widget.FrameLayout.LayoutParams.WRAP_CONTENT));
+                cardScroll = new MaxHeightScrollView(this);
+                cardScroll.setMaxPx((int) (getResources().getDisplayMetrics().heightPixels * cardMaxHeightFrac));
+                cardScroll.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+                cardScroll.setVerticalScrollBarEnabled(false);
+                cardScroll.setOnTouchListener(new View.OnTouchListener() {
+                    @Override public boolean onTouch(View v, MotionEvent ev) {
+                        int a = ev.getAction();
+                        if (a == MotionEvent.ACTION_DOWN) {
+                            cardUserTouching = true;
+                        } else if (a == MotionEvent.ACTION_UP || a == MotionEvent.ACTION_CANCEL) {
+                            cardUserTouching = false;
+                            cardFollowTail = isCardAtBottom();   // 滑回底部才恢复"跟随最新"
+                        }
+                        return false;   // 让 ScrollView 自己滚
+                    }
+                });
+                cardScroll.addView(cardText);
+                body.addView(cardScroll);
+                cardFull.addView(body);
+
+                cardProg = new View(this);
+                GradientDrawable pg = new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
+                        new int[]{0xFF4D6BFE, 0xFF9DB4FF});
+                pg.setCornerRadius(dp(1));
+                cardProg.setBackground(pg);
+                LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, dp(2));
+                plp.topMargin = dp(9);
+                cardProg.setLayoutParams(plp);
+                cardProg.setAlpha(0.25f);
+                cardFull.addView(cardProg);
+            }
+            cardBody = initial == null ? "" : initial;
+            cardShownAt = System.currentTimeMillis();
+            cardFollowTail = true;    // v1.89：新飘一次 → 重新跟随
+            cardUserTouching = false;
+            cardExpanded = false;                       // v1.81：每次飘起来都是小胶囊，点它才展开
+            if (cardFull != null) cardFull.setVisibility(View.GONE);
+            if (capsuleRow != null) capsuleRow.setVisibility(View.VISIBLE);
+            streamAttempts = 0;
+            lastStreamText = null;
+            cardStreaming = true;
+            cursorOn = true;
+            GradientDrawable bg = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                    new int[]{cardBgTop, cardBgBottom});
+            bg.setCornerRadius(dp(cardRadiusDp));
+            bg.setStroke(dp(1), 0x334D6BFE);   // 品牌蓝细边（原稿的 border）
+            cardView.setBackground(bg);
+            cardView.setPadding(dp(12), dp(9), dp(12), dp(9));
+            renderCardText();
+
+            int screenW = getResources().getDisplayMetrics().widthPixels;
+            int screenH = getResources().getDisplayMetrics().heightPixels;
+            cardText.setMaxWidth(Math.max(dp(140), (int) (screenW * cardMaxWidthFrac) - dp(24)));
+            // v1.88：不再截断成"…" —— 交给限高 ScrollView，超出的部分往下滚（用户要求"自下滑"）
+            cardText.setMaxLines(Integer.MAX_VALUE);
+            cardText.setEllipsize(null);
+            if (cardScroll != null) {
+                cardScroll.setMaxPx((int) (getResources().getDisplayMetrics().heightPixels * cardMaxHeightFrac));
+            }
+
+            cardLp = new WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.WRAP_CONTENT,
+                    WindowManager.LayoutParams.WRAP_CONTENT,
+                    overlayWindowType(),
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                            | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                            | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+                            | WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+                    PixelFormat.TRANSLUCENT);
+            // v1.82：**水平居中**（用户明确说"不曾居中"）—— 交给 gravity，别手算 x
+            cardLp.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
+            positionCard();
+
+            if (!cardVisible) {
+                wm.addView(cardView, cardLp);
+                cardVisible = true;
+            } else {
+                try { wm.updateViewLayout(cardView, cardLp); } catch (Throwable ignored) {}
+            }
+            cardHandler.removeCallbacks(cardHider);
+            cardHandler.removeCallbacks(cursorBlink);
+            cardHandler.postDelayed(cursorBlink, 500);
+            // v1.80：流体感 —— 从下方"升"到位（用户原话"向上升"）+ 轻微放大回弹
+            try {
+                cardView.setAlpha(0f);
+                cardView.setTranslationY(dp(cardRiseDp));
+                cardView.setScaleX(0.94f);
+                cardView.setScaleY(0.94f);
+                cardView.animate().alpha(1f).translationY(0f).scaleX(1f).scaleY(1f)
+                        .setDuration(cardAnimMs)
+                        .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                        .start();
+            } catch (Throwable ignored) {}
+            logVis("card show");
+        } catch (Throwable t) {
+            logVis("card show failed: " + t);
+        }
+    }
+
+    /**
+     * v1.87（用户要求）：**✕ = 收回胶囊形态**，不再整个关掉。
+     * （用户原话："怎么点取消是关掉整个流体云，把他改成为恢复胶囊形态"）
+     * 整个关掉仍然有两条路：①"点别处"（护栏：坐标真实 + 已亮 >1.5s）②开/关按钮（面板与通知栏各一份）。
+     */
+    private void collapseCard() {
+        try {
+            cardExpanded = false;
+            if (cardFull != null) cardFull.setVisibility(View.GONE);
+            if (capsuleRow != null) capsuleRow.setVisibility(View.VISIBLE);
+            if (cardLp != null) {
+                cardLp.width = WindowManager.LayoutParams.WRAP_CONTENT;
+                try { wm.updateViewLayout(cardView, cardLp); } catch (Throwable ignored) {}
+            }
+            logVis("card collapse -> capsule");
+        } catch (Throwable ignored) {}
+    }
+
+    /** v1.81：小胶囊 → 展开成卡片（参考里"点胶囊变卡片"）。 */
+    private void expandCard() {
+        try {
+            if (cardExpanded) return;
+            cardExpanded = true;
+            if (cardFull != null) cardFull.setVisibility(View.VISIBLE);
+            if (capsuleRow != null) capsuleRow.setVisibility(View.GONE);
+            int screenW = getResources().getDisplayMetrics().widthPixels;
+            if (cardLp != null) {
+                cardLp.width = screenW - dp(cardSideMarginDp) * 2;
+                cardLp.height = WindowManager.LayoutParams.WRAP_CONTENT;
+                try { wm.updateViewLayout(cardView, cardLp); } catch (Throwable ignored) {}
+            }
+            try {
+                cardView.setAlpha(0.92f);
+                cardView.setScaleX(0.96f);
+                cardView.setScaleY(0.96f);
+                cardView.animate().alpha(1f).scaleX(1f).scaleY(1f)
+                        .setDuration(Math.max(120, cardAnimMs))
+                        .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
+            } catch (Throwable ignored) {}
+            logVis("card expand");
+        } catch (Throwable ignored) {}
+    }
+
+    /** v1.89：卡内是否已经滚到底（留 24dp 容差）。 */
+    private boolean isCardAtBottom() {
+        try {
+            if (cardScroll == null || cardText == null) return true;
+            int diff = cardText.getBottom() - (cardScroll.getScrollY() + cardScroll.getHeight());
+            return diff <= dp(24);
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
+    private void renderCardText() {
+        try {
+            if (cardText == null) return;
+            String body = cardBody == null ? "" : cardBody.replace("**", "").replace("`", "");
+            cardText.setText(body + (cardStreaming && cursorOn ? "▍" : ""));
+            // v1.88：跟着最新内容往下滑（用户："文字一直停留在这"）
+            try {
+                // v1.89：只在"没人在摸 + 用户没翻上去"时才跟着最新内容走
+                if (cardScroll != null && cardFollowTail && !cardUserTouching) {
+                    cardScroll.post(new Runnable() { @Override public void run() {
+                        try {
+                            if (cardFollowTail && !cardUserTouching) cardScroll.fullScroll(View.FOCUS_DOWN);
+                        } catch (Throwable ignored) {}
+                    }});
+                }
+            } catch (Throwable ignored) {}
+            try {
+                if (capsuleText != null) {
+                    // 收起态只显示很短的提示（参考里胶囊也是小小的）
+                    String one = body.replace("\n", " ").trim();
+                    if (one.length() > 14) one = one.substring(0, 14) + "…";
+                    capsuleText.setText(one.isEmpty() ? "生成中…" : one);
+                }
+            } catch (Throwable ignored) {}
+        } catch (Throwable ignored) {}
+    }
+
+    /** 轮询到新内容时刷新卡片（还在长就继续闪光标）。 */
+    private void updateCard(String text) {
+        try {
+            if (!cardVisible || text == null) return;
+            if (text.equals(cardBody)) return;
+            cardBody = text;
+            renderCardText();
+            positionCard();
+            try { wm.updateViewLayout(cardView, cardLp); } catch (Throwable ignored) {}
+        } catch (Throwable ignored) {}
+    }
+
+    /**
+     * 落点（v1.78 按草图改）：**顶部状态栏下沿展开，浮在内容之上，不挡悬浮球**。
+     * 草图原话见 /sdcard/Download/fluidcard-mock/index.html「① 在哪出现」。
+     * 仍然要补偿"窗口帧 vs 绘制位置"那个固定偏移（本机约 139px）。
+     */
+    private void positionCard() {
+        try {
+            if (cardLp == null || rootView == null || lp == null) return;
+            int screenW = getResources().getDisplayMetrics().widthPixels;
+            int screenH = getResources().getDisplayMetrics().heightPixels;
+            int[] rloc = new int[2];
+            rootView.getLocationOnScreen(rloc);
+            if (cardAtTop) {
+                // v1.82（**实测修正**，别再改回去）：
+                //   `dumpsys input` 里本机窗口的真·可触区 = frame=[-67,699][143,895]，
+                //   而 lp.y=560 —— **真实位置 = lp.y + 139**（139 = 状态栏高度）。
+                //   我上一版为了"贴到电量那一栏"把 y 减了 139，于是卡片落进**状态栏那一条**里，
+                //   而状态栏是**系统窗口、压在我们之上**：用户点胶囊全被状态栏吃掉，
+                //   我们只收到 ACTION_OUTSIDE（= 自己写的"点别处消失"）⇒ 表现为"点不开、还自己消失"。
+                //   ⛔ 结论：第三方悬浮窗**进不了状态栏那一条**（酷狗能是因为它系统预装）。
+                //   ⇒ 不补偿，直接放在状态栏**下面**那一行，可点、可展开、✕ 也能点。
+                cardLp.width = cardExpanded ? (screenW - dp(cardSideMarginDp) * 2)
+                                            : WindowManager.LayoutParams.WRAP_CONTENT;
+                cardLp.height = WindowManager.LayoutParams.WRAP_CONTENT;
+                cardLp.x = 0;   // 靠 gravity 居中，见下面 CENTER_HORIZONTAL
+                cardLp.y = dp(cardTopOffsetDp);
+                return;
+            }
+            int offY = rloc[1] - lp.y;   // 非顶部模式（贴球）才用这个补偿
+            cardLp.width = WindowManager.LayoutParams.WRAP_CONTENT;
+            cardView.measure(View.MeasureSpec.makeMeasureSpec((int) (screenW * cardMaxWidthFrac), View.MeasureSpec.AT_MOST),
+                    View.MeasureSpec.makeMeasureSpec((int) (screenH * cardMaxHeightFrac), View.MeasureSpec.AT_MOST));
+            int cw = Math.max(1, cardView.getMeasuredWidth());
+            int ch = Math.max(1, cardView.getMeasuredHeight());
+            int cx = Math.max(dp(4), Math.min(rloc[0], screenW - cw - dp(4)));
+            int cy = (rloc[1] < screenH / 2) ? (rloc[1] + rootView.getHeight() + dp(cardGapDp))
+                                             : (rloc[1] - ch - dp(cardGapDp));
+            cy = Math.max(dp(4), Math.min(cy, screenH - ch - dp(4)));
+            cardLp.x = cx;
+            cardLp.y = cy - offY;
+        } catch (Throwable ignored) {}
+    }
+
+    /** 回复收尾：卡片留 holdMs 再收（可配）。 */
+    private void scheduleCardHide() {
+        try {
+            cardStreaming = false;
+            renderCardText();
+            try { if (cardState != null) cardState.setText("已完成"); } catch (Throwable ignored) {}
+            try { if (cardProg != null) cardProg.setAlpha(1f); } catch (Throwable ignored) {}
+            cardHandler.removeCallbacks(cursorBlink);
+            cardHandler.removeCallbacks(cardHider);
+            if (cardHoldMs > 0) cardHandler.postDelayed(cardHider, cardHoldMs);
+            else hideCard();
+        } catch (Throwable ignored) {}
+    }
+
+    private void hideCard() {
+        try {
+            cardHandler.removeCallbacks(cursorBlink);
+            cardHandler.removeCallbacks(cardHider);
+            final View v = cardView;
+            final boolean wasVisible = cardVisible;
+            cardVisible = false;          // 先标记不可见：轮询/探针立刻停手
+            cardStreaming = false;
+            if (wasVisible && v != null && wm != null) {
+                try {
+                    v.animate().alpha(0f).translationY(-dp(16))
+                            .setDuration(Math.min(200, cardAnimMs))
+                            .withEndAction(new Runnable() { @Override public void run() {
+                                try { wm.removeView(v); } catch (Throwable ignored) {}
+                            }}).start();
+                    return;               // 由动画结束回调负责 remove
+                } catch (Throwable ignored) {}
+                try { wm.removeView(v); } catch (Throwable ignored) {}
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    /**
+     * v1.79（用户选 A）：**只要 AI 在写就飘卡**，不管那条消息是从 GUI 还是从球面板发出去的。
+     * 判据复用现成的"会话正在写"扫描（`scanActiveSessions()`：扫 /proc 里持着 session.lock 的进程，
+     * 面板上那句「AI: N 个会话工作中…」用的就是它）—— 那是**引擎自己持有写锁**的一手证据，不需要认证。
+     * 每 2 秒的探针里调用；不忙了就收尾（留 holdMs 再消失）。
+     */
+    private void maybeStreamCard() {
+        try {
+            if (!cardAutoShow) return;
+            java.util.HashSet<String> act = scanActiveSessions();
+            boolean busy = act != null && !act.isEmpty();
+            if (busy) {
+                if (!cardVisible && !cardBroadcasting) {
+                    // v1.83：**先读到内容再决定飘不飘** —— 原来一看到"会话在写"就飘，
+                    // 于是没有新内容时会把上一条反复播报（用户实测："循环播报上一条"）。
+                    cardBroadcasting = true;
+                    final String sid = act.iterator().next();
+                    streamSessionId = sid;
+                    new Thread(new Runnable() { @Override public void run() {
+                        String txt = null;
+                        try {
+                            JSONObject o = readReply(sid);
+                            if (o != null) txt = o.optString("reply", null);
+                        } catch (Throwable ignored) {}
+                        final String t = txt;
+                        try { rootView.post(new Runnable() { @Override public void run() {
+                            cardBroadcasting = false;
+                            if (t == null || t.isEmpty()) return;            // 没内容 → 不飘
+                            String h = String.valueOf(t.hashCode());
+                            if (h.equals(lastBroadcastHash)) return;          // 同上一条 → 不重复播报（跨重启也算）
+                            lastBroadcastHash = h;
+                            persistLastBroadcast(h);
+                            showCard("正在生成…");
+                            updateCard(t);
+                            scheduleStreamPoll(0);
+                        }}); } catch (Throwable ignored) {}
+                    }}, "ovl-card-pre").start();
+                }
+            } else if (cardVisible && cardStreaming) {
+                scheduleCardHide();
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    /** 自动流：定期读一次会话里的最新回复，贴到卡上（读一次要跑 node 解压会话文件，有代价，故间隔偏宽）。 */
+    private void scheduleStreamPoll(final int attempt) {
+        try {
+            if (attempt > 40 || !cardVisible || !cardStreaming) return;
+            cardHandler.postDelayed(new Runnable() { @Override public void run() {
+                if (!cardVisible || !cardStreaming) return;
+                new Thread(new Runnable() { @Override public void run() {
+                    final String sid = streamSessionId;
+                    String txt = null;
+                    try {
+                        if (sid != null) {
+                            JSONObject o = readReply(sid);
+                            if (o != null) txt = o.optString("reply", null);
+                        }
+                    } catch (Throwable ignored) {}
+                    if (txt != null && !txt.isEmpty()) {
+                        final String t = txt;
+                        try { rootView.post(new Runnable() { @Override public void run() {
+                            updateCard(t);
+                            String h = String.valueOf(t.hashCode());   // v1.84：记指纹，避免重复播报
+                            lastBroadcastHash = h;
+                            persistLastBroadcast(h);
+                        }}); } catch (Throwable ignored) {}
+                    }
+                    scheduleStreamPoll(attempt + 1);
+                }}, "ovl-stream").start();
+            }}, cardGuiPollMs);
+        } catch (Throwable ignored) {}
+    }
+
+    /** v1.83：读用户对"流体云"的开关（pet.json 的 card.autoShow 只是首次默认值）。 */
+    private void loadCardPrefs() {
+        try {
+            SharedPreferences p = getSharedPreferences(PREFS, MODE_PRIVATE);
+            cardAutoShow = p.getBoolean(PREF_FLUID, cardAutoShow);
+            lastBroadcastHash = p.getString(PREF_LAST_BCAST, null);   // v1.84：重启后不再把上一条重播
+        } catch (Throwable ignored) {}
+    }
+
+    private void persistLastBroadcast(String h) {
+        try {
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(PREF_LAST_BCAST, h).apply();
+        } catch (Throwable ignored) {}
+    }
+
+    /**
+     * ⚠️ v1.84：标签必须写成**动作**，不能写成状态。
+     * 用户原话"根本就没看到流体云"—— 很可能就是因为上一版写的是「流体云:开」（=当前状态），
+     * 用户读成"点它开启" → 一点反而把开关**关掉**并持久化了。
+     * 现在：开着时显示「关流体云」，关着时显示「开流体云」。
+     */
+    /**
+     * v1.86：统一的"流体云开关"入口（通知栏动作 + 面板按钮都走这里）。
+     * 用户报"开关作用只有一次" → 真因是**内容去重**：关掉再打开时回复没变，被 lastBroadcastHash 挡掉了，
+     * 于是"打开没反应"。⇒ 开启时**清掉指纹并立刻播一次最新回复**，给用户可见反馈。
+     */
+    private void setFluid(boolean on) {
+        try {
+            cardAutoShow = on;
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(PREF_FLUID, on).apply();
+            logVis("fluid -> " + on);
+            if (!on) {
+                hideCard();
+            } else {
+                lastBroadcastHash = null;       // 允许立刻把"当前这条"重播一次
+                persistLastBroadcast("");
+                streamSessionId = null;
+                maybeStreamCard();              // 立刻试一次（有内容就飘）
+            }
+            try { if (fluidBtn != null) fluidBtn.setText(fluidLabel()); } catch (Throwable ignored) {}
+        } catch (Throwable ignored) {}
+    }
+
+    private String fluidLabel() {
+        return cardAutoShow ? "关流体云" : "开流体云";
+    }
+
+    private void loadBalanceState() {
+        try {
+            SharedPreferences p = getSharedPreferences(PREFS, MODE_PRIVATE);
+            balDay = p.getString(PREF_BAL_DAY, null);
+            balRef = p.getFloat(PREF_BAL_REF, -1f);
+        } catch (Throwable ignored) {}
+    }
+
+    /** 查到余额后的统一入口：跨天重置 + 持久化 + 本轮结算 + 返回泡泡文案。 */
+    private String applyBalance(double total) {
+        try {
+            String today = new java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+                    .format(new java.util.Date());
+            SharedPreferences p = getSharedPreferences(PREFS, MODE_PRIVATE);
+            if (balDay == null || !balDay.equals(today) || balRef < 0) {
+                balDay = today;
+                balRef = total;        // 跨天（或首次）：把今天第一笔余额当"当日起点"
+                p.edit().putString(PREF_BAL_DAY, balDay).putFloat(PREF_BAL_REF, (float) total).apply();
+            }
+            balLast = total;
+            if (turnArmed && turnPre >= 0) {
+                turnSpent = turnPre - total;   // 本轮结束：余额差 = 这一轮花的
+                turnArmed = false;
+            }
+        } catch (Throwable ignored) {}
+        return balanceLine(total);
+    }
+
+    private String balanceLine(double total) {
+        String t = "余额 ¥" + String.format(java.util.Locale.US, "%.2f", total);
+        if (total < balanceLowWarn) t += "，该充了";
+        return t;
+    }
+
+    /** 泡泡：今日已用（按余额差估算，别当精确账单）。 */
+    private String todaySpentText() {
+        long age = System.currentTimeMillis() - balanceAt;
+        if (balanceAt == 0L || age > balanceRefreshSec * 1000L) fetchBalanceAsync(false);
+        if (balRef < 0 || balLast < 0) return "今日消耗还没数";
+        double spent = balRef - balLast;
+        if (spent < 0.005) return "今日账上还没动";
+        String t = "今日 ≈ ¥" + String.format(java.util.Locale.US, "%.2f", spent);
+        if (balanceDayBudget > 0 && spent > balanceDayBudget) t += "，超预算了";
+        return t;
+    }
+
+    /** 泡泡：上一轮消耗（只算从球里发出去的那一轮）。 */
+    private String turnSpentText() {
+        if (turnSpent < 0) return "上一轮还没计时";
+        return "上一轮 ≈ ¥" + String.format(java.util.Locale.US, "%.2f", turnSpent);
+    }
+
+    /** 球内发送成功时调用：记下这一轮的起点余额。 */
+    private void markTurnStart() {
+        turnArmed = true;
+        turnPre = balLast;
+        if (balLast < 0) fetchBalanceAsync(true);   // 还没有基准，先查一次
+    }
+
+    /** 拿到真回复时调用：后台把这一轮的余额差算出来（不阻塞界面）。 */
+    private void finishTurnAccounting() {
+        if (turnArmed) fetchBalanceAsync(true);
+    }
+
+    /** 从 $DSH_HOME/.credentials.yaml 的 refs.<名> 取钥匙（只认这一行；失败返回 null）。 */
+    private String readCredentialRef(String refName) {
+        try {
+            java.io.File f = new java.io.File(getFilesDir(), "payload/dshhome/.credentials.yaml");
+            if (!f.exists()) return null;
+            for (String line : readFileUtf8(f).split("\n")) {
+                String t = line.trim();
+                if (t.startsWith(refName + ":")) {
+                    String v = t.substring(refName.length() + 1).trim();
+                    if (v.length() >= 2 && (v.startsWith("\"") || v.startsWith("'"))) {
+                        v = v.substring(1, v.length() - 1);
+                    }
+                    return v.trim();
+                }
+            }
+        } catch (Throwable t) {
+            logVis("credentials 读取失败: " + t);
+        }
+        return null;
+    }
+
+    /**
+     * 显示台词气泡（第二个悬浮窗）。落点按 dockSide 避开贴边的那个方向，
+     * 并补偿本机实测的"窗口帧 vs 绘制位置"偏移（见下面的 offY）。
+     */
+    private void showBubble(final String text) {
+        if (text == null || text.isEmpty()) return;
+        try {
+            if (bubbleView == null) {
+                bubbleView = new TextView(this);
+                bubbleView.setTextSize(TypedValue.COMPLEX_UNIT_PX,
+                        getResources().getDimension(R.dimen.text_caption));
+                bubbleView.setMaxLines(3);
+                bubbleView.setOnClickListener(new View.OnClickListener() {
+                    @Override public void onClick(View v) {
+                        hideBubble();
+                        if ("panel".equals(petOnBubble)) setPanelVisible(true, true);
+                    }
+                });
+                // v1.72（用户指定）：气泡的**唯一**消失途径 = 点「气泡与球以外」的地方。
+                // 原来气泡窗虽然带 FLAG_WATCH_OUTSIDE_TOUCH，却没人处理 ACTION_OUTSIDE，
+                // 于是「点别处」毫无反应，反而只有「点气泡 / 6 秒超时」会让它走 —— 与用户意图正好相反。
+                bubbleView.setOnTouchListener(new View.OnTouchListener() {
+                    @Override public boolean onTouch(View v, MotionEvent ev) {
+                        if (ev.getAction() == MotionEvent.ACTION_OUTSIDE) {
+                            // ⚠️ v1.78 实测：本机 ACTION_OUTSIDE 事件的坐标恒为 (0,0)，
+                            // 坐标判"是否点在球上"在这里是瞎的 → 只有坐标非 0 时才用这个判据。
+                            boolean onBall = (ev.getRawX() != 0f || ev.getRawY() != 0f)
+                                    && insideBall(ev.getRawX(), ev.getRawY());
+                            logVis("bubble outside-tap at(" + (int) ev.getRawX() + "," + (int) ev.getRawY()
+                                    + ") onBall=" + onBall);
+                            if (!onBall) hideBubble();   // 点在球上不算「别处」（用户明确要求）
+                            return true;
+                        }
+                        return false;   // 其余事件交给 OnClickListener（点气泡 → 展开面板）
+                    }
+                });
+            }
+            bubbleView.setTextColor(petTextColor);
+            bubbleView.setText(text);
+            GradientDrawable bg = new GradientDrawable();
+            bg.setColor(petBgColor);
+            bg.setCornerRadius(dp(petRadiusDp));
+            bubbleView.setBackground(bg);
+            bubbleView.setPadding(dp(petPadHdp), dp(petPadVdp), dp(petPadHdp), dp(petPadVdp));
+
+            int screenW = getResources().getDisplayMetrics().widthPixels;
+            int screenH = getResources().getDisplayMetrics().heightPixels;
+            int maxW = Math.max(dp(120), (int) (screenW * petMaxWidthFrac));
+            bubbleView.measure(View.MeasureSpec.makeMeasureSpec(maxW, View.MeasureSpec.AT_MOST),
+                    View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+            int bw = Math.max(1, bubbleView.getMeasuredWidth());
+            int bh = Math.max(1, bubbleView.getMeasuredHeight());
+
+            int[] rloc = new int[2];
+            if (rootView != null) rootView.getLocationOnScreen(rloc);
+            int w = rootView == null ? 0 : rootView.getWidth();
+            int h = rootView == null ? 0 : rootView.getHeight();
+            int gap = dp(petGapDp);
+            int bx;
+            if (dockSide == 1) bx = rloc[0] - bw - gap;        // 球贴右边 → 气泡放左侧
+            else if (dockSide == 2) bx = rloc[0];              // 球贴上边 → 气泡放下方
+            else bx = rloc[0] + w + gap;                       // 左贴边 → 气泡放右侧
+            int by = (dockSide == 2) ? (rloc[1] + h + gap) : (rloc[1] + (h - bh) / 2);
+            bx = Math.max(dp(4), Math.min(bx, screenW - bw - dp(4)));
+            by = Math.max(dp(4), Math.min(by, screenH - bh - dp(4)));
+
+            bubbleLp = new WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.WRAP_CONTENT,
+                    WindowManager.LayoutParams.WRAP_CONTENT,
+                    overlayWindowType(),
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                            | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                            | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+                            | WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+                    PixelFormat.TRANSLUCENT);
+            bubbleLp.gravity = Gravity.TOP | Gravity.START;
+            // ⚠️ 本机实测：窗口帧的 lp.y 与视图真正画出来的位置差一个**固定量**（约 139px，稳定复现）。
+            // 图标窗那边靠 getLocationOnScreen() 报出来；气泡窗要反着补偿这一次，才会贴着球出现。
+            int offY = (lp == null) ? 0 : (rloc[1] - lp.y);
+            bubbleLp.x = bx;
+            bubbleLp.y = by - offY;
+            bubbleDx = bubbleLp.x - (lp == null ? 0 : lp.x);
+            bubbleDy = bubbleLp.y - (lp == null ? 0 : lp.y);
+
+            if (!bubbleVisible) {
+                wm.addView(bubbleView, bubbleLp);
+                bubbleVisible = true;
+            } else {
+                try { wm.updateViewLayout(bubbleView, bubbleLp); } catch (Throwable ignored) {}
+            }
+            bubbleHandler.removeCallbacks(bubbleHider);
+            if (petAutoHideMs > 0) bubbleHandler.postDelayed(bubbleHider, petAutoHideMs);
+            logVis("bubble show: " + text + " at(" + bx + "," + by + ") offY=" + offY);
+        } catch (Throwable t) {
+            logVis("bubble show failed: " + t);
+        }
+    }
+
+    /**
+     * v1.73（用户实测）：拖动悬浮球时，气泡要**跟着走**。
+     * 用"相对偏移"跟随（显示时算好 bubbleDx/Dy），比每帧重算省事，也不会碰到
+     * 「拖动中 getLocationOnScreen() 还是旧值」这个坑。
+     */
+    private void followBubble() {
+        try {
+            if (!bubbleVisible || bubbleView == null || bubbleLp == null || lp == null) return;
+            bubbleLp.x = lp.x + bubbleDx;
+            bubbleLp.y = lp.y + bubbleDy;
+            wm.updateViewLayout(bubbleView, bubbleLp);
+        } catch (Throwable ignored) {}
+    }
+
+    /** v1.73：拖动结束时把气泡按当前位置夹回屏内，并重新计时（松手也算一步动作）。 */
+    private void clampBubble() {
+        try {
+            if (!bubbleVisible || bubbleView == null || bubbleLp == null) return;
+            int screenW = getResources().getDisplayMetrics().widthPixels;
+            int screenH = getResources().getDisplayMetrics().heightPixels;
+            bubbleLp.x = Math.max(dp(4), Math.min(bubbleLp.x, screenW - bubbleView.getWidth() - dp(4)));
+            bubbleLp.y = Math.max(dp(4), Math.min(bubbleLp.y, screenH - bubbleView.getHeight() - dp(4)));
+            wm.updateViewLayout(bubbleView, bubbleLp);
+            bubbleHandler.removeCallbacks(bubbleHider);
+            if (petAutoHideMs > 0) bubbleHandler.postDelayed(bubbleHider, petAutoHideMs);
+        } catch (Throwable ignored) {}
+    }
+
+    /** v1.88：限高的 ScrollView —— 跟着文本长，但不超过 maxPx（超过就滚动）。 */
+    private static class MaxHeightScrollView extends android.widget.ScrollView {
+        private int maxPx = 0;
+        MaxHeightScrollView(Context c) { super(c); }
+        void setMaxPx(int px) { maxPx = px; }
+        @Override protected void onMeasure(int wSpec, int hSpec) {
+            int capped = hSpec;
+            if (maxPx > 0) capped = View.MeasureSpec.makeMeasureSpec(maxPx, View.MeasureSpec.AT_MOST);
+            super.onMeasure(wSpec, capped);
+        }
+    }
+
+    /** 触点是否落在悬浮球窗口内（气泡的 outside 判定要排除「点在球上」）。 */
+    private boolean insideBall(float rawX, float rawY) {
+        try {
+            if (rootView == null) return false;
+            int[] loc = new int[2];
+            rootView.getLocationOnScreen(loc);
+            int w = rootView.getWidth(), h = rootView.getHeight();
+            return rawX >= loc[0] && rawX <= loc[0] + w && rawY >= loc[1] && rawY <= loc[1] + h;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private void hideBubble() {
+        try {
+            bubbleHandler.removeCallbacks(bubbleHider);
+            if (bubbleVisible && bubbleView != null && wm != null) {
+                try { wm.removeView(bubbleView); } catch (Throwable ignored) {}
+            }
+        } catch (Throwable ignored) {}
+        bubbleVisible = false;
     }
 
     // ===================== 悬浮窗聊天：与引擎的 RPC 通道 =====================
@@ -777,6 +1988,8 @@ public class OverlayService extends Service {
         if (!manual && reply.equals(lastReplyShown) && expectUser == null) return false;
         lastReplyShown = reply;
         replyHasContent = true;          // v1.38：拿到真回复 → 回复区可以出现了
+        finishTurnAccounting();          // v1.75：这一轮结束 → 后台算本轮消耗
+        updateCard(reply);               // v1.77：卡片跟着长（逐字观感）
         try {
             StringBuilder sb = new StringBuilder();
             if (user != null && !user.isEmpty()) {
@@ -788,8 +2001,13 @@ public class OverlayService extends Service {
             }
             sb.append(htmlEscape(reply).replace("\n", "<br>"));
             replyText.setText(android.text.Html.fromHtml(sb.toString()));
-            setReplyShown(true);
-            if (!panelVisible) setPanelVisible(true, true);
+            // v1.78：卡片（流体云）在显示时，**不再**把面板的回复区一起铺开 ——
+            // 否则同一段回复同时出现在"顶部卡片"和"面板大框"里（用户实测报"这不像流体云"就是因为后者更抢眼）。
+            // 手动「刷新」路径（manual=true）不受影响：那时会显式 setReplyShown(true)。
+            if (!cardVisible) {
+                setReplyShown(true);
+                if (!panelVisible) setPanelVisible(true, true);
+            }
             setReplyHint("");
             scrollReplyToBottom();
         } catch (Throwable ignored) {}
@@ -884,8 +2102,21 @@ public class OverlayService extends Service {
                         fresh = a.equals(b) || a.endsWith(b) || b.endsWith(a);
                     }
                     if (got && fresh) {
+                        boolean changed = !d.reply.equals(lastStreamText);
+                        lastStreamText = d.reply;
                         applyReply(d.obj(), false, expectUser);   // 内容没变也不会重绘
+                        updateCard(d.reply);                      // v1.77：卡片跟着长
+                        // v1.77：卡片开着且内容还在变长 → 继续密集轮询（"逐字"就靠这个）。
+                        // 连续两次一样（= 写完了）或到上限就收尾。⚠️ 每次都要跑 node 解压会话文件，有代价。
+                        if (cardVisible && changed && streamAttempts < 40) {
+                            streamAttempts++;
+                            rootView.postDelayed(new Runnable() { @Override public void run() {
+                                refreshReplyAt(sessionId, expectUser, false, gen, attempt + 1);
+                            }}, cardPollMs);
+                            return;
+                        }
                         replyWaiting = false;
+                        scheduleCardHide();
                         return;
                     }
                     // 还没等到：按退避表继续重试（同一代数，所以不算过期）
@@ -935,13 +2166,15 @@ public class OverlayService extends Service {
         iconView = new ImageView(this);
         // v1.24：悬浮球图标从「黑鲸鱼剪影」换成桌宠形象（whale-shota），圆形裁剪 + 白描边。
         // 原图标 R.drawable.ic_whale_black 保留未删，想换回只需改这一处。
-        android.graphics.Bitmap petIcon = loadPetIcon(dp(40));
+        android.graphics.Bitmap petIcon = loadPetIcon(dp(petBallDp));   // v1.71：大小来自 pet.json
         if (petIcon != null) {
             iconView.setImageBitmap(petIcon);
+            iconIsPet = true;                      // v1.67 诊断：/overlay 里报 iconSrc
         } else {
             iconView.setImageResource(R.drawable.ic_whale_black); // 兜底：解码失败仍用原图标
+            iconIsPet = false;
         }
-        iconView.setLayoutParams(new LinearLayout.LayoutParams(dp(40), dp(40)));
+        iconView.setLayoutParams(new LinearLayout.LayoutParams(dp(petBallDp), dp(petBallDp)));
         // ⛔ v1.60 根因修复：**不要再给 iconView 挂 OnLongClickListener / OnClickListener**。
         // 它是"点不中悬浮球"的真正原因（v1.24 可点、v1.37 起只能点最底部）：
         //   挂上长按监听后 iconView 变成 clickable，落在图标范围内的触摸被**图标自己消费**，
@@ -1014,6 +2247,7 @@ public class OverlayService extends Service {
         chatInput.setLayoutParams(new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         chatRow.addView(chatInput);
+        chatInputView = chatInput;   // v1.67：收起面板时要用它还焦点（原来拿不到，只能靠失焦回调）
 
         final TextView chatStatus = new TextView(this);
         chatStatus.setTextColor(getColor(R.color.panel_text_dim));
@@ -1062,6 +2296,8 @@ public class OverlayService extends Service {
                     if (res.error == null) {
                         // v1.25：发完自动刷回复 —— 立刻把刚发出的这句话显示出来（不用等引擎），
                         // 然后温和轮询（1.5s / 3s / 5s / 8s / 12s / 18s，最多 6 次）等助手写完。
+                        markTurnStart();   // v1.75：记下这一轮的起点余额
+                        showCard("正在生成…");   // v1.77：流式回复卡
                         showSentEcho(txt);
                         startReplyWait(res.sessionId, txt);
                     }
@@ -1138,7 +2374,32 @@ public class OverlayService extends Service {
         btnRow2.addView(pillButton("刷新", new Runnable() { @Override public void run() {
             refreshReply(true);   // sessionId=null → 脚本自己挑最新会话；不强求匹配某条发言
         }}));
+        // v1.70（用户用截图纠正了我的误解）：
+        //   「收起」= 把**那块长的对话/回复区**收起来、回到紧凑面板（面板本身留着）；
+        //             ⛔ 不是关掉整个面板（v1.69 我做成关面板了，用户明确否掉）。
+        //   「隐藏」= 球收回**半隐藏**（面板一起收起）。
         btnRow2.addView(pillButton("收起", new Runnable() { @Override public void run() {
+            setReplyShown(false);
+            // 顺手把"有内容"标记清掉：否则下次再打开面板时 setPanelVisible(true) 会按
+            // hasReplyContent() 又把它自动铺开 —— 用户会觉得"收起没生效"。
+            // 新回复到达时 applyReply→showReplyArea() 会重新标记并铺开，所以不会漏消息。
+            replyHasContent = false;
+            try {
+                if (lp != null) {   // 窗口是 WRAP_CONTENT，收起后必须让它重新量一次
+                    lp.width = WindowManager.LayoutParams.WRAP_CONTENT;
+                    lp.height = WindowManager.LayoutParams.WRAP_CONTENT;
+                    wm.updateViewLayout(rootView, lp);
+                }
+            } catch (Throwable ignored) {}
+            settleAfterLayout();
+        }}));
+        // v1.83（用户要求"可以实现自己决定开启流体云"）：面板上一个开关，选择记进 prefs
+        fluidBtn = pillButton(fluidLabel(), new Runnable() { @Override public void run() {
+            setFluid(!cardAutoShow);
+        }});
+        btnRow2.addView(fluidBtn);
+        btnRow2.addView(pillButton("隐藏", new Runnable() { @Override public void run() {
+            ballTucked = true;           // 半隐藏（静置态）
             setPanelVisible(false, true);
         }}));
 
@@ -1166,6 +2427,7 @@ public class OverlayService extends Service {
                             lp.y = (int) (startY + (ev.getRawY() - touchY));
                             try { wm.updateViewLayout(rootView, lp); } catch (Throwable ignored) {}
                             updateDismissHint(ev.getRawY());
+                            followBubble();   // v1.73：气泡跟着球走（用户实测原来不跟随）
                         }
                         return true;
                     case MotionEvent.ACTION_UP:
@@ -1191,8 +2453,10 @@ public class OverlayService extends Service {
                             // 并按面板状态决定半藏还是完整贴边。
                             snapToEdge(ev.getRawX(), ev.getRawY());
                             if (panelVisible) setPanelVisible(true, false);
+                            clampBubble();   // v1.73：松手后气泡仍在球旁边，并留在屏内
                         } else if (System.currentTimeMillis() - downAt < 400) {
-                            setPanelVisible(!panelVisible, true);
+                            // v1.71：单击球 = 吐台词（气泡）；面板开着时先收面板（保留一条触摸出口）。
+                            onBallTap();
                         }
                         logDrag("up", ev, v, onRoot);
                         setDismissHintInternal(false);
@@ -1204,8 +2468,23 @@ public class OverlayService extends Service {
                         setDismissHintInternal(false);
                         return true;
                     case MotionEvent.ACTION_OUTSIDE:
-                        // 点击悬浮窗外区域：收回面板（回到静置态）
-                        if (panelVisible) setPanelVisible(false, true);
+                        // v1.69 关键修复：**输入框有焦点时（用户正在打字）不要关面板**。
+                        // 为什么：键盘是另一个窗口，用户每按一个键，对我们来说都是"落在窗口外的 DOWN"
+                        // → 系统给我们发 ACTION_OUTSIDE → 原来一律关面板。
+                        // 实测线索：注入点球开面板后 1~2 秒面板自己变回关闭，当时用户正在**微信**里打字
+                        // （键盘前台 = com.sohu.inputmethod.sogouoem）—— 键盘的每一次按键都会把它关掉。
+                        // 这也顺带解释了老报障"输入以后对话框收不回去/一闪"：面板在跟键盘抢同一个事件流。
+                        // v1.72：顺手补旧欠账 —— outside 事件一直没记坐标，没法判「是不是点在面板下半部分」。
+                        logVis("ball outside-tap at(" + (int) ev.getRawX() + "," + (int) ev.getRawY() + ")");
+                        hideBubble();   // 点别处 → 气泡消失（用户指定的唯一途径）
+                        if (panelVisible) {
+                            if (inputHasFocus()) {
+                                logVis("outside-ignored: input focused");
+                            } else {
+                                logVis("outside-close");
+                                setPanelVisible(false, true);
+                            }
+                        }
                         return true;
                 }
                 return false;
@@ -1267,12 +2546,34 @@ public class OverlayService extends Service {
             // 无障碍服务的 activePackage 是系统事件直接给的，不会卡。
             if (AccessibilityService.isRunning) {
                 String fg = AccessibilityService.activePackage;
-                if (fg != null && !fg.isEmpty()) {
+                // ⛔ v1.68 血的教训（装机后 40 秒就被用户抓到）：把 `==` 改成 `!=` 之后，
+                //   这条"不一致就以真实前台为准"的自愈**才真的会动**，于是立刻暴露了它的前提是错的：
+                //   **a11y 报的 activePackage 会是我们自己的包** —— 只要用户碰了我们自己的悬浮窗
+                //   （尤其点输入框、让它变成可获焦窗口），前台就被报成 com.deepseek.harness。
+                //   实测日志（1.29/112，2026-10-01 21:12:59 起）：
+                //     harness -> fgHidden=true  → 球当场消失
+                //     launcher -> fgHidden=false → 球又回来   （如此往复，用户报"一点说点什么球就消失一会"）
+                //   还有第三个数：输入法（com.sohu.inputmethod.sogouoem）在前台时也被当成"别的 App"。
+                //   ⇒ 这个信号**只能判"确实切到别的 App 了"，不能判"回到 App 了"**。
+                // v1.68 因此收紧成三条（每条都独立可回滚）：
+                //   ① 只朝"该露出来"一个方向治（永不因为 a11y 报文把球藏起来）；
+                //   ② 跳过 systemui 与当前默认输入法；
+                //   ③ 要求连续 2 次（≈4 秒）读到同一个包才动手，瞬时抖动不再引起闪烁。
+                boolean ignorable = fg == null || fg.isEmpty()
+                        || fg.startsWith("com.android.systemui")
+                        || (!defaultImePackage().isEmpty() && fg.equals(defaultImePackage()));
+                if (ignorable) {
+                    lastFgPkg = null;
+                    sameFgCount = 0;
+                } else {
+                    if (fg.equals(lastFgPkg)) sameFgCount++;
+                    else { lastFgPkg = fg; sameFgCount = 1; }
                     boolean dshInFront = fg.equals(getPackageName());
-                    if (dshInFront == foregroundWantsHidden) {
-                        // 与生命周期标志不一致 → 以真实前台为准
-                        foregroundWantsHidden = dshInFront;
-                        logVis("fg-heal: activePackage=" + fg + " -> fgHidden=" + dshInFront);
+                    if (!dshInFront && foregroundWantsHidden && sameFgCount >= 2) {
+                        // 只在"确实在别的 App / 桌面上，且已经稳定 4 秒"时，把球放出来
+                        foregroundWantsHidden = false;
+                        logVis("fg-heal: activePackage=" + fg + " (stable x" + sameFgCount
+                                + ") -> fgHidden=false");
                     }
                 }
             }
@@ -1291,12 +2592,50 @@ public class OverlayService extends Service {
                 lastScreenW = w; lastScreenH = h;
                 relayoutForCurrentScreen();
             }
+            maybeStreamCard();   // v1.79：不管从哪儿发的，只要 AI 在写就飘一张卡
         } catch (Throwable ignored) {}
     }
 
     /** 记录上一次用于摆放的屏幕尺寸（旋转自愈的基准）。 */
     private int lastScreenW = 0;
     private int lastScreenH = 0;
+
+    // v1.68：a11y 前台账的"连续同值"计数（自愈防抖用），以及输入法包名缓存。
+    private String lastFgPkg = null;
+    private int sameFgCount = 0;
+    private String imePkgCache = null;
+
+    /**
+     * v1.69（用户指定）：球的"半隐藏"意图。
+     * true = 静置半藏（默认，也是「隐藏」按钮的效果）；
+     * false = 完整露出（点「收起」只收对话窗口后，球留在原地不缩回去）。
+     * 摆放时与面板状态一起决定落点：`tuck = ballTucked && !panelVisible`。
+     */
+    private boolean ballTucked = true;
+
+    /** v1.69：面板输入框当前是否有焦点（= 用户正在面板里打字）。 */
+    private boolean inputHasFocus() {
+        try { return chatInputView != null && chatInputView.hasFocus(); } catch (Throwable t) { return false; }
+    }
+
+    /**
+     * v1.68：当前默认输入法的包名（缓存；取不到返回空串）。
+     * 为什么要它：默认输入法弹出来时 a11y 会把前台报成输入法包名（实测 com.sohu.inputmethod.sogouoem），
+     * 那并不代表"用户离开了 App" —— 而是用户**正在我们的面板里打字**。把它当成"切到别的 App"
+     * 会让球在打字时忽隐忽现（v1.67 就是这么被用户抓到的）。
+     */
+    private String defaultImePackage() {
+        if (imePkgCache == null) {
+            String p = "";
+            try {
+                String ime = android.provider.Settings.Secure.getString(
+                        getContentResolver(), android.provider.Settings.Secure.DEFAULT_INPUT_METHOD);
+                if (ime != null && ime.indexOf('/') > 0) p = ime.substring(0, ime.indexOf('/'));
+            } catch (Throwable ignored) {}
+            imePkgCache = p;
+        }
+        return imePkgCache;
+    }
 
     /** 按当前屏幕尺寸重算窗口位置/边界（旋转自愈与 onConfigurationChanged 共用）。 */
     private void relayoutForCurrentScreen() {
@@ -1350,7 +2689,34 @@ public class OverlayService extends Service {
                     + ",\"iconOnScreen\":[" + iloc[0] + "," + iloc[1] + "]"
                     + ",\"iconSize\":[" + (s.iconView == null ? -1 : s.iconView.getWidth())
                     + "," + (s.iconView == null ? -1 : s.iconView.getHeight()) + "]"
+                    // v1.67 诊断：用户报「调出来之后球变得很小」，光看 getWidth() 分不清是
+                    // ①窗口/视图真的变小 ②被 scale 缩了 ③图换成了兜底黑鲸鱼 ④密度取错。
+                    // 这四项各自独立报出来，下次一眼就能定性。
+                    + ",\"iconSrc\":" + (s.iconIsPet ? "\"pet\"" : "\"fallback\"")
+                    + ",\"rootScale\":[" + (s.rootView == null ? -1 : s.rootView.getScaleX())
+                    + "," + (s.rootView == null ? -1 : s.rootView.getScaleY()) + "]"
+                    + ",\"iconScale\":[" + (s.iconView == null ? -1 : s.iconView.getScaleX())
+                    + "," + (s.iconView == null ? -1 : s.iconView.getScaleY()) + "]"
+                    + ",\"rootAlpha\":" + (s.rootView == null ? -1 : s.rootView.getAlpha())
+                    + ",\"lpWH\":[" + (s.lp == null ? -1 : s.lp.width)
+                    + "," + (s.lp == null ? -1 : s.lp.height) + "]"
+                    // v1.67：Bug A 的判据 —— FLAG_NOT_FOCUSABLE(0x8) 在不在 lp.flags 里。
+                    // 正常（收起态）必须置位；点过输入框后若它没了、inputFocused 还 true，
+                    // 就坐实"输入后窗口一直可获焦 → 抢焦点吃返回键 → 收不回去"。
+                    + ",\"lpFlags\":" + (s.lp == null ? -1 : s.lp.flags)
+                    + ",\"inputFocused\":" + (s.chatInputView != null && s.chatInputView.hasFocus())
+                    + ",\"screen\":[" + s.getResources().getDisplayMetrics().widthPixels
+                    + "," + s.getResources().getDisplayMetrics().heightPixels + "]"
                     + ",\"density\":" + s.getResources().getDisplayMetrics().density
+                    + ",\"petJsonOk\":" + s.petJsonOk
+                    + ",\"petLines\":" + s.petLines.length
+                    + ",\"bubbleVisible\":" + s.bubbleVisible
+                    + ",\"cardVisible\":" + s.cardVisible
+                    + ",\"balanceOk\":" + (s.balanceText != null)
+                    + ",\"peakNow\":" + s.isPeakNow()
+                    + ",\"todaySpentCents\":" + (s.balRef < 0 || s.balLast < 0 ? -1 : Math.round((s.balRef - s.balLast) * 100))
+                    + ",\"turnSpentCents\":" + (s.turnSpent < 0 ? -1 : Math.round(s.turnSpent * 100))
+                    + ",\"balanceAgeSec\":" + (s.balanceAt == 0L ? -1 : (System.currentTimeMillis() - s.balanceAt) / 1000)
                     + "}";
         } catch (Throwable t) {
             return "{\"error\":\"" + String.valueOf(t.getMessage()).replace("\"", "'") + "\"}";
@@ -1390,6 +2756,9 @@ public class OverlayService extends Service {
                             + " fgHidden=" + foregroundWantsHidden + " userHidden=" + userHidden);
                 }
                 rootView.setVisibility(show ? View.VISIBLE : View.GONE);
+                // v1.79：球藏起来时收气泡，但**不收卡片** —— 卡片是"流体云"，本来就要能浮在
+                // App 自己的界面上（用户选 A：GUI 里聊天也要看得到）。它由生成结束/服务销毁来收。
+                if (!show) hideBubble();
                 visible = show;
                 if (show) {
                     // v1.64：修"从通知栏恢复后小鲸鱼变得非常小"。
@@ -1529,7 +2898,7 @@ public class OverlayService extends Service {
             // 直接 -offH 会把鲸鱼推进状态栏/挖孔区里（实测 frame 顶到 y=31，用户"看不到"）。
             // 上边改成只收 TUCK_TOP_DP，让鲸鱼贴在状态栏下沿露出大半。
             int offH = dp(TUCK_TOP_DP);
-            boolean tuck = !panelVisible;
+            boolean tuck = ballTucked && !panelVisible;   // v1.69：面板开着必完整露出；收起后看「收起/隐藏」意图
 
             switch (dockSide) {
                 case DOCK_LEFT:
@@ -1599,10 +2968,70 @@ public class OverlayService extends Service {
      *  · 面板展开 → **完整贴边**：面板必须完整留在屏内，否则会被截掉。
      */
 
+    /**
+     * v1.67 修「在面板里输入过之后，对话框/输入法收不回去」。
+     *
+     * 原实现只把 panelView 置 GONE，**完全没碰**下面三样：
+     *   ① 输入框焦点 —— 原来唯一会恢复窗口标志的地方是 chatInput 的 OnFocusChangeListener；
+     *      而把 panelView 置 GONE 并不保证触发它。一旦没触发，lp 就**一直停在"可获焦"**，
+     *      悬浮窗继续抢焦点、吃掉返回键 → 表现就是面板/输入法都"收不回去"。
+     *   ② 输入法本身 —— 没有任何一处调 hideSoftInputFromWindow，软键盘就留在屏上。
+     *   ③ lp.flags —— 上面那条的后果；这里**显式**再补一次 NOT_FOCUSABLE，不依赖任何回调。
+     * 三步都幂等：面板没开、没输入时调用无副作用。
+     */
+    private void releasePanelInput() {
+        try {
+            if (chatInputView != null) {
+                chatInputView.clearFocus();
+                android.view.inputmethod.InputMethodManager imm =
+                        (android.view.inputmethod.InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+                if (imm != null) {
+                    imm.hideSoftInputFromWindow(chatInputView.getWindowToken(), 0);
+                }
+            }
+        } catch (Throwable ignored) {}
+        try {
+            if (lp != null && rootView != null) {
+                lp.flags |= WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
+                wm.updateViewLayout(rootView, lp);
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    /**
+     * v1.67：控制台「显示悬浮球」在服务**还活着**时的正确语义 —— 解除"用户拖底隐藏"并重新应用可见性。
+     *
+     * 为什么需要它：原来 /overlay?action=show 在 isRunning==true 时直接返回"已在运行"、
+     * 什么都不做。于是球只要是被"拖到底部隐藏"（userHidden=true）藏起来的，
+     * 从控制台怎么点都调不出来（服务在跑、窗口在、就是不露脸）。
+     * 真正的可见性规则仍然只有 applyVisibleNow() 一处（App 在前台时照旧隐藏，不会违反 v1.13.12）。
+     */
+    public static String reshowFromBridge() {
+        final OverlayService s = instance;
+        if (s == null) return "{\"ok\":false,\"error\":\"overlay not running\"}";
+        try {
+            s.handler.post(new Runnable() { @Override public void run() {
+                try {
+                    s.userHidden = false;
+                    s.applyVisibleNow();   // 里面已含缩放/尺寸复位（v1.64）
+                    s.wiggle();
+                } catch (Throwable ignored) {}
+            }});
+            return "{\"ok\":true,\"queued\":true}";
+        } catch (Throwable t) {
+            return "{\"ok\":false,\"error\":\"" + String.valueOf(t.getMessage()).replace("\"", "'") + "\"}";
+        }
+    }
+
     /** 面板显示/隐藏；animate=true 时带旋转抖动 + 位置过渡（唤出、收起共用）。 */
     private void setPanelVisible(boolean show, boolean animate) {
+        // v1.69 诊断：面板每次变化都记一行（含球的半隐藏意图）—— 用户报"面板开了又自己关"
+        // 时，这行 + 上面的 outside-ignored/outside-close 就能直接指认是谁干的。
+        logVis("panel " + panelVisible + " -> " + show + " (animate=" + animate
+                + " ballTucked=" + ballTucked + " inputFocused=" + inputHasFocus() + ")");
         panelVisible = show;
         if (panelView != null) panelView.setVisibility(show ? View.VISIBLE : View.GONE);
+        if (!show) releasePanelInput();   // v1.67：收起时把焦点 / 输入法 / 窗口标志一起收回
         if (show) {
             refreshPanelDynamicRows();
             // v1.38：回复区只在**真有消息**时才露出来（用户要求：没发消息时它不该出现）。
@@ -1733,7 +3162,7 @@ public class OverlayService extends Service {
             int h = rootView.getHeight() > 0 ? rootView.getHeight() : dp(56);
             int offW = Math.round(w * (1f - TUCK_VISIBLE_FRACTION));
             int offH = Math.round(h * (1f - TUCK_VISIBLE_FRACTION));
-            boolean tuck = !panelVisible;
+            boolean tuck = ballTucked && !panelVisible;   // v1.69：与 snapToEdge 必须一致
             final int targetX, targetY;
             switch (dockSide) {
                 case DOCK_RIGHT:

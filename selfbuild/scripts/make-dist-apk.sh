@@ -50,7 +50,8 @@ BK=$F/tmp/dist-bk; rm -rf "$BK"; mkdir -p "$BK"
 restore_dist() {
   [ -f "$BK/dsh-bg.css" ] && cp "$BK/dsh-bg.css" "$DIST/dsh-bg.css" 2>/dev/null
   [ -f "$BK/dsh-bg-user.png" ] && mv "$BK/dsh-bg-user.png" "$DIST/" 2>/dev/null
-  [ -d "$BK/dshhome" ] && mv "$BK/dshhome" "$OVL/" 2>/dev/null
+  [ -d "$BK/profiles" ] && mv "$BK/profiles" "$OVL/dshhome/" 2>/dev/null
+  if [ -d "$BK/dshhome-extra" ]; then mv "$BK/dshhome-extra"/* "$OVL/dshhome/" 2>/dev/null; fi
   rm -rf "$BK" 2>/dev/null
   return 0
 }
@@ -58,11 +59,28 @@ trap restore_dist EXIT
 
 echo "== 摘掉个人壁纸（临时改动，出包后还原）=="
 if [ -f "$DIST/dsh-bg-user.png" ]; then mv "$DIST/dsh-bg-user.png" "$BK/"; echo "  移出 dsh-bg-user.png"; fi
-# ⚠️ overlay 里的 dshhome 是**开发者私人 profile**：
-#   package.json 里有 `link:/sdcard/Download/Operit/...`（只在本机存在），
-#   还带着只有本机才有的插件。发行包应当**继承骨架里那份干净的 profile**
-#   —— 线上 v1.26 就是这么发的（它的 dshhome 里没有这些）。
-[ -d "$OVL/dshhome" ] && { mv "$OVL/dshhome" "$BK/dshhome"; echo "  移出 overlay 的 dshhome（私人 profile）"; }
+# ⚠️ overlay 里的 dshhome 是**开发者私人 profile 的所在地**（package.json 里带
+#   `link:/sdcard/Download/Operit/...`，只在本机存在）。发行包应当继承骨架里那份干净的 profile
+#   —— 线上 v1.26 / v1.29 就是这么发的。
+#
+# ⚠️ 2026-10-02 两次修正：
+#   ① 以前整目录 `mv "$OVL/dshhome"` —— 那时 dshhome 下只有私人 profile，搬走是对的；
+#      但现在 dshhome 下还放着**要随包分发的技能**（dshhome/skills/），整目录搬走
+#      = 发行包里静默没有技能。
+#   ② 只搬 `profiles` 又是**黑名单思路**：以后谁往 dshhome 下丢一个新目录
+#      （笔记 / 草稿 / review.json…）都会静默进包。跨模型会审专门点了这条。
+#   → 改成**白名单**：dshhome 下只有名单里的目录允许进包，其余一律搬走并打印。
+DHOME_ALLOW="skills"
+if [ -d "$OVL/dshhome" ]; then
+  for p in "$OVL/dshhome"/* "$OVL/dshhome"/.[!.]*; do
+    [ -e "$p" ] || continue
+    b=$(basename "$p")
+    case " $DHOME_ALLOW " in
+      *" $b "*) echo "  随包保留 dshhome/$b（$(ls "$p" 2>/dev/null | tr '\n' ' ')）" ;;
+      *) mkdir -p "$BK/dshhome-extra"; mv "$p" "$BK/dshhome-extra/"; echo "  ⚠ 移出非白名单 dshhome/$b（不进发行包）" ;;
+    esac
+  done
+fi
 # overlay 里必须自带 dsh-bg.css（2026-09-30 起）：以前它从骨架 APK 的 payload 继承，
 # 于是「发行版 CSS 指向哪张图」取决于用了哪个骨架 —— 这也正是那次 cp 失败的原因。
 [ -f "$DIST/dsh-bg.css" ] || { echo "  ✗ overlay 里没有 dsh-bg.css：$DIST"; echo "     修法：cp bg-patch/dsh-bg.css \"$DIST/\""; exit 1; }
@@ -97,6 +115,21 @@ fi
 # ── 3. 出包（复用现有 dex，只换 payload）──────────────────────────────
 echo "== 出包 =="
 cd "$SB"
+
+# ⚠️ 门禁（2026-10-02 加）：dex 必须比所有 Java 源码**新**。
+#   背景：这一步用的是上一次 javac 的产物 work/appbuild/out/classes.dex。
+#   如果本轮改了 OverlayService/MainActivity 却没重编，发行包就会**悄悄缺掉本机已测的功能**
+#   —— 正是"发行包比本机包少功能"这类事故的入口。宁可在这里失败。
+DEX=work/appbuild/out/classes.dex
+[ -f "$DEX" ] || { echo "  ✗ 没有 $DEX —— 先跑 selfbuild/scripts/javac-app.sh 编译 App 侧 Java"; exit 1; }
+STALE=$(find $R/v118/android-app/src -name '*.java' -newer "$DEX" 2>/dev/null | head -3)
+if [ -n "$STALE" ]; then
+  echo "  ✗ dex 比 Java 源码旧，先重编（javac-app.sh）再出包："
+  echo "$STALE" | sed 's/^/      /'
+  exit 1
+fi
+echo "  ✓ dex 不旧于源码：$(stat -c%s "$DEX") 字节"
+
 sh selfbuild.sh payload >/dev/null 2>&1
 sh selfbuild.sh patch 2>&1 | tail -1
 
@@ -104,7 +137,22 @@ sh selfbuild.sh patch 2>&1 | tail -1
 # 出包脚本只把壁纸从 overlay 挪走，管不到骨架 payload 里已经带进来的那份。
 echo "== 剔除发行包里不该有的条目 =="
 "$F/payload/runtime/bin/node" scripts/strip-dist-payload.js work/payload-new.zip
-sh selfbuild.sh pack --dex work/appbuild/out/classes.dex 2>&1 | tail -1
+
+# ⚠️ 瘦身（2026-10-02 加）：runtime/lib 下的**重复 .so 副本**换成 LINKS.txt 声明。
+#   本机自建链的 payload 里 libicudata 等有 2~3 份逐字节相同的真副本（原始数据多 85MB、
+#   落盘多 ~36MB）；App 首次解压时会按 LINKS.txt 自己建硬链接（MainActivity.applyLinks）。
+#   已发布的 v1.29 就是这个形状 —— 这一步是"回到已验证的发行形状"，不是新机制。
+"$F/payload/runtime/bin/node" scripts/slim-dist-payload.js work/payload-new.zip
+
+sh selfbuild.sh pack --dex "$DEX" 2>&1 | tail -1
+
+# ⚠️ 2026-10-02 加：写 dshroot 标记（内核版本 + 新 revision）。
+#   不发新 revision 的话，老用户从上一版升上来时 App 判定"不用同步"，
+#   新加的文件只能靠白名单兜底（技能/配置在名单里没问题，但这是运气不是设计）。
+#   内核版本从 payload 的 dsh/package.json 读（不变）→ 升级仍走**快速同步**，
+#   不会让用户白等一次 2.5 万文件的全量解压。
+sh selfbuild.sh mark 2>&1 | tail -1
+
 STAMP=$(date +%Y%m%d-%H%M%S)
 OUT=$SB/out/DeepSeekHarness-dist-$STAMP.apk
 
@@ -183,6 +231,10 @@ print("  ① 文件名扫描（整包）")
 for label, p in {
   '个人壁纸': r'dsh-bg-user', '私钥/keystore': r'keystore|\.p12$|pkcs12',
   'AGENTS.md 文件': r'AGENTS\.md$', '自建脚本': r'selfbuild/', '提示词/笔记': r'PATCH-NOTES',
+  # 2026-10-02 加（个人数据清查）
+  '桌宠源图/预览': r'whale-shota', '派生美术': r'archive-2\.5d',
+  '源码/文件备份': r'\.(bak|orig|pre-lan)(-[\d.]+)?$', '会话数据': r'session\.v4\.jsonl',
+  '登录凭据': r'\.credentials',
 }.items():
     hits = [n for n in names if re.search(p, n, re.I)]
     print(f"     {label:<14} {'❌ ' + str(hits[:2]) if hits else '✅ 0'}")
@@ -207,7 +259,13 @@ for root, _, files in os.walk(ovl):
         mine.append(os.path.join(root, f))
 outer = ['assets/mobile.css', 'assets/mobile.js', 'AndroidManifest.xml']
 pats = {'手机号': r'1[3-9]\d{9}', '邮箱': r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.(com|cn|net)',
-        '游戏/私用包名': r'sgzzlb|aweme\.lite', '绝对私密路径': r'/sdcard/Download/Operit'}
+        '游戏/私用包名': r'sgzzlb|aweme\.lite', '绝对私密路径': r'/sdcard/Download/Operit',
+        # 2026-10-02 加（个人数据清查）：开发机路径 / 密钥形态。
+        # ⚠️ 素材名（whale-shota/dsh-bg-user）**只做文件名层检查**，不做内容层 ——
+        #    文档里解释"为什么不随包分发"、以及静态门禁代码里引用这两条路径，都是正常内容，
+        #    内容层扫它们只会误报（实测踩过：CHANGELOG + dsh-host-frontend-static 两处误报）。
+        '开发机路径': r'dsh_own_app|fluidcard-mock|/sdcard/Download/Operit',
+        '密钥形态': r'\bsk-[A-Za-z0-9_-]{16,}|\bghp_[A-Za-z0-9]{20,}|\bgithub_pat_'}
 for path in mine + outer:
     if path.startswith(ovl):
         rel = 'dshroot/' + os.path.relpath(path, ovl + '/dshroot') if '/dshroot/' in path else None

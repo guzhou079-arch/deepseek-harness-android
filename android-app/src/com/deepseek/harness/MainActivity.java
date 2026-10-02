@@ -162,7 +162,13 @@ public class MainActivity extends Activity {
         // 刻意**不注入全局 dshDesktop**：那会让 dsh-client-ui-settings-models 的 API Key 引导消失。
         // 详见 /sdcard/Download/Operit/dsh_own_app/PATCH-NOTES-account-ui-enable.md
         "dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-settings-account/lib/client.js",
-        "dshroot/lib/node_modules/@deepseek-ai/dsh/package.json"
+        "dshroot/lib/node_modules/@deepseek-ai/dsh/package.json",
+        // v1.71：随包分发的**官方技能**（桌宠/文档/手机自动化那套）。
+        // 前缀匹配 → 只有我们发的这个目录会被更新；用户自己往别处放的技能文件不受影响。
+        "dshhome/skills/",
+        // v1.71：桌宠配置（台词表/球大小/裁剪中心）。⚠️ 精确到文件：
+        // 同目录的 whale-shota.png 授权"仅限本机自用、不得随包分发"，**绝不能**被这条带上。
+        "pet/pet.json"
     };
     // 外部 dshroot 解压完成标记（App 在 dshroot 补齐后写入；清空/重置时随目录删除）。
     // 用于识别「解压中途被打断」：即使 REVISION 一致也强制补齐缺失文件。
@@ -3273,7 +3279,11 @@ public class MainActivity extends Activity {
                         return "{\"ok\":true,\"running\":false}";
                     }
                     setOverlayWanted(true);
-                    return "{\"ok\":true,\"running\":true,\"msg\":\"已在运行\"}";
+                    // v1.67：服务还活着时也要**真的再显示一次** —— 解除 userHidden 并重应用可见性。
+                    // 原来这里直接 return "已在运行"，于是被"拖到底部隐藏"的球（userHidden=true）
+                    // 从控制台怎么点都出不来（服务在跑、窗口在、就是不露脸）。
+                    return "{\"ok\":true,\"running\":true,\"msg\":\"已在运行\",\"reshow\":"
+                            + OverlayService.reshowFromBridge() + "}";
                 }
                 setOverlayWanted(true);
                 startOverlayService();
