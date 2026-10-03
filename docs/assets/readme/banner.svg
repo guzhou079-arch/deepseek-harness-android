@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300" viewBox="0 0 1200 300" role="img" aria-label="DeepSeek Harness 安卓移植增强版">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0b1622"/>
+      <stop offset="55%" stop-color="#122436"/>
+      <stop offset="100%" stop-color="#0d1c2b"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#5b8cff"/>
+      <stop offset="100%" stop-color="#3fd6c0"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="300" fill="url(#bg)"/>
+  <circle cx="1080" cy="60" r="150" fill="#5b8cff" opacity="0.10"/>
+  <circle cx="120" cy="270" r="120" fill="#3fd6c0" opacity="0.08"/>
+  <text x="70" y="120" font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="46" font-weight="700" fill="#eaf2ff">DeepSeek Harness · 安卓移植增强版</text>
+  <text x="70" y="165" font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="22" fill="#9fb6d0">装个 APK 就能用 · 不用 Termux · 不用 root · 不用配环境</text>
+  <text x="70" y="200" font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="20" fill="#6f8aa6">DeepSeek Harness packaged as a ready-to-install Android APK</text>
+  <g font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="18" fill="#cfe0f5">
+    <rect x="70" y="225" width="176" height="42" rx="21" fill="#14314a"/>
+    <text x="158" y="252" text-anchor="middle">手机自己出包</text>
+    <rect x="262" y="225" width="158" height="42" rx="21" fill="#14314a"/>
+    <text x="341" y="252" text-anchor="middle">手机自动化</text>
+    <rect x="436" y="225" width="176" height="42" rx="21" fill="#14314a"/>
+    <text x="524" y="252" text-anchor="middle">悬浮球 / 桌宠</text>
+    <rect x="628" y="225" width="176" height="42" rx="21" fill="#14314a"/>
+    <text x="716" y="252" text-anchor="middle">随包技能</text>
+  </g>
+  <rect x="0" y="296" width="1200" height="4" fill="url(#accent)"/>
+</svg>

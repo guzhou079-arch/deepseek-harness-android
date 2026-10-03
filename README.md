@@ -1,5 +1,21 @@
 # DeepSeek Harness · 安卓移植增强版
 
+<div align="center">
+
+<img src="docs/assets/readme/banner.svg" width="100%" alt="DeepSeek Harness · 安卓移植增强版">
+
+**中文** | [English](README.en.md)
+
+<br>
+
+[![Stars](https://img.shields.io/github/stars/guzhou079-arch/deepseek-harness-android?style=flat&label=stars)](https://github.com/guzhou079-arch/deepseek-harness-android/stargazers)
+[![Release](https://img.shields.io/github/v/release/guzhou079-arch/deepseek-harness-android?label=latest%20release)](https://github.com/guzhou079-arch/deepseek-harness-android/releases/latest)
+![Platform](https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-Android%208.0%2B-brightgreen)
+[![Last commit](https://img.shields.io/github/last-commit/guzhou079-arch/deepseek-harness-android)](https://github.com/guzhou079-arch/deepseek-harness-android/commits/main)
+
+</div>
+
+
 把 **DeepSeek Harness**（DeepSeek 的 AI Agent）打包成**装个 APK 就能用**的安卓版。
 
 **不用 Termux、不用 root、不用配环境** —— 终端、文件访问、命令执行全部在 App 内运行。
@@ -119,3 +135,9 @@ licenses/lgpl-3.0.txt       LGPL-3.0（虚拟屏部分）
 licenses/gpl-3.0.txt        GPL-3.0（LGPL-3.0 的基础）
 THIRD_PARTY_NOTICES.md      第三方组件逐项声明
 ```
+
+---
+
+## ⭐ Star 趋势
+
+[![Star History Chart](https://api.star-history.com/chart?repos=guzhou079-arch/deepseek-harness-android&type=date&legend=top-left)](https://star-history.com/#guzhou079-arch/deepseek-harness-android&Date)

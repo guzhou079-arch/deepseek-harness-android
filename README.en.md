@@ -1,87 +1,56 @@
-# DeepSeek Harness · Android Port (Enhanced)
+# DeepSeek Harness · Android port (enhanced)
 
-An Android port of **DeepSeek Harness** (DeepSeek's AI agent, originally desktop-only),
-packaged as an APK you can simply install.
+**DeepSeek Harness**, packaged as a ready-to-install **Android APK**.
 
-**No Termux. No root. No environment setup.** Terminal, file access and command
-execution all run inside the app.
+**No Termux, no root, no setup** — the terminal, file access and command execution all run inside the app.
+It can even compile, package, sign and release itself, entirely on the phone, without a computer.
 
-| What you get | |
+**中文** | [English](README.en.md)
+
+| What you get | Detail |
 |---|---|
-| 🐳 **Floating ball / desktop pet** | Tap it and it "talks": lines, account balance, today's spend, last turn's spend, peak/off-peak pricing hints |
-| ☁️ **Fluid-cloud reply card** | While the AI is writing, a capsule appears at the top; tap to expand into a card, scroll it by hand |
-| 📱 **Phone automation** | Screen reading, taps, typing, notification capture, scheduled tasks, virtual display |
-| 🔧 **Build it on the phone** | javac → dex → pack → sign → release, no PC needed (build environment is an in-app on-demand download) |
-| 🧩 **Bundled skills** | `dsh-mobile` (phone automation) · `doc-tidy` (Office files) · `dsh-review` (cross-vendor model review) |
+| 🐳 **Floating ball / desktop pet** | Tap the ball and it "speaks": lines, account balance, usage today, last-turn cost, peak/off-peak hints |
+| ☁️ **Fluid notification card** | While the AI is writing, a capsule appears under the status bar; tap to expand into a card you can scroll by hand |
+| 📱 **Phone automation** | Screen reading, tapping, text input, notification access, scheduled tasks, virtual display |
+| 🔧 **Self-building on the phone** | javac → dex → package → sign → release, all on-device (the build environment is downloaded on demand) |
+| 🧩 **Bundled skills** | Phone automation (`dsh-mobile`), document tidy (`doc-tidy`), cross-vendor multi-model review (`dsh-review`) |
 
-**Download**: see this repository's **Releases** (GitHub and Gitee carry identical content — either one works).
+**Download**: see **Releases** (GitHub and Gitee carry the same content — either is fine). Each release lists the APK's SHA-256 so you can verify it before installing.
 
-**Docs** (Chinese): [Install & requirements](docs/安装与要求.md) · [Permissions & privacy](docs/权限与隐私.md) · [FAQ](docs/常见问题.md) · [Upgrade & rescue](docs/升级与救援.md) · [Build it yourself](docs/自建环境与出包.md)
+**Docs** (Chinese): [install & requirements](docs/安装与要求.md) · [permissions & privacy](docs/权限与隐私.md) · [FAQ](docs/常见问题.md) · [upgrade & rescue](docs/升级与救援.md) · [build environment](docs/自建环境与出包.md)
 
----
-
-> ## ⚠️ Read before updating — only update from this repository's Releases
+> ## ⚠️ Read before upgrading — only update from this repository's Releases
 >
-> This app is signed with **this project's own key**. Installing a same-named app from
-> **any other source** (the official build, the upstream author's build, a reposted APK)
-> will fail with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`, because Android refuses to
-> overwrite an app signed with a different key.
+> This app is signed with **this project's own key**. Installing a same-named app from **another source**
+> (the official build, the upstream author's package, a forwarded APK) cannot overwrite it — the signatures differ.
+> If you then choose to uninstall and reinstall, **all app-private data is wiped** (session history, runtime
+> environment, configuration).
 >
-> If you then choose to *uninstall and reinstall*, **all app-private data is wiped**
-> — session history, runtime environment, settings. Without a backup it is usually gone for good.
->
-> **Seeing that error means your data is being protected. Do not uninstall.**
-> Back up first: in the app, Console → Rescue → "Export all data"
-> (developers can also use `selfbuild/scripts/backup-dshhome.sh`).
->
-> Full guide (Chinese) → [docs/升级与救援.md](docs/升级与救援.md)
+> When you see `INSTALL_FAILED_UPDATE_INCOMPATIBLE`: **do not uninstall** — that error is protecting your data.
+> Back up first from the in-app console, or with `selfbuild/scripts/backup-dshhome.sh`.
 
----
+## What was changed vs upstream
 
-## Sources & licenses
+- Android adaptation patches (45+): app shell, single-process engine, storage/permission handling, engine startup and HTTP dispatch.
+- **On-device build chain**: the app can build, sign and publish itself; project sources and scripts are in this repository.
+- Bundled skills and self-authored patches (see the repository tree).
 
-| Part | Origin | License |
+## Provenance and license
+
+| Part | Upstream | License |
 |---|---|---|
-| Android shell skeleton | [woaiys3/deepseek-harness-android-app](https://github.com/woaiys3/deepseek-harness-android-app) | MIT |
-| `@deepseek-ai/dsh` engine | [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) | MIT |
-| Virtual display (vscreen) | [AAswordman/Operit](https://github.com/AAswordman/Operit) | LGPL-3.0 |
+| Android app shell | [woaiys3/deepseek-harness-android-app](https://github.com/woaiys3/deepseek-harness-android-app) | MIT |
+| DSH engine core | [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) | see upstream |
+| Virtual display bridge | [AAswordman/Operit](https://github.com/AAswordman/Operit) | LGPL-3.0 |
 
-The code added by this project is released under the **MIT license** — see [`LICENSE`](LICENSE).
-Bundled third-party components keep their own licenses (`@deepseek-ai/dsh` is MIT;
-the virtual-display part is LGPL-3.0) — see [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+Full license texts: [licenses/](licenses/) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+## Disclaimer
+
+Use at your own risk. Features that touch other apps or system settings require explicit authorization
+(accessibility service, Shizuku, notifications, storage). Nothing in this repository grants any right to
+third-party assets or trademarks.
 
 ---
 
-## Build it yourself — on the phone, no PC required
-
-The whole toolchain runs on-device (proot + Alpine + OpenJDK 17, plus
-`android.jar` / `d8.jar` / `apksigner.jar`).
-
-**It is _not_ bundled in the APK** — it weighs ~342MB, and most people only want the AI.
-So it is an **on-demand download**:
-
-> **Console → "Build environment"** → pick GitHub or Gitee → ~193MB, verified
-> (sha256, per part *and* whole) and extracted automatically.
->
-> Both repositories host **the same split archives**.
->
-> The archives stay in `/sdcard/DeepSeekHarness/buildenv`, so **reinstalling the app
-> only needs a re-extract, not a re-download**.
-
-Then:
-
-```sh
-sh selfbuild/selfbuild.sh all     # payload → patch → pack → sign → verify
-```
-
-⚠️ Things that will bite you (learned the hard way):
-
-- **Signing keys**: the on-device key lets you overwrite-update *your* install; a
-  distribution build needs the release key. Mixing them up means whoever installs it
-  **cannot overwrite-update** — and uninstalling wipes all their data.
-- **Version numbers must be set explicitly** when packing, or the update check breaks
-  and `pm install -r` may be rejected as a downgrade.
-- **⛔ Never install a self-built APK directly** — verify it in an isolated instance first
-  and keep a rollback APK on `/sdcard`.
-
-See `selfbuild/` for the scripts and `docs/` for per-patch notes.
+⭐ If this saved you time, a **star** is the best feedback — issues and feature requests are welcome (https://github.com/guzhou079-arch/deepseek-harness-android/issues).
