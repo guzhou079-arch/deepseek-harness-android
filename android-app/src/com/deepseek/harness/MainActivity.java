@@ -299,7 +299,7 @@ public class MainActivity extends Activity {
         installCrashHandler();
         checkAbiCompat(); // ② ABI 检测：非 arm64 设备引擎可能无法运行，弹提示
         checkBatteryOptimization(); // ④ 电池优化引导：被限制时提示（挂后台可能被杀）
-        // v1.12：不再在启动时自动检查更新（用户需求）；改为控制台底部的「检查更新」手动触发。
+        // v1.12：不再在启动时自动检查更新；改为控制台底部的「检查更新」手动触发。
 
         webView = new WebView(this);
         WebSettings ws = webView.getSettings();
@@ -996,7 +996,7 @@ public class MainActivity extends Activity {
             // 非 arm64 设备：引擎（node arm64 二进制）无法原生运行，提示但不阻止。
             // 用 Toast 轻提示且只提示一次（SharedPreferences 记录）：原来是模态 AlertDialog，
             // 真机 arm64 根本不会触发，而 x86_64 模拟器上每次切主题/旋转重建 Activity 都弹一次，
-            // 遮住操作还很吵（用户需求改成 Toast 式提示）。
+            // 遮住操作还很吵（改成 Toast 式提示）。
             // 位宽用 Process.is64Bit() 如实描述（API 23+，minSdk 24 可直接用），别猜。
             SharedPreferences sp = getSharedPreferences(PREFS, MODE_PRIVATE);
             if (sp.getBoolean("abi_warned", false)) return;
@@ -3715,8 +3715,9 @@ public class MainActivity extends Activity {
             @Override public void run() {
                 try { Thread.sleep(90000); } catch (Throwable ignored) { return; }
                 try {
-                    File script = new File(Environment.getExternalStorageDirectory(),
-                            "Download/Operit/dsh_own_app/selfbuild/selfcheck.sh");
+                    // 位置可覆盖：-Ddsh.selfcheck.script=<绝对路径>；默认用 App 公开目录下的副本。
+                    File script = new File(System.getProperty("dsh.selfcheck.script",
+                            new File(Environment.getExternalStorageDirectory(), "DeepSeekHarness/selfcheck.sh").getAbsolutePath()));
                     if (!script.isFile()) return;
                     ProcessBuilder pb = new ProcessBuilder("/system/bin/sh", script.getAbsolutePath(), "--quiet");
                     pb.redirectErrorStream(true);
@@ -7083,7 +7084,7 @@ public class MainActivity extends Activity {
     }
 
     // ==================== 备份：导出 / 导入 ====================
-    // 用户需求：装插件把引擎弄崩时，能先把全部数据导出，清完重装再导回，什么都不丢。
+    // 设计目标：装插件把引擎弄崩时，能先把全部数据导出，清完重装再导回，什么都不丢。
     // 与安全模式互补：安全模式解决「不用清数据就能启动」，导出/导入解决「换机、彻底重装、留底」。
 
     private SharedPreferences prefs() { return getSharedPreferences(PREFS, MODE_PRIVATE); }

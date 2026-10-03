@@ -124,7 +124,7 @@ public class OverlayService extends Service {
     private volatile boolean replyWaiting = false;
     /**
      * v1.38：回复区**只在真有消息要显示时**才出现。
-     * 用户需求「没发消息时不要出现，发了消息才出现」—— 所以打开面板不再自动加载历史回复，
+     * 设计约束：没发消息时不要出现、发了消息才出现 —— 所以打开面板不再自动加载历史回复，
      * 只有「发送」「读取到真回复」「长按头像」这三种情况才会把这块区域显示出来。
      * 注意它和 replyText 非空不是一回事：等待回复时 replyText 是占位文案，不算有内容。
      */
@@ -143,7 +143,7 @@ public class OverlayService extends Service {
     private volatile boolean userHidden = false;
     /**
      * v1.61：吸附在哪条边（0=左 1=右 2=上 3=下）。
-     * 用户需求「左右能半隐藏外，上下也可以」—— 横屏打游戏时左右贴边会让画面很别扭，
+     * 设计约束：左右能半隐藏外、上下也可以 —— 横屏打游戏时左右贴边会让画面很别扭，
      * 上下半藏更自然（游戏多是横屏，上/下边缘的可用空间更值钱）。
      * 由拖动松手时的 snapToEdge() 决定。
      */
@@ -337,7 +337,7 @@ public class OverlayService extends Service {
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         try { b.addAction(new Notification.Action.Builder(null, "开关面板", togglePi).build()); }
         catch (Throwable ignored) {}
-        // v1.84（用户需求）：把「流体云:开/关」也放到通知栏这一排，和小鲸鱼开关在一起
+        // v1.84：把「流体云:开/关」也放到通知栏这一排，和小鲸鱼开关在一起
         Intent fluid = new Intent(this, OverlayService.class);
         fluid.setAction(ACTION_TOGGLE_FLUID);
         PendingIntent fluidPi = PendingIntent.getService(this, 3, fluid,
@@ -760,7 +760,7 @@ public class OverlayService extends Service {
     }
 
     // ===================== v1.77 阶段 5：流体云式回复卡（逐字流式） =====================
-    // 设计出处：9-30 文档「流体云 —— 只做视觉仿」。视觉取自 /sdcard/Download/fluidcard-mock/index.html：
+    // 设计出处：9-30 文档「流体云 —— 只做视觉仿」。视觉取自本地设计草图（未随仓库分发）：
     //   品牌蓝 #4D6BFE、深蓝渐变卡面、大圆角、闪烁光标；原稿的 backdrop-filter 模糊在 Android 悬浮窗上
     //   **做不了真模糊**（那要模糊"身后的东西"）→ 这里用半透明渐变近似，别写"已实现模糊"。
     // ⚠️「逐字」的实现方式：引擎是**边生成边往会话文件落盘**的，所以我们用**密集轮询**（默认 1.2s）
@@ -799,7 +799,7 @@ public class OverlayService extends Service {
     private volatile boolean cardBroadcasting = false;
     private static final String PREF_FLUID = "ovl_fluid";
     private static final String PREF_LAST_BCAST = "ovl_last_bcast";   // v1.84：已播报内容的指纹（持久化）
-    /** v1.84：通知栏上的「流体云:开/关」动作（用户需求与小鲸鱼开关放一起）。 */
+    /** v1.84：通知栏上的「流体云:开/关」动作（与小鲸鱼开关放一起）。 */
     private static final String ACTION_TOGGLE_FLUID = "com.deepseek.harness.overlay.TOGGLE_FLUID";
     private Button fluidBtn = null;
     // v1.80（用户指定）：流体感（向上升入）+ 关闭键 + 顶到电量那一栏
@@ -1001,7 +1001,7 @@ public class OverlayService extends Service {
             int screenW = getResources().getDisplayMetrics().widthPixels;
             int screenH = getResources().getDisplayMetrics().heightPixels;
             cardText.setMaxWidth(Math.max(dp(140), (int) (screenW * cardMaxWidthFrac) - dp(24)));
-            // v1.88：不再截断成"…" —— 交给限高 ScrollView，超出的部分往下滚（用户需求"自下滑"）
+            // v1.88：不再截断成"…" —— 交给限高 ScrollView，超出的部分往下滚（可下滑）
             cardText.setMaxLines(Integer.MAX_VALUE);
             cardText.setEllipsize(null);
             if (cardScroll != null) {
@@ -1048,7 +1048,7 @@ public class OverlayService extends Service {
     }
 
     /**
-     * v1.87（用户需求）：**✕ = 收回胶囊形态**，不再整个关掉。
+     * v1.87：**✕ = 收回胶囊形态**，不再整个关掉。
      * （用户反馈："怎么点取消是关掉整个流体云，把他改成为恢复胶囊形态"）
      * 整个关掉仍然有两条路：①"点别处"（护栏：坐标真实 + 已亮 >1.5s）②开/关按钮（面板与通知栏各一份）。
      */
@@ -1142,7 +1142,7 @@ public class OverlayService extends Service {
 
     /**
      * 落点（v1.78 按草图改）：**顶部状态栏下沿展开，浮在内容之上，不挡悬浮球**。
-     * 草图原话见 /sdcard/Download/fluidcard-mock/index.html「① 在哪出现」。
+     * 布局依据见本地设计草图（未随仓库分发）「① 在哪出现」。
      * 仍然要补偿"窗口帧 vs 绘制位置"那个固定偏移（本机约 139px）。
      */
     private void positionCard() {
@@ -2355,7 +2355,7 @@ public class OverlayService extends Service {
         replyScroll.addView(replyText);
         panelView.addView(replyScroll);
 
-        // v1.24：原来的「打开应用 / 虚拟屏」两个按钮已按用户需求移除（面板太挤）。
+        // v1.24：原来的「打开应用 / 虚拟屏」两个按钮已移除（面板太挤）。
         // 回 App 走通知栏或桌面图标；虚拟屏预览仍可由其他入口唤起。
         LinearLayout btnRow2 = new LinearLayout(this);
         btnRow2.setOrientation(LinearLayout.HORIZONTAL);
@@ -2363,7 +2363,7 @@ public class OverlayService extends Service {
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         r2p.topMargin = dp(5);
         btnRow2.setLayoutParams(r2p);
-        // 销毁屏：替代旧预览窗上的 ✕（用户需求销毁功能收进小鲸鱼面板）
+        // 销毁屏：替代旧预览窗上的 ✕（销毁功能收进小鲸鱼面板）
         destroyBtn = pillButton("销毁屏", new Runnable() { @Override public void run() {
             try { VsreenBridgeService.destroyVscreenFromWhale(); } catch (Throwable ignored) {}
             setPanelVisible(false, true);
@@ -2393,7 +2393,7 @@ public class OverlayService extends Service {
             } catch (Throwable ignored) {}
             settleAfterLayout();
         }}));
-        // v1.83（用户需求"可以实现自己决定开启流体云"）：面板上一个开关，选择记进 prefs
+        // v1.83（可自行开关）：面板上一个开关，选择记进 prefs
         fluidBtn = pillButton(fluidLabel(), new Runnable() { @Override public void run() {
             setFluid(!cardAutoShow);
         }});
@@ -3034,7 +3034,7 @@ public class OverlayService extends Service {
         if (!show) releasePanelInput();   // v1.67：收起时把焦点 / 输入法 / 窗口标志一起收回
         if (show) {
             refreshPanelDynamicRows();
-            // v1.38：回复区只在**真有消息**时才露出来（用户需求：没发消息时它不该出现）。
+            // v1.38：回复区只在**真有消息**时才露出来（没发消息时不该出现）。
             // 所以这里不再自动去读会话文件 —— 打开面板只是把已有内容按需显示。
             boolean has = hasReplyContent();
             setReplyShown(has);
