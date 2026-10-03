@@ -135,9 +135,3 @@ licenses/lgpl-3.0.txt       LGPL-3.0（虚拟屏部分）
 licenses/gpl-3.0.txt        GPL-3.0（LGPL-3.0 的基础）
 THIRD_PARTY_NOTICES.md      第三方组件逐项声明
 ```
-
----
-
-## ⭐ Star 趋势
-
-[![Star History Chart](https://api.star-history.com/chart?repos=guzhou079-arch/deepseek-harness-android&type=date&legend=top-left)](https://star-history.com/#guzhou079-arch/deepseek-harness-android&Date)
