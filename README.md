@@ -4,6 +4,10 @@
 
 **不用 Termux、不用 root、不用配环境** —— 终端、文件访问、命令执行全部在 App 内运行。
 
+> **English** — DeepSeek Harness packaged as a ready-to-install Android APK. No Termux, no root, no setup:
+> the terminal, file access and command execution all run inside the app. It can even compile, package,
+> sign and release itself — entirely on the phone, without a computer.
+
 | 能干什么 | 说明 |
 |---|---|
 | 🐳 **悬浮球 / 桌宠** | 单击球就"说话"：台词 / 账户余额 / 今日已用 / 上一轮消耗 / 峰谷与预算提醒 |
@@ -11,6 +15,9 @@
 | 📱 **手机自动化** | 读屏、点击、输入、通知读取、定时任务、虚拟屏 |
 | 🔧 **手机自己出包** | javac → dex → 打包 → 签名 → 发版，全程不需要电脑（构建环境 App 内按需下载） |
 | 🧩 **随包技能** | 手机自动化（`dsh-mobile`）/ 文档整理（`doc-tidy`）/ 跨厂商多模型会审（`dsh-review`） |
+
+> ⭐ **如果它帮你省了时间，给个 Star 是最好的反馈** —— 也让我知道继续维护值不值得。
+> 用着有问题、或者有想要的功能，欢迎开 [Issue](https://github.com/guzhou079-arch/deepseek-harness-android/issues)。
 
 **下载安装**：见本仓库 **Releases**（GitHub 与 Gitee 两边内容一致，用哪个都行；
 每个 Release 的说明里带该 APK 的 SHA-256，装前可以核对）。
