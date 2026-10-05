@@ -10,7 +10,7 @@
  * 子命令：
  *   payload-extract <apk> <out.zip>
  *   payload-patch   <in.zip> <out.zip> <overlayDir>       # overlay 目录按 payload 相对路径覆盖
- *   apk-pack        <base.apk> <payload.zip> <out.apk>    # 输出未签名 APK
+ *   apk-pack        <base.apk> <payload.zip> <out.apk> [--dex <classes.dex>] [--asset <本地文件>:<APK内条目>]
  *   check           <dir|zip> <manifest>                  # path|md5|keyword 行式校验
  *   inspect         <apk>
  */
@@ -87,11 +87,31 @@ else if (cmd === 'apk-pack') {
   const [base, payload, out] = args;
   const di = args.indexOf('--dex');
   const dexPath = di >= 0 ? args[di + 1] : null;
+  // --asset <本地文件>:<APK 内条目名>（可重复）—— 替换 payload.zip / classes.dex 之外的 asset。
+  // 为什么需要：pack 原本只换这两样，于是「虚拟屏核心 assets/vscreen_shizuku.jar」这类
+  // 独立 asset，光改 Java 源码再 pack 也进不去包（2026-10-03 踩到，v143 差点白装）。
+  const assetSpecs = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--asset') {
+      const v = args[i + 1] || '';
+      const k = v.lastIndexOf(':');
+      if (k <= 0) die('--asset 用法: <本地文件>:<APK 内条目名>');
+      assetSpecs.push([v.slice(0, k), v.slice(k + 1)]);
+    }
+  }
   const pbuf = (!payload || payload === '-') ? null : fs.readFileSync(payload);
   const dbuf = dexPath ? fs.readFileSync(dexPath) : null;
-  if (!pbuf && !dbuf) die('payload 与 --dex 至少要换一个');
+  if (!pbuf && !dbuf && !assetSpecs.length) die('payload / --dex / --asset 至少要换一样');
   let hitP = 0, hitD = 0;
+  const hitA = new Set();
   const es = readZip(base).map((e) => {
+    const as = assetSpecs.find(([, name]) => name === e.name);
+    if (as) {
+      const buf = fs.readFileSync(as[0]);
+      hitA.add(e.name);
+      log(`  替换 ${e.name}: ${e.csize} → ${buf.length} 字节（来自 ${as[0]}）`);
+      return { name: e.name, data: buf };
+    }
     if (e.name === ASSET && pbuf) {
       hitP++;
       log(`  替换 ${ASSET}: ${e.csize} → ${pbuf.length} 字节（STORE）`);
@@ -106,6 +126,7 @@ else if (cmd === 'apk-pack') {
   });
   if (pbuf && !hitP) die('骨架里没有 ' + ASSET);
   if (dbuf && !hitD) die('骨架里没有 classes.dex');
+  for (const [src, name] of assetSpecs) if (!hitA.has(name)) die(`骨架里没有 ${name}（--asset ${src}）`);
   writeZip(es, out);
   log(`✓ 写出未签名 APK ${out}（${fs.statSync(out).size} 字节，条目 ${es.length}）`);
 }

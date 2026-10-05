@@ -35,5 +35,5 @@ $PY $D selftest       # 自测（现场造样例并读回），改完脚本必�
 
 ## 与"聊天里的文件"衔接
 
-微信/QQ 收到的文件通常先在 `/sdcard/Download/WeiXin`（用户点过"保存到手机"）→ 直接读；
+微信/QQ 收到的文件通常先在 `Download/WeiXin`（用户点过"保存到手机"）→ 直接读；
 没有则见技能 `dsh-mobile` 的三路 fallback。

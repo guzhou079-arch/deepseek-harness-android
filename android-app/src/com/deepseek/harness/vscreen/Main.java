@@ -518,7 +518,10 @@ public class Main {
             return err("无法解析启动组件：" + pkg + "（" + resolved.replace("\n", " ") + "）");
         }
 
+        // v1.43：加 --activity-exclude-from-recents —— 起在虚拟屏上的 App 不进"最近任务/后台"。
+        // （用户反馈：虚拟屏里起设置，任务切换器里也冒出一个"设置"。）
         String out = execCapture("/system/bin/am", "start", "--display", String.valueOf(s.displayId),
+                "--activity-exclude-from-recents",
                 "-n", component);
         log("launch " + pkg + " -> " + component + " on " + s.displayId + " : " + out, null);
         if (out.contains("Error:") || out.startsWith("exec失败")) {

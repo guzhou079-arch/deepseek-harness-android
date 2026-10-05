@@ -9,8 +9,14 @@
    为什么不放进 mobile.css：mobile.css / mobile.js / index.html 在 APK 的
    FORCE_OVERWRITE_PREFIXES 白名单里，App 每次启动都会被 payload 覆盖；
    dist/dsh-bg.css + dist/dsh-bg.svg + open-in-app 里那几行注入都不在白名单里，
-   所以**重启 App 也还在**（换内核大版本、dshroot 整体重解压时才会没，
-   那时把本文件与 dsh-bg.svg 拷回去 + 重新打那几行注入即可）。
+   所以**重启 App 也还在**。
+   ⚠️ 但它**换内核大版本后会静默失效**（2026-10-03 rc.1→rc.2 实测）：文件还在、md5 也没变，
+   坏的是下面那些选择器 —— 它们绑的是**前端构建的 CSS 模块哈希类名**
+   （rc.1 是 .D_tfqW_*，rc.2 变成 .wSkVaW_*）。前端 build 一换哈希就整批变，
+   规则全成死选择器 → 壁纸消失（不报错、不崩、清单也查不出来）。
+   ⇒ 换内核后**必须重新映射哈希**：从新前端 bundle 里按类名后缀找唯一对应
+     （`.wSkVaW_composerSeat` 在 dsh-client-ui-conversation/lib/client.js；
+       `.ZTP-Xa_frame` 那次恰好没变）。`mobile.css` 有同一个坑。
 
    想换图，三种改法（从易到难）：
      1) 直接替换 dist/dsh-bg.svg（保持文件名，随手用别的 SVG 覆盖即可）；
@@ -97,23 +103,23 @@ body[data-ds-dark-theme] {
 }
 
 /* ---------- 会话列透明，让图透出来 ----------
-   否则 .D_tfqW_root 的实色 bg-base 会把整列盖成一块死黑，图只在侧栏缝隙里露边。 */
-.D_tfqW_root,
-.D_tfqW_embeddedBody {
+   否则 .wSkVaW_root 的实色 bg-base 会把整列盖成一块死黑，图只在侧栏缝隙里露边。 */
+.wSkVaW_root,
+.wSkVaW_embeddedBody {
   background: transparent !important;
 }
 
 /* ---------- 输入栏底部渐隐别糊一条实色 ----------
    原规则把底部渐变收到实色 bg-base（36px 以下全不透明）→ 图片在底部被切断。
    改成半透明，既保住输入栏上的文字可读性，也不切断背景。 */
-.D_tfqW_root[data-phase="active"] .D_tfqW_composerSeat,
-.D_tfqW_embeddedBody[data-content-phase="active"] .D_tfqW_composerSeat {
+.wSkVaW_root[data-phase="active"] .wSkVaW_composerSeat,
+.wSkVaW_embeddedBody[data-content-phase="active"] .wSkVaW_composerSeat {
   background: linear-gradient(180deg,
     transparent 0px,
     color-mix(in srgb, var(--dsw-alias-bg-base, #0b0f1a) 84%, transparent) 36px) !important;
 }
 
 /* ---------- 空会话/新会话页的卡片别整块盖住图 ---------- */
-.D_tfqW_root [data-empty-state] {
+.wSkVaW_root [data-empty-state] {
   background: transparent !important;
 }

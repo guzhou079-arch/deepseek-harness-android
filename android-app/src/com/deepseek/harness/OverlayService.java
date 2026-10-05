@@ -106,6 +106,8 @@ public class OverlayService extends Service {
     private TextView statusText;
     private TextView aiText;
     private Button destroyBtn;
+    /** v1.37：面板上的「开/关虚拟屏」按钮。 */
+    private Button vscreenBtn;
     // v1.9 虚拟屏预览：悬浮窗实时显示虚拟屏画面（用户可看 AI 操作）
     private ImageView vscreenImageView = null;
     // v1.67：面板里的输入框引用（收起面板时要主动还焦点/关输入法/恢复 NOT_FOCUSABLE）
@@ -233,7 +235,7 @@ public class OverlayService extends Service {
             // "Only the original thread that created a view hierarchy can touch its views"。
             s.handler.post(new Runnable() { @Override public void run() {
                 try {
-                    s.userHidden = false;
+                    s.setUserHidden(false);
                     s.applyVisibleNow();
                     s.setPanelVisible(show, true);
                     if (show && refresh) s.refreshReply(false);
@@ -247,21 +249,31 @@ public class OverlayService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        // 通知栏「显示小鲸鱼」：解除用户隐藏并抖一下示意
+        // 通知栏「显示小鲸鱼」：解除用户关闭并抖一下示意（v1.88 起通知栏那个按钮走下面的两态开关）
         if (intent != null && ACTION_SHOW.equals(intent.getAction())) {
-            userHidden = false;
+            setUserHidden(false);
             applyVisibleNow();
             wiggle();
+        }
+        // v1.88：通知栏「开启/关闭悬浮球」一键开关（与「流体云:开/关」同一套：先动状态，再刷新按钮文字）
+        if (intent != null && ACTION_TOGGLE_BALL.equals(intent.getAction())) {
+            try { toggleBall(); } catch (Throwable ignored) {}
+            try { startForegroundCompat(); } catch (Throwable ignored) {}
         }
         // v1.84：通知栏「流体云:开/关」
         if (intent != null && ACTION_TOGGLE_FLUID.equals(intent.getAction())) {
             setFluid(!cardAutoShow);
             try { startForegroundCompat(); } catch (Throwable ignored) {}   // 刷新通知上那行文字
         }
+        // v1.37：通知栏「开/关虚拟屏」
+        if (intent != null && ACTION_TOGGLE_VSCREEN.equals(intent.getAction())) {
+            try { VsreenBridgeService.toggleFromUi(); } catch (Throwable ignored) {}
+            try { startForegroundCompat(); } catch (Throwable ignored) {}   // 刷新按钮文字
+        }
         // v1.43：通知栏「开关面板」—— 悬浮窗收不到触摸时的固定入口
         if (intent != null && ACTION_TOGGLE_PANEL.equals(intent.getAction())) {
             try {
-                userHidden = false;
+                setUserHidden(false);   // v1.88：开面板 = 用户要它，顺手把"关闭"状态解除并落盘
                 applyVisibleNow();
                 setPanelVisible(!panelVisible, true);
                 if (panelVisible) refreshReply(false);   // 打开顺手刷一次回复
@@ -278,6 +290,10 @@ public class OverlayService extends Service {
     private static final String ACTION_SHOW = "com.deepseek.harness.overlay.SHOW";
     /** v1.43：从通知栏动作触发面板开关（不依赖悬浮窗触摸）。 */
     private static final String ACTION_TOGGLE_PANEL = "com.deepseek.harness.overlay.TOGGLE_PANEL";
+    /** v1.37：通知栏「开/关虚拟屏」。 */
+    private static final String ACTION_TOGGLE_VSCREEN = "com.deepseek.harness.overlay.TOGGLE_VSCREEN";
+    /** v1.88：通知栏「隐藏/显示小鲸鱼」—— 一键开关悬浮球（两态文案）。 */
+    private static final String ACTION_TOGGLE_BALL = "com.deepseek.harness.overlay.TOGGLE_BALL";
 
     @Override
     public void onDestroy() {
@@ -319,11 +335,16 @@ public class OverlayService extends Service {
         open.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_NEW_TASK);
         PendingIntent pi = PendingIntent.getActivity(this, 0, open,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        Intent show = new Intent(this, OverlayService.class);
-        show.setAction(ACTION_SHOW);
-        PendingIntent showPi = PendingIntent.getService(this, 1, show,
+        // v1.88：通知栏那一格改成**一键开关**（原来只有单向「显示小鲸鱼」，
+        // 想关掉只能把球拖到屏幕底部 —— 用户报"没法直接关"）。
+        // 文案看 userHidden（用户意图）而不是当前像素可见性：App 在前台时球本来就不显示，
+        // 那时按钮若跟着说「显示」，用户会以为开关坏了。
+        // （旧动作 ACTION_SHOW 仍然保留处理，老通知点下去照样能恢复。）
+        Intent ball = new Intent(this, OverlayService.class);
+        ball.setAction(ACTION_TOGGLE_BALL);
+        PendingIntent ballPi = PendingIntent.getService(this, 5, ball,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        try { b.addAction(new Notification.Action.Builder(null, "显示小鲸鱼", showPi).build()); }
+        try { b.addAction(new Notification.Action.Builder(null, ballLabel(), ballPi).build()); }
         catch (Throwable ignored) {
             // 老系统 Action.Builder(null, ...) 不吃图标时退化：不显示动作也不影响主流程
         }
@@ -344,12 +365,69 @@ public class OverlayService extends Service {
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         try { b.addAction(new Notification.Action.Builder(null, fluidLabel(), fluidPi).build()); }
         catch (Throwable ignored) {}
+        // v1.37：虚拟屏开关也放通知栏这一排
+        Intent vs = new Intent(this, OverlayService.class);
+        vs.setAction(ACTION_TOGGLE_VSCREEN);
+        PendingIntent vsPi = PendingIntent.getService(this, 4, vs,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        try { b.addAction(new Notification.Action.Builder(null, vscreenLabel(), vsPi).build()); }
+        catch (Throwable ignored) {}
         return b.setContentTitle("🐋 DeepSeek Harness 运行中")
                 .setContentText("引擎状态：" + (engineUp ? "运行中（端口 " + enginePort + "）" : "未运行"))
                 .setSmallIcon(R.drawable.ic_launcher)
                 .setContentIntent(pi)
                 .setOngoing(true)
                 .build();
+    }
+
+    /** v1.37：通知栏按钮文字随虚拟屏状态变。 */
+    private String vscreenLabel() {
+        try { return VsreenBridgeService.isVscreenRunning() ? "关虚拟屏" : "开虚拟屏"; }
+        catch (Throwable t) { return "虚拟屏"; }
+    }
+
+    /**
+     * v1.88：通知栏那一格的文字 —— 写成**动作**，不写状态（和「开/关流体云」同一个理由）。
+     * 判据是 userHidden（**用户意图**），不是像素可见性：App 在前台时球本来就不显示，
+     * 那时若跟着说「开启悬浮球」，用户会以为这个开关坏了。
+     */
+    private String ballLabel() {
+        return userHidden ? "开启悬浮球" : "关闭悬浮球";
+    }
+
+    /**
+     * v1.88：一键**开关**悬浮球 —— 用户要的是"关掉"，不是"藏一下"。
+     *   关 = userHidden=true 且**落盘**（PREF_BALL_OFF）：
+     *        球立刻淡出，而且 App 重启 / 换内核 / 服务被系统重建之后**都不会再自己冒出来**，
+     *        直到用户自己点「开启悬浮球」。面板是 rootView 的子视图，所以关球时面板一起收，
+     *        不会留一个"没有球的浮层"。
+     *   开 = 解除并抖一下示意（与旧的「显示小鲸鱼」一致）。
+     */
+    private void toggleBall() {
+        if (userHidden) {
+            setUserHidden(false);
+            applyVisibleNow();
+            wiggle();
+            return;
+        }
+        setUserHidden(true);
+        if (panelVisible) { try { setPanelVisible(false, true); } catch (Throwable ignored) {} }
+        try {
+            rootView.animate().alpha(0f).scaleX(0.5f).scaleY(0.5f).setDuration(180)
+                    .withEndAction(new Runnable() { @Override public void run() {
+                        try {
+                            rootView.setAlpha(1f);
+                            applyVisibleNow();
+                        } catch (Throwable ignored) {}
+                    }}).start();
+        } catch (Throwable ignored) {
+            applyVisibleNow();
+        }
+        try {
+            android.widget.Toast.makeText(getApplicationContext(),
+                    "悬浮球已关闭，需要时点通知栏「开启悬浮球」",
+                    android.widget.Toast.LENGTH_SHORT).show();
+        } catch (Throwable ignored) {}
     }
 
     /**
@@ -798,6 +876,11 @@ public class OverlayService extends Service {
     private volatile String lastBroadcastHash = null;   // v1.84：内容指纹（String.valueOf(t.hashCode())）
     private volatile boolean cardBroadcasting = false;
     private static final String PREF_FLUID = "ovl_fluid";
+    /**
+     * v1.88：悬浮球「关了就是关了」——用户按通知栏那一格关掉后，**跨重启也要保持关闭**
+     * （原来只有内存里的 userHidden，服务一重建球又冒出来，用户报"我不想要它出现的时候关不掉"）。
+     */
+    private static final String PREF_BALL_OFF = "ovl_ball_off";
     private static final String PREF_LAST_BCAST = "ovl_last_bcast";   // v1.84：已播报内容的指纹（持久化）
     /** v1.84：通知栏上的「流体云:开/关」动作（与小鲸鱼开关放一起）。 */
     private static final String ACTION_TOGGLE_FLUID = "com.deepseek.harness.overlay.TOGGLE_FLUID";
@@ -1299,6 +1382,20 @@ public class OverlayService extends Service {
             SharedPreferences p = getSharedPreferences(PREFS, MODE_PRIVATE);
             cardAutoShow = p.getBoolean(PREF_FLUID, cardAutoShow);
             lastBroadcastHash = p.getString(PREF_LAST_BCAST, null);   // v1.84：重启后不再把上一条重播
+            // v1.88：用户上次把悬浮球关掉了吗？关了就一直不出现，直到他自己再打开。
+            userHidden = p.getBoolean(PREF_BALL_OFF, false);
+        } catch (Throwable ignored) {}
+    }
+
+    /**
+     * v1.88：改「用户是否主动关掉了悬浮球」，并**落盘**。
+     * 所有改 userHidden 的地方都必须走这里 —— 只改内存字段的话，
+     * 服务一重建（换内核/App 重启）球就又冒出来，正是用户报的那个问题。
+     */
+    private void setUserHidden(boolean hidden) {
+        userHidden = hidden;
+        try {
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(PREF_BALL_OFF, hidden).apply();
         } catch (Throwable ignored) {}
     }
 
@@ -2364,6 +2461,12 @@ public class OverlayService extends Service {
         r2p.topMargin = dp(5);
         btnRow2.setLayoutParams(r2p);
         // 销毁屏：替代旧预览窗上的 ✕（销毁功能收进小鲸鱼面板）
+        // v1.37：面板里给出「开/关虚拟屏」——一个按钮，文字随状态变
+        vscreenBtn = pillButton("开虚拟屏", new Runnable() { @Override public void run() {
+            try { VsreenBridgeService.toggleFromUi(); } catch (Throwable ignored) {}
+            setPanelVisible(false, true);
+        }});
+        btnRow2.addView(vscreenBtn);
         destroyBtn = pillButton("销毁屏", new Runnable() { @Override public void run() {
             try { VsreenBridgeService.destroyVscreenFromWhale(); } catch (Throwable ignored) {}
             setPanelVisible(false, true);
@@ -3012,7 +3115,7 @@ public class OverlayService extends Service {
         try {
             s.handler.post(new Runnable() { @Override public void run() {
                 try {
-                    s.userHidden = false;
+                    s.setUserHidden(false);   // v1.88：也落盘（控制台点「显示悬浮球」= 用户要它）
                     s.applyVisibleNow();   // 里面已含缩放/尺寸复位（v1.64）
                     s.wiggle();
                 } catch (Throwable ignored) {}
@@ -3292,9 +3395,9 @@ public class OverlayService extends Service {
         } catch (Throwable ignored) {}
     }
 
-    /** 拖到底部松手：隐藏小鲸鱼（通知栏「显示小鲸鱼」可恢复）。 */
+    /** 拖到底部松手：关掉小鲸鱼（通知栏「开启悬浮球」可恢复；v1.88 起这个状态会落盘）。 */
     private void hideByDragToBottom() {
-        userHidden = true;
+        setUserHidden(true);
         // v1.63 诊断：把"隐藏分支被触发时的现场"记进手势日志。
         // 用户反馈"拖到底部直接收起来了"，但按代码应该先命中底边半藏 ——
         // 这条日志能确认到底是不是走了这个分支，以及当时松手在哪。
@@ -3313,7 +3416,7 @@ public class OverlayService extends Service {
         }
         try {
             android.widget.Toast.makeText(getApplicationContext(),
-                    "小鲸鱼已隐藏，可从通知栏「显示小鲸鱼」恢复", android.widget.Toast.LENGTH_LONG).show();
+                    "小鲸鱼已关闭，可从通知栏「开启悬浮球」恢复", android.widget.Toast.LENGTH_LONG).show();
         } catch (Throwable ignored) {}
     }
 

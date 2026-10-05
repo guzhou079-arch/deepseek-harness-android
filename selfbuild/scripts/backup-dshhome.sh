@@ -58,8 +58,14 @@ OUT="$OUTDIR/dshhome-$TS.tar.gz"
 echo "== 打包 =="
 # ⚠ toybox tar 对多个 -C 只认最后一个（实测：dshhome 会被整个漏掉）→ 只用一个 -C + 相对路径。
 # 还原对应 `tar -xzf <归档> -C $F`。
-tar -czf "$OUT" -C "$F" \
-  payload/dshhome keys .pip bin .local/lib/python3.14/site-packages/usercustomize.py
+# ⚠ 2026-10-03 修复：`.pip` / `bin` / `.local/.../usercustomize.py` 在本机**已经不存在**，
+#   硬塞进 tar 会让整包以非 0 退出 —— 归档其实写出来了，但脚本报「✗ tar 失败」，看着像备份坏了。
+#   → 先只挑存在的路径；顺带把**可再生**的 cache 排除掉（实测 111MB，占整包三分之一）。
+ITEMS="payload/dshhome keys"
+for p in .pip bin .local/lib/python3.14/site-packages/usercustomize.py; do
+  if [ -e "$F/$p" ] || [ -L "$F/$p" ]; then ITEMS="$ITEMS $p"; else echo "  · 跳过（本机不存在）: $p"; fi
+done
+tar -czf "$OUT" -C "$F" --exclude 'payload/dshhome/cache' $ITEMS
 if [ $? -ne 0 ]; then echo "✗ tar 失败（看上面报错）"; exit 1; fi
 
 if [ ! -s "$OUT" ]; then echo "✗ 打包失败"; exit 1; fi

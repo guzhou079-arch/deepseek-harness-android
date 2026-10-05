@@ -87,16 +87,24 @@ patch)
   "$NODE" "$SB/scripts/check-bg-injection.js"     "$SB/build-overlay/dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-open-in-app/lib/client.js"
   ;;
 pack)
-  # 用法: pack [--dex <classes.dex>]     # 没跑 patch 时 payload 保持原样
-  DEX=""
-  if [ "$1" = "--dex" ]; then DEX="$2"; shift 2 || true; fi
+  # 用法: pack [--dex <classes.dex>] [--asset <本地文件>:<APK 内条目名>]...
+  #   --asset：替换独立的 asset（如虚拟屏核心 assets/vscreen_shizuku.jar）。
+  #   没有它的话，改这类 asset 的源码再 pack 也进不去包（v143 差点白装）。
+  DEX=""; ASSETS=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --dex)   DEX="$2"; shift 2 || exit 1;;
+      --asset) ASSETS="$ASSETS --asset $2"; shift 2 || exit 1;;
+      *) shift;;
+    esac
+  done
   if [ -f "$PAY_NEW" ]; then PAY=$PAY_NEW; else PAY=-; fi
-  [ "$PAY" = "-" ] && [ -z "$DEX" ] && { echo "✗ 既没有 payload-new.zip 也没有 --dex"; exit 1; }
+  [ "$PAY" = "-" ] && [ -z "$DEX" ] && [ -z "$ASSETS" ] && { echo "✗ 既没有 payload-new.zip 也没有 --dex/--asset"; exit 1; }
   [ -n "$DEX" ] && { [ -f "$DEX" ] || { echo "✗ 找不到 dex: $DEX"; exit 1; }; echo "  换 dex: $DEX"; }
   if [ -n "$DEX" ]; then
-    "$NODE" "$SB/lib/selfbuild.js" apk-pack "$BASE" "$PAY" "$UNSIGNED" --dex "$DEX"
+    "$NODE" "$SB/lib/selfbuild.js" apk-pack "$BASE" "$PAY" "$UNSIGNED" --dex "$DEX" $ASSETS
   else
-    "$NODE" "$SB/lib/selfbuild.js" apk-pack "$BASE" "$PAY" "$UNSIGNED"
+    "$NODE" "$SB/lib/selfbuild.js" apk-pack "$BASE" "$PAY" "$UNSIGNED" $ASSETS
   fi
   ;;
 mark)

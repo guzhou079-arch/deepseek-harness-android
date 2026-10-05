@@ -11,7 +11,7 @@ whenToUse: 任务涉及操作手机上的其他 App（微信/QQ/飞书/WPS/浏�
 1. **免特权通道**（永远可用）：文件系统（`/sdcard` 全读写）、剪贴板、`android_notify`、定时任务、
    以及两个 HTTP 桥 —— 引擎 `127.0.0.1:3080`、App 桥 `127.0.0.1:3081`。
 2. **无障碍桥** `http://127.0.0.1:3181`（不需特权，但用户必须开着「屏幕助手」）：
-   `/status` `/dump` `/find` `/tap?text=` `/input?text=` `/back` `/home` `/scroll?direction=` `/swipe`
+   `/status` `/dump` `/tap?text=`   ⚠️ **`/find` 实测不存在**（2026-10-03 核，返回「未知路由」）——要定位控件只能 `/dump` 后自己筛；筛选放在脚本里不花钱，把 dump 读进模型才花钱 `/input?text=` `/back` `/home` `/scroll?direction=` `/swipe`
    `/hold` `/touch` `/gesture` `/screenshot` `/open-file` `/notifications*`
 3. **特权通道**（Shizuku，**每周有 4 天不可用**）：`shizuku_shell`、`pm`、`am`、`dumpsys`、
    虚拟屏、读 `Android/data/<包名>`（微信收到的文件就在这里）。
@@ -19,7 +19,7 @@ whenToUse: 任务涉及操作手机上的其他 App（微信/QQ/飞书/WPS/浏�
 ## ⛔ 省 token 的硬规矩（违反 = 账单翻几倍）
 
 - **不要为了"看一眼"就 `/dump`**：一屏常有 600+ 节点。要点击就直接 `/tap?text=发送`；
-  要确认/定位控件用 `/find?text=…`（只回命中项）。**只有排障时才 dump 整树。**
+  要确认/定位控件：**桥没有 `/find`**，只能 `/dump` 后自己筛（**在脚本里筛**，别把整树读进上下文）。
 - **能走数据就绝不点界面**：文件、剪贴板、Intent、HTTP 优先；UI 只用在"非点不可"的地方
   （发消息、点"接收"、点"用其他应用打开"）。
 - **第二遍必须固化成脚本**：同一件事做过一次就写进本技能 `scripts/` 或
@@ -40,7 +40,7 @@ whenToUse: 任务涉及操作手机上的其他 App（微信/QQ/飞书/WPS/浏�
 
 ## 常用配方
 
-- **取微信收到的文件**：先看 `/sdcard/Download/WeiXin`（免特权，用户点过"保存到手机"的都在这里）；
+- **取微信收到的文件**：先看 `Download/WeiXin`（免特权，用户点过"保存到手机"的都在这里）；
   没有再看特权通道下的 `/sdcard/Android/data/com.tencent.mm/MicroMsg/Download`；
   两条都不行就提示用户点一次"保存到手机"。
 - **给某人发消息**：`/tap?text=<联系人>` → `/find?text=<联系人>` 核对 → `/input?text=<内容>`

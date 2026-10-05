@@ -29,6 +29,8 @@ import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.animation.AlphaAnimation;
+import android.view.animation.Animation;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebChromeClient;
@@ -507,11 +509,12 @@ public class MainActivity extends Activity {
         });
 
         statusView = new TextView(this);
-        statusView.setText("正在启动 DeepSeek Harness…");
+        statusView.setText("");
         statusView.setTextColor(cSub());
         statusView.setTextSize(TypedValue.COMPLEX_UNIT_PX, getResources().getDimension(R.dimen.text_body));
         statusView.setGravity(Gravity.CENTER);
-        statusView.setPadding(dp(24), dp(12), dp(24), dp(12));
+        statusView.setPadding(dp(24), dp(8), dp(24), dp(8));
+        statusView.setVisibility(View.GONE);
 
         progressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progressBar.setMax(100);
@@ -758,34 +761,34 @@ public class MainActivity extends Activity {
         // 鲸鱼 logo
         splashLogo = new ImageView(this);
         splashLogo.setImageResource(R.drawable.ic_launcher);
-        LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(dp(92), dp(92));
+        LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(dp(76), dp(76));
         llp.gravity = Gravity.CENTER_HORIZONTAL;
-        llp.bottomMargin = dp(22);
         box.addView(splashLogo, llp);
+
+        try {
+            AlphaAnimation breathe = new AlphaAnimation(0.45f, 1.0f);
+            breathe.setDuration(1200);
+            breathe.setRepeatMode(Animation.REVERSE);
+            breathe.setRepeatCount(Animation.INFINITE);
+            splashLogo.startAnimation(breathe);
+        } catch (Throwable ignored) {}
 
         // 品牌名
         splashBrand = new TextView(this);
-        splashBrand.setText("DeepSeek Harness");
-        splashBrand.setTextColor(cText());
-        splashBrand.setTextSize(TypedValue.COMPLEX_UNIT_PX, getResources().getDimension(R.dimen.text_title));
-        splashBrand.setTypeface(null, android.graphics.Typeface.BOLD);
-        splashBrand.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        blp.gravity = Gravity.CENTER_HORIZONTAL;
-        blp.bottomMargin = dp(26);
-        box.addView(splashBrand, blp);
+        splashBrand.setVisibility(View.GONE);
 
         // 状态文字
-        box.addView(statusView, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        slp.topMargin = dp(16);
+        box.addView(statusView, slp);
 
-        // 进度条（深色主题：亮蓝进度 + 暗灰轨道）
+        // 进度条（极细现代线条）
         android.content.res.ColorStateList tint = android.content.res.ColorStateList.valueOf(Color.parseColor("#4d6bfe"));
         progressBar.setProgressTintList(tint);
         progressBar.setProgressBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.parseColor("#1f2733")));
-        LinearLayout.LayoutParams pbp = new LinearLayout.LayoutParams(dp(260), dp(6));
-        pbp.topMargin = dp(18);
+        LinearLayout.LayoutParams pbp = new LinearLayout.LayoutParams(dp(180), dp(3));
+        pbp.topMargin = dp(14);
         pbp.gravity = Gravity.CENTER_HORIZONTAL;
         box.addView(progressBar, pbp);
 
@@ -3720,6 +3723,15 @@ public class MainActivity extends Activity {
                             new File(Environment.getExternalStorageDirectory(), "DeepSeekHarness/selfcheck.sh").getAbsolutePath()));
                     if (!script.isFile()) return;
                     ProcessBuilder pb = new ProcessBuilder("/system/bin/sh", script.getAbsolutePath(), "--quiet");
+                    // v1.45：**必须**给子进程 PATH / LD_LIBRARY_PATH。
+                    //   selfcheck.sh 里用的是裸命令（rg / curl / node），它们都在
+                    //   payload/runtime/bin 下；ProcessBuilder 继承的环境里没有这个 PATH，
+                    //   于是 7 项检查全部查不了 → 每次开机都误报「自检发现问题（7 项）」。
+                    //   复现与验证：模拟同样的空环境 → 7 项失败全出现；补上下面两行 → 0 失败。
+                    java.io.File rt = new java.io.File(getFilesDir(), "payload/runtime");
+                    java.util.Map<String, String> env = pb.environment();
+                    env.put("PATH", new java.io.File(rt, "bin").getAbsolutePath() + ":/system/bin:/system/xbin");
+                    env.put("LD_LIBRARY_PATH", new java.io.File(rt, "lib").getAbsolutePath());
                     pb.redirectErrorStream(true);
                     Process p = pb.start();
                     java.io.BufferedReader r = new java.io.BufferedReader(
@@ -4753,7 +4765,9 @@ public class MainActivity extends Activity {
             if (engineStartAborted) return;   // v1.13：用户点了「停止」→ 立即收手，别再刷“已等待 N 秒”
             if (healthOk()) { loadHome(); executePendingScheduledTask(); return; }
             long waited = (System.currentTimeMillis() - start) / 1000;
-            setStatus("正在启动 DeepSeek Harness…（已等待 " + waited + " 秒）");
+            if (waited >= 12) {
+                setStatus("正在准备运行环境…");
+            }
             try { Thread.sleep(1000); } catch (InterruptedException e) { return; }
         }
         if (engineStartAborted) return;   // v1.13：停止后不再走超时兜底（否则会重新 spawn + 重新加载页面）
@@ -4945,7 +4959,10 @@ public class MainActivity extends Activity {
         ui.post(new Runnable() {
             @Override public void run() {
                 statusView.setVisibility(View.GONE);
-                if (splashLogo != null) splashLogo.setVisibility(View.GONE);
+                if (splashLogo != null) {
+                    try { splashLogo.clearAnimation(); } catch (Throwable ignored) {}
+                    splashLogo.setVisibility(View.GONE);
+                }
                 if (splashBrand != null) splashBrand.setVisibility(View.GONE);
                 if (progressBar != null) {
                     progressBar.setIndeterminate(false);
@@ -4959,7 +4976,12 @@ public class MainActivity extends Activity {
     private void setStatus(final String s) {
         ui.post(new Runnable() {
             @Override public void run() {
-                statusView.setText(s);
+                if (s != null && !s.isEmpty()) {
+                    statusView.setText(s);
+                    statusView.setVisibility(View.VISIBLE);
+                } else {
+                    statusView.setVisibility(View.GONE);
+                }
                 if (consoleVisible) conSay(s);
             }
         });
