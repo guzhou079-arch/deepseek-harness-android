@@ -68,15 +68,10 @@ public class EngineService extends Service {
         i.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
         PendingIntent pi = PendingIntent.getActivity(this, 0, i,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        // v1.14：常驻通知加一个「控制台」入口。
-        // 冷启动不再停在控制台（改成直接进聊天页），控制台（权限自检 / 插件开关 / 日志 /
-        // 重启·停止引擎 / 检查更新）就只剩这一个常驻入口了，所以必须留着。
-        // requestCode 用 1，避免和上面的内容点击 PendingIntent（requestCode 0）撞车。
-        Intent c = new Intent(this, MainActivity.class);
-        c.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
-        c.putExtra("open_console", true);
-        PendingIntent cpi = PendingIntent.getActivity(this, 1, c,
-                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        // v1.33：常驻通知里的「控制台」按钮**已移除**。
+        // 旧实现把它当成控制台的唯一入口（见旧注释），所以必须有；现在界面上有一个
+        // 可拖动的齿轮按钮（MainActivity.attachSettingsFab），通知栏不再承担入口职责，
+        // 这一格就只做「前台保活 + 点一下回到应用」这件本分事。
         Notification.Builder b;
         if (Build.VERSION.SDK_INT >= 26) {
             b = new Notification.Builder(this, CHANNEL_ID);
@@ -87,7 +82,6 @@ public class EngineService extends Service {
                 .setContentText(text)
                 .setSmallIcon(R.drawable.ic_launcher)
                 .setContentIntent(pi)
-                .addAction(0, "控制台", cpi)   // 图标参数在 API 24+ 被忽略，传 0 即可
                 .setOngoing(true)   // 常驻不可滑动删除
                 .setPriority(Notification.PRIORITY_LOW)
                 .build();

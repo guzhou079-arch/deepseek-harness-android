@@ -374,8 +374,8 @@ public class OverlayService extends Service {
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         try { b.addAction(new Notification.Action.Builder(null, vscreenLabel(), vsPi).build()); }
         catch (Throwable ignored) {}
-        return b.setContentTitle("🐋 DeepSeek Harness 运行中")
-                .setContentText("引擎状态：" + (engineUp ? "运行中（端口 " + enginePort + "）" : "未运行"))
+        return b.setContentTitle("DeepSeek Harness")
+                .setContentText(engineUp ? "引擎运行中 · 点按回到应用" : "引擎未运行 · 点按回到应用")
                 .setSmallIcon(R.drawable.ic_launcher)
                 .setContentIntent(pi)
                 .setOngoing(true)

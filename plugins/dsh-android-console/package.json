@@ -1,0 +1,22 @@
+{
+  "name": "dsh-android-console",
+  "version": "0.1.0",
+  "private": true,
+  "description": "安卓壳控制台：设置页里的「控制台」——解压 / 引擎 / 救援 / 权限 / 插件 / 日志 / 自建环境 / 时光机 / 主题 / 更新",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": { "inject": [], "platform": "web" }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh": ">=0.1.7-rc.1 <0.3.0-0",
+    "@deepseek-ai/cordis": "^4.0.1"
+  },
+  "files": ["lib/index.js", "lib/client.js", "cordis.patch.yml", "README.md"]
+}

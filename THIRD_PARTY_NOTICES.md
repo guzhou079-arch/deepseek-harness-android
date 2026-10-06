@@ -95,11 +95,19 @@
 
 ---
 
-## 4. 摘要
+## 4. 社区技能与生态创意
+
+| 项 | 说明 |
+|---|---|
+| 随包扩展技能 (`skills/`) | `archify`、`ppt-design`、`memos`、`browser-skill`、`vox-director` 等技能的交互设计与原型思路借鉴自 DSH / AI 开源社区与创作者（如 @Omega泡泡 等），本项目针对安卓内嵌端与移动端场景进行了原生重构与深度适配 |
+
+---
+
+## 5. 摘要
 
 | 范围 | 许可证 |
 |---|---|
-| 本仓库其余全部内容（App 外壳、4 个自研插件、补丁面、构建脚本、文档） | **MIT** |
+| 本仓库其余全部内容（App 外壳、4 个自研插件、随包技能、补丁面、构建脚本、文档） | **MIT** |
 | `android-app/src/com/deepseek/harness/vscreen/`（虚拟屏） | **LGPL-3.0**（源自 Operit） |
 | `android-app/libs/*.aar`、`assets/rish_shizuku.dex`（Shizuku） | **Apache-2.0** |
 | APK 内置 Node 运行时、npm 依赖 | 各自原许可 |

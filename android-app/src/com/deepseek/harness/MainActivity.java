@@ -183,7 +183,9 @@ public class MainActivity extends Activity {
         "dshhome/skills/",
         // v1.71：桌宠配置（台词表/球大小/裁剪中心）。⚠️ 精确到文件：
         // 同目录的 whale-shota.png 授权"仅限本机自用、不得随包分发"，**绝不能**被这条带上。
-        "pet/pet.json"
+        "pet/pet.json",
+        // v1.33：网页设置页「控制台」插件 —— 解压/引擎/救援/权限/插件/自建环境/时光机/主题/更新
+        "dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-android-console/"
     };
     // 外部 dshroot 解压完成标记（App 在 dshroot 补齐后写入；清空/重置时随目录删除）。
     // 用于识别「解压中途被打断」：即使 REVISION 一致也强制补齐缺失文件。
@@ -427,6 +429,8 @@ public class MainActivity extends Activity {
                         @Override public void run() { refreshPageBackground(); }
                     }, d);
                 }
+                // v1.34：控制台改由前端插件 dsh-android-console 提供设置页，
+                // 这里不再往设置弹窗里注入 DOM（旧的 SETTINGS_ENTRY_JS / openSettings 已删）。
                 // v1.13.12：让页面把底色变化主动推给壳（用户在前端里切深浅色时状态栏能跟着变，
                 // 不再只靠页面加载时的几次采样）。注入 MutationObserver，主题 class/属性一变就上报。
                 try {
@@ -448,8 +452,17 @@ public class MainActivity extends Activity {
         });
 
         // v1.13.12：页面 → 壳的底色上报通道（配合上面注入的观察器；只暴露一个只读回调）
+        // v1.34：控制台搬进网页设置页后，这里换成两个窄接口 —— 状态 / 动作，见 ctlStateJson()。
         try {
             webView.addJavascriptInterface(new Object() {
+                /** 客户端插件 dsh-android-console 拉状态用（返回 JSON 字符串）。 */
+                @android.webkit.JavascriptInterface
+                public String ctlState() { return ctlStateJson(); }
+
+                /** 客户端插件 dsh-android-console 发动作用；动作在主线程执行，这里立刻回。 */
+                @android.webkit.JavascriptInterface
+                public String ctlAct(String id, String arg) { return ctlAction(id, arg); }
+
                 @android.webkit.JavascriptInterface
                 public void onBg(String css) {
                     final int c = parseCssColor(css);
@@ -4821,6 +4834,16 @@ public class MainActivity extends Activity {
         if (lanOn) pb.environment().put("DSH_ALLOW_LAN", "1");
         java.util.Map<String, String> env = pb.environment();
         env.put("LD_LIBRARY_PATH", lib.getAbsolutePath());
+        // 2026-10-07：交互式终端（右侧面板「新建终端」）起不来 —— 报
+        //   subprocess-local: command "/data/data/com.termux/files/usr/bin/bash" is not an executable file
+        // 根因：内核 dsh-subprocess-local 用 `process.env.SHELL || os.userInfo().shell` 定默认 shell，
+        //   而 Android 上 libuv 的 getpwuid 回退会把 **Termux 的** home/shell 直接填进来
+        //   （实测 userInfo() = {homedir:/data/data/com.termux/files/home,
+        //     shell:/data/data/com.termux/files/usr/bin/bash}，本机根本没装 Termux）。
+        //   壳这边一直没设 SHELL → 终端拿着一个不存在的路径去 exec，必失败。
+        // 修法：显式给引擎 SHELL=/system/bin/sh（Android 上必然存在）。mksh 认 PS1，
+        //   终端照样能就绪；只是拿不到 bash 专属的 PROMPT_COMMAND 标记，走空闲探测兜底。
+        env.put("SHELL", "/system/bin/sh");
         // Termux 共存修复（v1.7.4）：内置 node 在 Termux 环境编译，OPENSSLDIR 被编译死为
         // /data/data/com.termux/files/usr。装了 Termux 的设备读其 openssl.cnf 触发 EACCES，
         // node 启动即崩；没装 Termux 时靠 ENOENT 静默才碰巧正常。注入 OPENSSL_CONF 指向
@@ -5428,6 +5451,215 @@ public class MainActivity extends Activity {
             while (end < tail.length() && !" \r\n\t".contains(String.valueOf(tail.charAt(end)))) end++;
             return tail.substring(at, end);
         } catch (Throwable t) { return null; }
+    }
+
+    // ==================== v1.34 控制台 → 网页设置页 ====================
+    // 要的最终形态：把原生控制台的功能与文字，照「通用设置」那一页的样子做成 DSH 前端里的
+    // 一个设置页（客户端插件 dsh-android-console，注册 settings.section）。
+    // 页面上的每个动作都要落回安卓壳执行，所以壳这边只开一条窄桥：
+    //     dshshell.ctlState()        → 控制台状态 JSON
+    //     dshshell.ctlAct(id, arg)   → 执行一个动作，立刻返回 {"ok":true}
+    // 桥方法跑在 WebView 的 JavaBridge 线程上：读状态是只读的、可以直接答；动作一律
+    // ui.post 回主线程（它们要碰视图与 Intent）。
+    //
+    // 原生控制台**没删**，但不再有用户可见入口：它降级成**救援面** —— 文件没解压、
+    // 引擎启动超时、或通知带 open_console 时自动出现。理由：设置页由引擎端出来，
+    // 引擎起不来时它连不上，必须留一条不依赖引擎的路。
+
+    /** 控制台「权限」页的行：id / 标题 / 说明。原生页与网页设置页共用同一份文字。 */
+    private static final String[][] CON_PERMS = {
+        {"storage", "所有文件访问", "读写 /sdcard，AI 才能碰你的文件"},
+        {"notify", "通知", "AI 发通知、定时任务提醒"},
+        {"overlay", "悬浮窗", "黑鲸鱼悬浮窗 / 虚拟屏预览"},
+        {"battery", "电池优化", "设为「不限制」，否则切后台引擎会被杀"},
+        {"root", "root（超级用户）", "替代 Shizuku 跑特权命令：装应用 / 改设置 / 虚拟屏点击 / 任意 shell"},
+        {"shizuku", "Shizuku（免 root 特权通道）", "有 root 时用 root；没 root 时装 Shizuku 走同一套能力"},
+        {"a11y", "无障碍服务（读屏 / 点屏）", "android_screen / tap / type / see（不需要 root 或 Shizuku）"},
+        {"install", "安装未知应用", "android_package 装 APK 用"},
+    };
+
+    /** 网页设置页要的全部状态，一次答完（页面每 2 秒拉一次）。 */
+    private String ctlStateJson() {
+        org.json.JSONObject o = new org.json.JSONObject();
+        try {
+            o.put("version", conVersionLabel());
+
+            boolean ready = conFilesReady();
+            org.json.JSONObject ex = new org.json.JSONObject();
+            ex.put("ready", ready);
+            ex.put("busy", extracting);
+            ex.put("state", extracting ? "正在解压…" : (ready ? "已解压" : "未解压"));
+            ex.put("meta", conExtractMetaText(ready));
+            o.put("extract", ex);
+
+            boolean run = conEngineRunning();
+            boolean booting = conEngineBooting();
+            boolean busy = !run && (booting || starting);
+            org.json.JSONObject en = new org.json.JSONObject();
+            en.put("running", run);
+            en.put("booting", booting);
+            en.put("busy", busy);
+            en.put("state", run ? "引擎运行中" : (busy ? "启动中…" : "未启动"));
+            en.put("meta", conEngineMetaText(run, ready, busy));
+            o.put("engine", en);
+
+            boolean safe = safeModeActive();
+            int fails = bootFailures();
+            String rescueDesc;
+            if (safe) {
+                rescueDesc = "已旁置 profile 的用户层，用出厂配置启动——会话 / 凭证 / 设置都还在。"
+                        + "修好之后再「退出安全模式」把用户层还回去。";
+            } else if (fails >= BOOT_FAIL_HINT_AT) {
+                rescueDesc = "连续 " + fails + " 次启动失败。很可能是装的插件把配置文件写坏了——"
+                        + "用「安全模式启动」跳过用户层，不丢任何数据。";
+            } else {
+                rescueDesc = "引擎起不来时，用安全模式跳过用户层启动（不丢数据）；也可以随时导出全部数据做备份。";
+            }
+            org.json.JSONObject rs = new org.json.JSONObject();
+            rs.put("safeMode", safe);
+            rs.put("fails", fails);
+            rs.put("warn", !safe && fails >= BOOT_FAIL_HINT_AT);
+            rs.put("desc", rescueDesc);
+            o.put("rescue", rs);
+
+            org.json.JSONObject th = new org.json.JSONObject();
+            int mode = themeMode();
+            th.put("mode", mode);
+            th.put("label", themeModeLabel(mode));
+            o.put("theme", th);
+
+            org.json.JSONObject pm = new org.json.JSONObject();
+            pm.put("summary", conPermSummary());
+            org.json.JSONArray pr = new org.json.JSONArray();
+            for (int i = 0; i < CON_PERMS.length; i++) {
+                String pid = CON_PERMS[i][0];
+                boolean ok = conPermOk(pid);
+                boolean noRoot = "root".equals(pid) && !conRootOk;
+                org.json.JSONObject row = new org.json.JSONObject();
+                row.put("id", pid);
+                row.put("title", CON_PERMS[i][1]);
+                row.put("desc", CON_PERMS[i][2]);
+                row.put("ok", ok);
+                row.put("disabled", noRoot);
+                row.put("state", ok ? "已授权" : (noRoot ? "本机无 root" : "未授权"));
+                pr.put(row);
+            }
+            pm.put("rows", pr);
+            o.put("perm", pm);
+
+            org.json.JSONObject ws = new org.json.JSONObject();
+            String wp = workspacePath();
+            ws.put("path", wp == null ? "" : wp);
+            ws.put("unset", wp == null || wp.isEmpty());
+            o.put("workspace", ws);
+
+            org.json.JSONObject pg = new org.json.JSONObject();
+            pg.put("summary", conPlugSummary());
+            org.json.JSONArray pl = new org.json.JSONArray();
+            for (int i = 0; i < CON_PLUGINS.length; i++) {
+                org.json.JSONObject row = new org.json.JSONObject();
+                row.put("id", CON_PLUGINS[i][0]);
+                row.put("title", "dsh-" + CON_PLUGINS[i][0]);
+                row.put("desc", CON_PLUGINS[i][1]);
+                row.put("on", !conPluginDisabled(CON_PLUGINS[i][0]));
+                pl.put(row);
+            }
+            pg.put("rows", pl);
+            o.put("plugins", pg);
+
+            org.json.JSONObject be = new org.json.JSONObject();
+            be.put("installed", BuildEnvInstaller.isInstalled(this));
+            be.put("summary", conBuildEnvSummary());
+            be.put("statusText", BuildEnvInstaller.statusText(this));
+            be.put("installing", beInstalling);
+            be.put("stage", beStage == null ? "" : beStage);
+            be.put("resolving", beResolving);
+            be.put("err", beResolveErr == null ? "" : beResolveErr);
+            org.json.JSONArray src = new org.json.JSONArray();
+            if (beSources != null) {
+                for (int i = 0; i < beSources.size(); i++) {
+                    org.json.JSONObject s = new org.json.JSONObject();
+                    s.put("index", i);
+                    s.put("label", beSources.get(i).label);
+                    src.put(s);
+                }
+            }
+            be.put("sources", src);
+            o.put("buildEnv", be);
+
+            org.json.JSONObject lg = new org.json.JSONObject();
+            lg.put("summary", conLogSummary());
+            lg.put("path", conLogFile().getAbsolutePath());
+            o.put("log", lg);
+        } catch (Throwable t) {
+            try { o.put("error", String.valueOf(t.getMessage())); } catch (Throwable ignored) {}
+        }
+        return o.toString();
+    }
+
+    /** 桥入口：执行一个控制台动作。动作本身异步，立刻回 ok（失败会 Toast）。 */
+    private String ctlAction(final String id, final String arg) {
+        try {
+            ui.post(new Runnable() { @Override public void run() { ctlActionOnUi(id, arg); } });
+            return "{\"ok\":true}";
+        } catch (Throwable t) {
+            return "{\"ok\":false,\"msg\":" + org.json.JSONObject.quote(String.valueOf(t.getMessage())) + "}";
+        }
+    }
+
+    /** 动作表。全部在主线程执行；二次确认由网页那一侧做（原生弹窗这里看不见）。 */
+    private void ctlActionOnUi(String id, String arg) {
+        try {
+            if ("extract".equals(id)) { conExtractClick(); return; }
+            if ("engine.start".equals(id)) {
+                if (conEngineRunning()) { enterMainUi(); return; }
+                engineStoppedByUser = false;
+                engineStartAborted = false;
+                conEngineClick();
+                return;
+            }
+            if ("engine.restart".equals(id)) { conRestartEngine(); return; }
+            if ("engine.stop".equals(id)) { conStopEngine(); return; }
+            if ("rescue.toggle".equals(id)) {
+                if (safeModeActive()) conExitSafeMode(); else conSafeMode();
+                return;
+            }
+            if ("backup.export".equals(id)) { conBackupExport(); return; }
+            if ("backup.import".equals(id)) { conBackupImport(); return; }
+            if ("snapshot".equals(id)) { triggerSnapshotBackup(); return; }
+            if ("log.view".equals(id)) { conViewLog(); return; }
+            if ("log.share".equals(id)) { conShareLog(); return; }
+            if ("log.clear".equals(id)) { conClearLogNow(); return; }
+            if ("theme.set".equals(id)) {
+                int mode = 0;
+                try { mode = Integer.parseInt(arg); } catch (Throwable ignored) {}
+                if (mode < 0 || mode > 2 || mode == themeMode()) return;
+                getSharedPreferences(PREFS, MODE_PRIVATE).edit().putInt("theme_mode", mode).apply();
+                recreate();   // 主题（含 WebView 的 prefers-color-scheme）随 onCreate 重新生效
+                return;
+            }
+            if ("update.check".equals(id)) { checkForUpdate(true); return; }
+            if ("perm.action".equals(id)) { conPermAction(arg); return; }
+            if ("workspace.change".equals(id)) { onWorkspaceRowClick(); return; }
+            if ("plugin.toggle".equals(id)) {
+                int c = arg == null ? -1 : arg.lastIndexOf(':');
+                if (c <= 0) return;
+                conSetPluginDisabled(arg.substring(0, c), !"1".equals(arg.substring(c + 1)));
+                return;
+            }
+            if ("buildenv.resolve".equals(id)) { conBuildEnvResolve(); return; }
+            if ("buildenv.cancel".equals(id)) { BuildEnvInstaller.cancel(); return; }
+            if ("buildenv.install".equals(id)) {
+                int idx = -1;
+                try { idx = Integer.parseInt(arg); } catch (Throwable ignored) {}
+                if (beSources != null && idx >= 0 && idx < beSources.size()) startBuildEnvInstall(beSources.get(idx));
+                else conToast("来源已失效，请重新查询");
+                return;
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "ctlAction " + id, t);
+            conToast("操作失败：" + t.getMessage());
+        }
     }
 
     private void showConsole() {
@@ -6386,10 +6618,9 @@ public class MainActivity extends Activity {
 
     // ---------- 权限页 ----------
     private String conPermSummary() {
-        String[] ids = {"storage", "notify", "overlay", "battery", "root", "shizuku", "a11y", "install"};
         int ok = 0;
-        for (int i = 0; i < ids.length; i++) if (conPermOk(ids[i])) ok++;
-        return "已授权 " + ok + " / " + ids.length;
+        for (int i = 0; i < CON_PERMS.length; i++) if (conPermOk(CON_PERMS[i][0])) ok++;
+        return "已授权 " + ok + " / " + CON_PERMS.length;
     }
 
     private boolean conPermOk(String id) {
@@ -6438,14 +6669,11 @@ public class MainActivity extends Activity {
         LinearLayout col = consoleBody;
         col.addView(conBackRow("授予权限"));
         col.addView(cSep(dp(12)));
-        addPermRow(col, "所有文件访问", "读写 /sdcard，AI 才能碰你的文件", "storage");
-        addPermRow(col, "通知", "AI 发通知、定时任务提醒", "notify");
-        addPermRow(col, "悬浮窗", "黑鲸鱼悬浮窗 / 虚拟屏预览", "overlay");
-        addPermRow(col, "电池优化", "设为「不限制」，否则切后台引擎会被杀", "battery");
-        addPermRow(col, "root（超级用户）", "替代 Shizuku 跑特权命令：装应用 / 改设置 / 虚拟屏点击 / 任意 shell", "root");
-        addPermRow(col, "Shizuku（免 root 特权通道）", "有 root 时用 root；没 root 时装 Shizuku 走同一套能力", "shizuku");
-        addPermRow(col, "无障碍服务（读屏 / 点屏）", "android_screen / tap / type / see（不需要 root 或 Shizuku）", "a11y");
-        addPermRow(col, "安装未知应用", "android_package 装 APK 用", "install");
+        // 行文字与网页设置页共用 CON_PERMS（单一来源，别再各写一份）
+        for (int i = 0; i < CON_PERMS.length; i++) {
+            final String pid = CON_PERMS[i][0];
+            addPermRow(col, CON_PERMS[i][1], CON_PERMS[i][2], pid);
+        }
         // issue #30：工作区入口原先只在首启引导完成页，走完引导就再无入口（只能清数据重走引导）。
         // 这里复用同一套 onWorkspaceRowClick()，使权限页也能查看 / 更改 / 恢复默认。
         addWorkspaceRow(col);

@@ -1,0 +1,11 @@
+# dsh-android-console —— 设置页里的「控制台」
+#
+# 往 DSH 设置弹窗里插一个「控制台」页（settings.section），页面内容 = 原先安卓壳原生
+# 控制台的全部功能与文字，动作经 dshshell 桥回原生执行。
+#
+# 为什么是插件而不是继续在 WebView 里注入 DOM：
+#   · settings.section 是上游给的正规缝；注入要猜 DOM 结构，内核升级就碎；
+#   · 插件住在 profiles/web/node_modules/ —— 内核升级不重解压 dshhome。
+- insert:
+    - id: android-console
+      name: 'dsh-android-console'

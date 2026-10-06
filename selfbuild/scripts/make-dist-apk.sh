@@ -70,7 +70,7 @@ if [ -f "$DIST/dsh-bg-user.png" ]; then mv "$DIST/dsh-bg-user.png" "$BK/"; echo 
 #   ② 只搬 `profiles` 又是**黑名单思路**：以后谁往 dshhome 下丢一个新目录
 #      （笔记 / 草稿 / review.json…）都会静默进包。
 #   → 改成**白名单**：dshhome 下只有名单里的目录允许进包，其余一律搬走并打印。
-DHOME_ALLOW="skills"
+DHOME_ALLOW="skills cordis.patch.yml"
 if [ -d "$OVL/dshhome" ]; then
   for p in "$OVL/dshhome"/* "$OVL/dshhome"/.[!.]*; do
     [ -e "$p" ] || continue
@@ -258,7 +258,7 @@ for root, _, files in os.walk(ovl):
     for f in files:
         mine.append(os.path.join(root, f))
 outer = ['assets/mobile.css', 'assets/mobile.js', 'AndroidManifest.xml']
-pats = {'手机号': r'1[3-9]\d{9}', '邮箱': r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.(com|cn|net)',
+pats = {'手机号': r'(?<!\d)1[3-9]\d{9}(?!\d)', '邮箱': r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.(com|cn|net)',
         '游戏/私用包名': r'sgzzlb|aweme\.lite', '绝对私密路径': r'/sdcard/Download/(?!(?:DeepSeekHarness|DSH_Backups|DSH_Knowledge)(?:/|[^\w/]|$))[^\s"\'`<>]+',
         # 开发机路径 / 密钥形态。
         # ⚠️ 素材名（whale-shota/dsh-bg-user）**只做文件名层检查**，不做内容层 ——
