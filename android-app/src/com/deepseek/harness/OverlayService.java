@@ -5,6 +5,8 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -632,18 +634,20 @@ public class OverlayService extends Service {
     }
 
     /**
-     * v1.71：单击悬浮球。
-     * 面板开着 → 收面板（保留一条**触摸**出口，因为「收起」现在只收那块长的对话区，不再关面板）；
-     * 面板没开 → 吐一句台词气泡。
+     * 单击悬浮球：
+     * 面板开着 → 收起面板并贴边半藏；
+     * 面板没开 → 展开面板（露出快捷聊天、剪贴板卡片、控制按钮）。
      */
     private void onBallTap() {
         try {
             if (panelVisible) {
-                ballTucked = true;   // 点球收面板 = 回静置半藏（v1.69 的老手感）
+                ballTucked = true;
                 setPanelVisible(false, true);
-                return;
+            } else {
+                hideBubble();
+                ballTucked = false;
+                setPanelVisible(true, true);
             }
-            showBubble(nextBubbleText());
         } catch (Throwable ignored) {}
     }
 
@@ -1527,7 +1531,12 @@ public class OverlayService extends Service {
      * 并补偿本机实测的"窗口帧 vs 绘制位置"偏移（见下面的 offY）。
      */
     private void showBubble(final String text) {
+        showBubble(text, petAutoHideMs);
+    }
+
+    private void showBubble(final String text, final int autoHideMs) {
         if (text == null || text.isEmpty()) return;
+        if (foregroundWantsHidden || userHidden || !isRunning) return;
         try {
             if (bubbleView == null) {
                 bubbleView = new TextView(this);
@@ -1537,25 +1546,20 @@ public class OverlayService extends Service {
                 bubbleView.setOnClickListener(new View.OnClickListener() {
                     @Override public void onClick(View v) {
                         hideBubble();
-                        if ("panel".equals(petOnBubble)) setPanelVisible(true, true);
+                        setPanelVisible(true, true);
                     }
                 });
-                // v1.72（用户指定）：气泡的**唯一**消失途径 = 点「气泡与球以外」的地方。
-                // 原来气泡窗虽然带 FLAG_WATCH_OUTSIDE_TOUCH，却没人处理 ACTION_OUTSIDE，
-                // 于是「点别处」毫无反应，反而只有「点气泡 / 6 秒超时」会让它走 —— 与用户意图正好相反。
                 bubbleView.setOnTouchListener(new View.OnTouchListener() {
                     @Override public boolean onTouch(View v, MotionEvent ev) {
                         if (ev.getAction() == MotionEvent.ACTION_OUTSIDE) {
-                            // ⚠️ v1.78 实测：本机 ACTION_OUTSIDE 事件的坐标恒为 (0,0)，
-                            // 坐标判"是否点在球上"在这里是瞎的 → 只有坐标非 0 时才用这个判据。
                             boolean onBall = (ev.getRawX() != 0f || ev.getRawY() != 0f)
                                     && insideBall(ev.getRawX(), ev.getRawY());
                             logVis("bubble outside-tap at(" + (int) ev.getRawX() + "," + (int) ev.getRawY()
                                     + ") onBall=" + onBall);
-                            if (!onBall) hideBubble();   // 点在球上不算「别处」（用户明确要求）
+                            if (!onBall) hideBubble();
                             return true;
                         }
-                        return false;   // 其余事件交给 OnClickListener（点气泡 → 展开面板）
+                        return false;
                     }
                 });
             }
@@ -1598,8 +1602,6 @@ public class OverlayService extends Service {
                             | WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
                     PixelFormat.TRANSLUCENT);
             bubbleLp.gravity = Gravity.TOP | Gravity.START;
-            // ⚠️ 本机实测：窗口帧的 lp.y 与视图真正画出来的位置差一个**固定量**（约 139px，稳定复现）。
-            // 图标窗那边靠 getLocationOnScreen() 报出来；气泡窗要反着补偿这一次，才会贴着球出现。
             int offY = (lp == null) ? 0 : (rloc[1] - lp.y);
             bubbleLp.x = bx;
             bubbleLp.y = by - offY;
@@ -1613,7 +1615,8 @@ public class OverlayService extends Service {
                 try { wm.updateViewLayout(bubbleView, bubbleLp); } catch (Throwable ignored) {}
             }
             bubbleHandler.removeCallbacks(bubbleHider);
-            if (petAutoHideMs > 0) bubbleHandler.postDelayed(bubbleHider, petAutoHideMs);
+            int delay = autoHideMs > 0 ? autoHideMs : petAutoHideMs;
+            if (delay > 0) bubbleHandler.postDelayed(bubbleHider, delay);
             logVis("bubble show: " + text + " at(" + bx + "," + by + ") offY=" + offY);
         } catch (Throwable t) {
             logVis("bubble show failed: " + t);

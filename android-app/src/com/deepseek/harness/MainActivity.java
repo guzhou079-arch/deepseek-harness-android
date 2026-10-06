@@ -26,11 +26,24 @@ import android.system.ErrnoException;
 import android.system.Os;
 import android.util.Log;
 import android.util.TypedValue;
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
+import android.animation.ValueAnimator;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.graphics.RadialGradient;
+import android.graphics.RectF;
+import android.graphics.Shader;
+import android.graphics.Typeface;
+import android.graphics.drawable.Drawable;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.animation.AccelerateDecelerateInterpolator;
 import android.view.animation.AlphaAnimation;
 import android.view.animation.Animation;
+import android.view.animation.DecelerateInterpolator;
+import android.view.animation.LinearInterpolator;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebChromeClient;
@@ -240,8 +253,10 @@ public class MainActivity extends Activity {
     // 网页 <input type="file"> 选完文件后的回调（见 onShowFileChooser）
     private ValueCallback<Uri[]> fileChooserCallback;
     private TextView statusView;
-    private ProgressBar progressBar;
-    private ImageView splashLogo;
+    private ProgressBar progressBar = null; // v1.32：启动页彻底移除横向进度条，保留引用为 null 兼顾控制台/老接口
+    private View splashLogo;
+    private SplashLogoView splashLogoView;
+    private View splashBox;
     private TextView splashBrand;
     private final Handler ui = new Handler(Looper.getMainLooper());
     // 运行时确定的 dshroot 目录（外部公共目录优先，失败回退内部 files/payload/dshroot）
@@ -516,11 +531,6 @@ public class MainActivity extends Activity {
         statusView.setPadding(dp(24), dp(8), dp(24), dp(8));
         statusView.setVisibility(View.GONE);
 
-        progressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
-        progressBar.setMax(100);
-        progressBar.setProgress(0);
-        progressBar.setVisibility(View.GONE);
-
         // 提取 rish dex（DSH 的 shizuku_shell 插件执行命令用，与 payload 解压解耦）
         rishDex = extractRishDex();
         vscreenDex = extractVscreenDex();
@@ -732,6 +742,10 @@ public class MainActivity extends Activity {
         return Math.round(v * getResources().getDisplayMetrics().density);
     }
 
+    private float dpF(float v) {
+        return v * getResources().getDisplayMetrics().density;
+    }
+
     private int sp(int v) {
         return Math.round(v * getResources().getDisplayMetrics().scaledDensity);
     }
@@ -743,54 +757,271 @@ public class MainActivity extends Activity {
         }
     }
 
+    // ============ 启动过渡动画与 Logo View（极简·现代·精致·流光圆环进度） ============
+    private class SplashLogoView extends View {
+        private final Drawable logo;
+        private final Paint glowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint trackPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint progressPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint dotPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+        private float breath = 0f;
+        private float appear = 0f;
+        private ValueAnimator breathAnim;
+        private ValueAnimator appearAnim;
+        private ValueAnimator spinAnim;
+        private ValueAnimator progressAnim;
+
+        private boolean indeterminate = true; // 默认拉起引擎时为流光巡航
+        private float spinAngle = 0f;
+        private float targetProgress = 0f;
+        private float displayProgress = 0f;
+
+        private int lastGlowColor = 0;
+        private float lastGlowRadius = 0f;
+        private final RectF arcRect = new RectF();
+
+        public SplashLogoView(Context context) {
+            super(context);
+            Drawable d = null;
+            try {
+                d = getResources().getDrawable(R.drawable.ic_launcher, getTheme());
+            } catch (Throwable t) {
+                try { d = getResources().getDrawable(R.drawable.ic_launcher); } catch (Throwable ignored) {}
+            }
+            logo = d;
+
+            trackPaint.setStyle(Paint.Style.STROKE);
+            trackPaint.setStrokeWidth(dpF(2.5f));
+
+            progressPaint.setStyle(Paint.Style.STROKE);
+            progressPaint.setStrokeCap(Paint.Cap.ROUND);
+            progressPaint.setStrokeWidth(dpF(2.5f));
+
+            dotPaint.setStyle(Paint.Style.FILL);
+        }
+
+        public void setProgress(int percent) {
+            indeterminate = false;
+            targetProgress = Math.max(0, Math.min(100, percent));
+            if (progressAnim != null) progressAnim.cancel();
+            progressAnim = ValueAnimator.ofFloat(displayProgress, targetProgress);
+            progressAnim.setDuration(240);
+            progressAnim.setInterpolator(new DecelerateInterpolator());
+            progressAnim.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+                @Override public void onAnimationUpdate(ValueAnimator animation) {
+                    displayProgress = (Float) animation.getAnimatedValue();
+                    invalidate();
+                }
+            });
+            progressAnim.start();
+        }
+
+        public void setIndeterminate(boolean ind) {
+            if (this.indeterminate == ind) return;
+            this.indeterminate = ind;
+            if (ind && (spinAnim == null || !spinAnim.isRunning())) {
+                startSpin();
+            }
+            invalidate();
+        }
+
+        private void startSpin() {
+            if (spinAnim != null) spinAnim.cancel();
+            spinAnim = ValueAnimator.ofFloat(0f, 360f);
+            spinAnim.setDuration(1600);
+            spinAnim.setRepeatCount(ValueAnimator.INFINITE);
+            spinAnim.setInterpolator(new LinearInterpolator());
+            spinAnim.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+                @Override public void onAnimationUpdate(ValueAnimator animation) {
+                    spinAngle = (Float) animation.getAnimatedValue();
+                    invalidate();
+                }
+            });
+            spinAnim.start();
+        }
+
+        public void startAnim() {
+            stopAnim();
+            // 入场：520ms 缩放 + 淡入
+            appearAnim = ValueAnimator.ofFloat(0f, 1f);
+            appearAnim.setDuration(520);
+            appearAnim.setInterpolator(new DecelerateInterpolator());
+            appearAnim.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+                @Override public void onAnimationUpdate(ValueAnimator animation) {
+                    appear = (Float) animation.getAnimatedValue();
+                    invalidate();
+                }
+            });
+            appearAnim.start();
+
+            // 呼吸：2600ms 循环微缩放 + 光晕脉冲
+            breathAnim = ValueAnimator.ofFloat(0f, 1f);
+            breathAnim.setDuration(2600);
+            breathAnim.setRepeatMode(ValueAnimator.REVERSE);
+            breathAnim.setRepeatCount(ValueAnimator.INFINITE);
+            breathAnim.setInterpolator(new AccelerateDecelerateInterpolator());
+            breathAnim.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+                @Override public void onAnimationUpdate(ValueAnimator animation) {
+                    breath = (Float) animation.getAnimatedValue();
+                    invalidate();
+                }
+            });
+            breathAnim.start();
+
+            // 启动巡航光弧
+            if (indeterminate) {
+                startSpin();
+            }
+        }
+
+        public void stopAnim() {
+            if (appearAnim != null) { appearAnim.cancel(); appearAnim = null; }
+            if (breathAnim != null) { breathAnim.cancel(); breathAnim = null; }
+            if (spinAnim != null) { spinAnim.cancel(); spinAnim = null; }
+            if (progressAnim != null) { progressAnim.cancel(); progressAnim = null; }
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            int w = getWidth(), h = getHeight();
+            if (w <= 0 || h <= 0) return;
+            float cx = w / 2f, cy = h / 2f;
+            int accent = cAccent();
+
+            // ① 柔和径向渐变光晕
+            float glowR = dp(84) * (1f + 0.08f * breath);
+            if (accent != lastGlowColor || Math.abs(glowR - lastGlowRadius) > 0.5f) {
+                RadialGradient gradient = new RadialGradient(
+                        cx, cy, Math.max(1f, glowR),
+                        new int[]{accent, accent & 0x00FFFFFF},
+                        new float[]{0f, 1f},
+                        Shader.TileMode.CLAMP);
+                glowPaint.setShader(gradient);
+                lastGlowColor = accent;
+                lastGlowRadius = glowR;
+            }
+            float baseAlpha = isDark() ? 0.24f : 0.12f;
+            int alpha = (int) (255f * baseAlpha * (0.60f + 0.40f * breath) * appear);
+            glowPaint.setAlpha(Math.max(0, Math.min(255, alpha)));
+            canvas.drawCircle(cx, cy, glowR, glowPaint);
+
+            // ② 环绕流光圆环进度（Orbital Progress Ring）
+            float ringR = dp(64); // 半径 64dp，包裹 104dp Logo 并留出微隙
+            arcRect.set(cx - ringR, cy - ringR, cx + ringR, cy + ringR);
+
+            // 2.1 底环暗色轨道
+            int trackColor = isDark() ? (accent & 0x00FFFFFF | 0x24000000) : (accent & 0x00FFFFFF | 0x1A000000);
+            trackPaint.setColor(trackColor);
+            trackPaint.setAlpha((int) (255f * appear * 0.45f));
+            canvas.drawCircle(cx, cy, ringR, trackPaint);
+
+            // 2.2 动态进度弧线
+            progressPaint.setColor(accent);
+            progressPaint.setAlpha((int) (255f * appear * (0.75f + 0.25f * breath)));
+
+            if (indeterminate) {
+                // 未定进度：80° 优雅流光巡航旋转
+                canvas.drawArc(arcRect, spinAngle, 80f, false, progressPaint);
+            } else if (displayProgress > 0.01f) {
+                // 确定进度：0%~100% 顺时针精准生长
+                float sweep = Math.min(360f, Math.max(0.1f, 360f * (displayProgress / 100f)));
+                canvas.drawArc(arcRect, -90f, sweep, false, progressPaint);
+
+                // 进度端点高亮微光点
+                if (sweep < 358f) {
+                    double rad = Math.toRadians(-90f + sweep);
+                    float dotX = (float) (cx + ringR * Math.cos(rad));
+                    float dotY = (float) (cy + ringR * Math.sin(rad));
+                    dotPaint.setColor(isDark() ? 0xFFFFFFFF : accent);
+                    dotPaint.setAlpha((int) (255f * appear));
+                    canvas.drawCircle(dotX, dotY, dpF(3.2f), dotPaint);
+                }
+            }
+
+            // ③ 鲸鱼 Logo（自适应深浅色 Tint + 104dp 微缩放呼吸）
+            if (logo != null) {
+                int tintColor = isDark() ? cText() : Color.parseColor("#1F2328");
+                logo.setTint(tintColor);
+                logo.setAlpha((int) (255f * appear));
+
+                float logoSize = dp(104) * (0.90f + 0.10f * appear) * (1.0f + 0.028f * breath);
+                int half = Math.round(logoSize / 2f);
+                int l = Math.round(cx - half);
+                int t = Math.round(cy - half);
+                int r = Math.round(cx + half);
+                int b = Math.round(cy + half);
+                logo.setBounds(l, t, r, b);
+                logo.draw(canvas);
+            }
+        }
+    }
+
     private void showEngineScreen() {
         if (engineRoot == null) engineRoot = new FrameLayout(this);
         FrameLayout root = engineRoot;
         root.setBackgroundColor(chromeBg()); // v1.13.11：跟随主题/页面底色
-        // 成员视图（webView/statusView/progressBar）可能已挂在旧容器上，先全部摘下，避免重复挂载崩溃。
+        // 成员视图可能已挂在旧容器上，先全部摘下，避免重复挂载崩溃。
         detachView(webView);
         detachView(statusView);
-        detachView(progressBar);
+        detachView(splashBox);
         root.addView(webView, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setGravity(Gravity.CENTER);
+        box.setTranslationY(-dp(24)); // 居中微抬，视觉重心更舒展
+        splashBox = box;
 
-        // 鲸鱼 logo
-        splashLogo = new ImageView(this);
-        splashLogo.setImageResource(R.drawable.ic_launcher);
-        LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(dp(76), dp(76));
+        // 1. 鲸鱼 Logo + 呼吸光晕
+        splashLogoView = new SplashLogoView(this);
+        splashLogo = splashLogoView;
+        LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(dp(168), dp(168));
         llp.gravity = Gravity.CENTER_HORIZONTAL;
-        box.addView(splashLogo, llp);
+        box.addView(splashLogoView, llp);
 
-        try {
-            AlphaAnimation breathe = new AlphaAnimation(0.45f, 1.0f);
-            breathe.setDuration(1200);
-            breathe.setRepeatMode(Animation.REVERSE);
-            breathe.setRepeatCount(Animation.INFINITE);
-            splashLogo.startAnimation(breathe);
-        } catch (Throwable ignored) {}
-
-        // 品牌名
+        // 2. 品牌名（排版质感升级：22sp + 0.28em 大字距 + 错峰入场）
         splashBrand = new TextView(this);
-        splashBrand.setVisibility(View.GONE);
+        splashBrand.setText("DEEPSEEK HARNESS");
+        splashBrand.setTextColor(cText());
+        splashBrand.setTextSize(TypedValue.COMPLEX_UNIT_PX, getResources().getDimension(R.dimen.text_title));
+        splashBrand.setLetterSpacing(0.28f);
+        splashBrand.setGravity(Gravity.CENTER);
+        splashBrand.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        splashBrand.setAlpha(0f);
+        splashBrand.setTranslationY(dp(8));
+        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        blp.topMargin = dp(4);
+        blp.gravity = Gravity.CENTER_HORIZONTAL;
+        box.addView(splashBrand, blp);
 
-        // 状态文字
+        // 3. 状态文字（移除 ProgressBar，保留优雅的状态文字展示）
+        statusView.setTextColor(cSub());
+        statusView.setAlpha(0f);
         LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        slp.topMargin = dp(16);
+        slp.topMargin = dp(12);
+        slp.gravity = Gravity.CENTER_HORIZONTAL;
         box.addView(statusView, slp);
 
-        // 进度条（极细现代线条）
-        android.content.res.ColorStateList tint = android.content.res.ColorStateList.valueOf(Color.parseColor("#4d6bfe"));
-        progressBar.setProgressTintList(tint);
-        progressBar.setProgressBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.parseColor("#1f2733")));
-        LinearLayout.LayoutParams pbp = new LinearLayout.LayoutParams(dp(180), dp(3));
-        pbp.topMargin = dp(14);
-        pbp.gravity = Gravity.CENTER_HORIZONTAL;
-        box.addView(progressBar, pbp);
+        // 入场动效编排
+        splashLogoView.startAnim();
+        splashBrand.animate()
+                .alpha(1f)
+                .translationY(0f)
+                .setDuration(480)
+                .setStartDelay(160)
+                .setInterpolator(new DecelerateInterpolator())
+                .start();
+        statusView.animate()
+                .alpha(1f)
+                .setDuration(480)
+                .setStartDelay(280)
+                .setInterpolator(new DecelerateInterpolator())
+                .start();
 
         FrameLayout.LayoutParams bp = new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
@@ -4958,12 +5189,27 @@ public class MainActivity extends Activity {
         startWatchdog();
         ui.post(new Runnable() {
             @Override public void run() {
-                statusView.setVisibility(View.GONE);
-                if (splashLogo != null) {
-                    try { splashLogo.clearAnimation(); } catch (Throwable ignored) {}
-                    splashLogo.setVisibility(View.GONE);
+                if (splashBox != null && splashBox.getVisibility() == View.VISIBLE) {
+                    splashBox.animate()
+                            .alpha(0f)
+                            .translationY(-dp(16))
+                            .setDuration(240)
+                            .setInterpolator(new AccelerateDecelerateInterpolator())
+                            .setListener(new AnimatorListenerAdapter() {
+                                @Override public void onAnimationEnd(Animator animation) {
+                                    if (splashBox != null) splashBox.setVisibility(View.GONE);
+                                    if (splashLogoView != null) splashLogoView.stopAnim();
+                                    if (splashLogo != null) splashLogo.setVisibility(View.GONE);
+                                    if (splashBrand != null) splashBrand.setVisibility(View.GONE);
+                                    if (statusView != null) statusView.setVisibility(View.GONE);
+                                }
+                            }).start();
+                } else {
+                    if (splashLogoView != null) splashLogoView.stopAnim();
+                    if (splashLogo != null) splashLogo.setVisibility(View.GONE);
+                    if (splashBrand != null) splashBrand.setVisibility(View.GONE);
+                    if (statusView != null) statusView.setVisibility(View.GONE);
                 }
-                if (splashBrand != null) splashBrand.setVisibility(View.GONE);
                 if (progressBar != null) {
                     progressBar.setIndeterminate(false);
                     progressBar.setVisibility(View.GONE);
@@ -4990,6 +5236,7 @@ public class MainActivity extends Activity {
     private void setProgress(final int percent, final String s) {
         ui.post(new Runnable() {
             @Override public void run() {
+                if (splashLogoView != null) splashLogoView.setProgress(percent);
                 if (progressBar != null) {
                     progressBar.setIndeterminate(false);
                     progressBar.setVisibility(View.VISIBLE);
@@ -5008,6 +5255,7 @@ public class MainActivity extends Activity {
     private void showIndeterminate(final String s) {
         ui.post(new Runnable() {
             @Override public void run() {
+                if (splashLogoView != null) splashLogoView.setIndeterminate(true);
                 if (progressBar != null) {
                     progressBar.setIndeterminate(true);
                     progressBar.setVisibility(View.VISIBLE);
@@ -5021,6 +5269,7 @@ public class MainActivity extends Activity {
     private void hideProgress() {
         ui.post(new Runnable() {
             @Override public void run() {
+                if (splashLogoView != null) splashLogoView.setIndeterminate(false);
                 if (progressBar != null) {
                     progressBar.setIndeterminate(false);
                     progressBar.setVisibility(View.GONE);
@@ -5182,6 +5431,7 @@ public class MainActivity extends Activity {
     }
 
     private void showConsole() {
+        if (splashLogoView != null) splashLogoView.stopAnim();
         if (consoleLayer == null) buildConsoleLayer();
         if (consoleLayer == null) { startEngine(); return; } // 兜底：控制台建不出来就走老路
         consoleVisible = true;
@@ -5544,6 +5794,26 @@ public class MainActivity extends Activity {
         col.addView(logRow);
         col.addView(cSep(0));
 
+        // 时光机全站备份（一键打包全站会话+记忆库+配置+技能）
+        LinearLayout snapRow = new LinearLayout(this);
+        snapRow.setOrientation(LinearLayout.HORIZONTAL);
+        snapRow.setGravity(Gravity.CENTER_VERTICAL);
+        snapRow.setPadding(0, dp(12), 0, dp(12));
+        LinearLayout snapLeft = new LinearLayout(this);
+        snapLeft.setOrientation(LinearLayout.VERTICAL);
+        snapLeft.addView(cText("时光机全站备份", 14f, cText(), false));
+        snapLeft.addView(cText("一键打包记忆库、所有历史会话与配置 (存至 /sdcard/Download/DSH_Backups)", 11f, cSub(), false));
+        snapRow.addView(snapLeft, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        Button snapBtn = cButton("立即备份", false);
+        snapBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f);
+        snapBtn.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { triggerSnapshotBackup(); }
+        });
+        snapRow.addView(snapBtn);
+        col.addView(snapRow);
+        col.addView(cSep(0));
+
         conFoot = cText("就绪", 11f, cSub(), false);
         col.addView(conFoot, cTop(dp(14)));
         col.addView(cText("换内核版本 / 覆盖安装后需要重新解压；平时只用到「启动引擎」。", 11f, cSub(), false), cTop(dp(6)));
@@ -5572,6 +5842,55 @@ public class MainActivity extends Activity {
         upd.addView(cText("当前 " + conVersionLabel(), 11f, cSub(), false));
         col.addView(upd, cTop(dp(16)));
         refreshConsole();
+    }
+
+    /** 触发时光机全站一键备份 */
+    private void triggerSnapshotBackup() {
+        conToast("正在生成时光机快照…");
+        new Thread(new Runnable() {
+            @Override public void run() {
+                try {
+                    File node = new File(getFilesDir(), "payload/runtime/bin/node");
+                    File tool = new File("/sdcard/DeepSeekHarness/tools/backup.mjs");
+                    if (!tool.exists()) {
+                        ui.post(new Runnable() {
+                            @Override public void run() { conToast("未找到备份工具脚本"); }
+                        });
+                        return;
+                    }
+                    ProcessBuilder pb = new ProcessBuilder(node.getAbsolutePath(), tool.getAbsolutePath(), "create", "--name", "console-backup");
+                    pb.redirectErrorStream(true);
+                    Process p = pb.start();
+                    BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream(), "UTF-8"));
+                    final StringBuilder sb = new StringBuilder();
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        sb.append(line).append("\n");
+                    }
+                    int code = p.waitFor();
+                    if (code == 0) {
+                        ui.post(new Runnable() {
+                            @Override public void run() {
+                                conDialog("时光机备份成功", "全站资产（记忆库/所有会话/配置/技能）已完整打包！\n\n保存位置：\n/sdcard/Download/DSH_Backups/\n\n换机或重装时可随时一键还原。", "我知道了", null, null);
+                            }
+                        });
+                    } else {
+                        ui.post(new Runnable() {
+                            @Override public void run() {
+                                conDialog("时光机备份失败", "执行返回错误码: " + code + "\n" + sb.toString(), "关闭", null, null);
+                            }
+                        });
+                    }
+                } catch (Throwable t) {
+                    final String err = t.getMessage();
+                    ui.post(new Runnable() {
+                        @Override public void run() {
+                            conDialog("时光机备份异常", "异常信息: " + err, "关闭", null, null);
+                        }
+                    });
+                }
+            }
+        }, "dsh-backup-worker").start();
     }
 
     /** 与控制台同一套视觉的弹窗（平色底、同字体、同按钮样式，跟随系统深浅色）。 */
