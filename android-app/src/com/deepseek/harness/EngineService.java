@@ -7,28 +7,77 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.media.session.MediaSession;
+import android.media.session.PlaybackState;
 import android.os.Build;
 import android.os.IBinder;
+import android.util.Log;
+import android.view.KeyEvent;
 
 /**
  * 前台保活服务：引擎（node 服务器）运行期间常驻通知栏，
  * 让系统把本应用标记为高优先级进程，挂后台/锁屏不被杀掉，
  * AI 后台任务（对话、工具调用）可持续执行。
- *
- * 生命周期：
- *   - startEngine() 时由 MainActivity 拉起（startForegroundService / startService）
- *   - 用户主动「退出」时由 MainActivity 停止（stopService）
- *   - 按 Home 挂后台不停止（这正是保活的目的）
+ * 兼任：蓝牙耳机按键唤醒 (MediaSession) 接收中心。
  */
 public class EngineService extends Service {
+    private static final String TAG = "EngineService";
     private static final String CHANNEL_ID = "dsh_engine";
     private static final int NOTIF_ID = 1;
+
+    private MediaSession mediaSession;
 
     @Override
     public void onCreate() {
         super.onCreate();
         createChannel();
         startForeground(NOTIF_ID, buildNotification("DeepSeek Harness 正在运行", "AI 引擎保活中，后台任务持续执行"));
+        initMediaSession();
+    }
+
+    private void initMediaSession() {
+        if (Build.VERSION.SDK_INT < 21) return;
+        try {
+            mediaSession = new MediaSession(this, "DSH_VoiceSession");
+            mediaSession.setCallback(new MediaSession.Callback() {
+                private long lastHookTime = 0;
+
+                @Override
+                public boolean onMediaButtonEvent(Intent mediaButtonIntent) {
+                    if (mediaButtonIntent != null && Intent.ACTION_MEDIA_BUTTON.equals(mediaButtonIntent.getAction())) {
+                        KeyEvent event = (KeyEvent) mediaButtonIntent.getParcelableExtra(Intent.EXTRA_KEY_EVENT);
+                        if (event != null && event.getAction() == KeyEvent.ACTION_DOWN) {
+                            int code = event.getKeyCode();
+                            if (code == KeyEvent.KEYCODE_HEADSETHOOK ||
+                                code == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE ||
+                                code == KeyEvent.KEYCODE_MEDIA_PLAY ||
+                                code == KeyEvent.KEYCODE_MEDIA_PAUSE) {
+                                
+                                long now = System.currentTimeMillis();
+                                if (now - lastHookTime > 400) {
+                                    lastHookTime = now;
+                                    Log.i(TAG, "Bluetooth headset / media button triggered voice wake-up");
+                                    VoiceManager.get(EngineService.this).triggerVoiceInteraction();
+                                }
+                                return true;
+                            }
+                        }
+                    }
+                    return super.onMediaButtonEvent(mediaButtonIntent);
+                }
+            });
+
+            PlaybackState.Builder stateBuilder = new PlaybackState.Builder()
+                    .setActions(PlaybackState.ACTION_PLAY | PlaybackState.ACTION_PAUSE |
+                                PlaybackState.ACTION_PLAY_PAUSE | PlaybackState.ACTION_STOP)
+                    .setState(PlaybackState.STATE_PLAYING, 0, 1.0f);
+            mediaSession.setPlaybackState(stateBuilder.build());
+            mediaSession.setFlags(MediaSession.FLAG_HANDLES_MEDIA_BUTTONS | MediaSession.FLAG_HANDLES_TRANSPORT_CONTROLS);
+            mediaSession.setActive(true);
+            Log.i(TAG, "MediaSession for headset buttons initialized");
+        } catch (Throwable t) {
+            Log.w(TAG, "initMediaSession failed", t);
+        }
     }
 
     @Override
@@ -59,6 +108,13 @@ public class EngineService extends Service {
     @Override
     public void onDestroy() {
         super.onDestroy();
+        if (mediaSession != null) {
+            try {
+                mediaSession.setActive(false);
+                mediaSession.release();
+                mediaSession = null;
+            } catch (Throwable ignored) {}
+        }
         NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
         if (nm != null) nm.cancel(NOTIF_ID);
     }

@@ -30,35 +30,53 @@ window.__ModuleLoader__.load({
     const Toast = primitives.Toast;
 
     // ---------------------------------------------------------------- 样式
-    // 与 ui-settings-general 的行规格对齐：行 16px 上下留白、.5px 分隔线、
-    // 标题 14px/20px、说明 12px/18px 次级色。
-    const CSS_ID = 'dsh-android-console/console.css';
+    // 与 ui-settings-general 的行规格对齐：标准单行 Flex、标题+说明在左、控件紧凑在右
+    const CSS_ID = 'dsh-android-console/console-v3.css';
     const CSS = [
       '.ctl-root{display:flex;flex-direction:column;width:100%}',
-      '.ctl-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding-bottom:2px}',
-      '.ctl-brand{font-family:var(--dsw-font-family-brand,var(--dsw-font-family));font-size:10px;letter-spacing:.14em;color:var(--dsw-alias-label-tertiary)}',
+      '.ctl-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding-bottom:4px}',
+      '.ctl-brand{font-family:var(--dsw-font-family-brand,var(--dsw-font-family));font-size:11px;letter-spacing:.14em;color:var(--dsw-alias-label-tertiary);font-weight:600}',
       '.ctl-ver{font-size:11px;color:var(--dsw-alias-label-tertiary);overflow-wrap:anywhere;text-align:right}',
-      '.ctl-group{font-size:12px;line-height:18px;font-weight:600;color:var(--dsw-alias-label-tertiary);padding:18px 0 2px}',
-      '.ctl-row{display:flex;flex-direction:column;align-items:stretch;gap:10px;padding:14px 0;border-bottom:.5px solid var(--dsw-alias-border-l2)}',
-      '@media(min-width:480px){.ctl-row{flex-direction:row;align-items:center;justify-content:space-between;gap:16px}}',
-      '.ctl-row.ctl-click{cursor:pointer}',
+      '.ctl-group{font-size:12px;line-height:18px;font-weight:600;color:var(--dsw-alias-label-tertiary);padding:18px 0 4px}',
+      '.ctl-row{display:flex;flex-direction:row;align-items:center;justify-content:space-between;gap:12px;min-height:46px;padding:10px 0;border-bottom:.5px solid var(--dsw-alias-border-l2)}',
+      '.ctl-row.ctl-click{cursor:pointer;margin:0 -6px;padding:10px 6px;border-radius:var(--dsw-radius-md)}',
       '.ctl-row.ctl-click:hover{background:var(--dsw-alias-interactive-bg-hover)}',
       '.ctl-row.ctl-last{border-bottom:none}',
       '.ctl-main{min-width:0;flex:1}',
-      '.ctl-title{font-size:14px;line-height:20px;color:var(--dsw-alias-label-primary);word-break:break-word}',
-      '.ctl-desc{font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);margin-top:4px;word-break:break-word}',
+      '.ctl-title{font-size:14px;font-weight:500;line-height:20px;color:var(--dsw-alias-label-primary);word-break:break-word}',
+      '.ctl-desc{font-size:12px;line-height:16px;color:var(--dsw-alias-label-secondary);margin-top:2px;word-break:break-word}',
       '.ctl-desc.ctl-warn{color:var(--dsw-alias-state-error-primary)}',
-      '.ctl-right{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex:none}',
-      '@media(max-width:479px){.ctl-right{width:100%}.ctl-right>*{width:100%;justify-content:center}}',
+      '.ctl-right{display:flex;align-items:center;justify-content:flex-end;gap:6px;flex:none;max-width:55%}',
+      '.ctl-right>button{flex:none;white-space:nowrap}',
+      '.ctl-btn-group{display:flex;align-items:center;gap:6px;flex-wrap:nowrap}',
       '.ctl-state{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary);white-space:nowrap}',
       '.ctl-state.ctl-ok{color:var(--dsw-alias-state-business-primary)}',
       '.ctl-state.ctl-bad{color:var(--dsw-alias-state-error-primary)}',
-      '.ctl-sep{height:1px;background:var(--dsw-alias-border-l2);margin:6px 0}',
-      '.ctl-back{display:flex;align-items:center;gap:6px;height:32px;margin:0 0 2px -6px;padding:0 8px 0 4px;border:none;border-radius:var(--dsw-radius-md);background:0 0;cursor:pointer;color:var(--dsw-alias-label-primary);font-family:inherit;font-size:15px;font-weight:600}',
+      '.ctl-sep{height:.5px;background:var(--dsw-alias-border-l2);margin:8px 0}',
+      '.ctl-back{display:flex;align-items:center;gap:6px;height:32px;margin:0 0 4px -6px;padding:0 8px 0 4px;border:none;border-radius:var(--dsw-radius-md);background:0 0;cursor:pointer;color:var(--dsw-alias-label-primary);font-family:inherit;font-size:15px;font-weight:600}',
       '.ctl-back:hover{background:var(--dsw-alias-interactive-bg-hover)}',
-      '.ctl-note{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary);padding:14px 0 0;overflow-wrap:anywhere}',
-      '.ctl-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:14px 0 0}',
+      '.ctl-note{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary);padding:10px 0 2px;overflow-wrap:anywhere}',
+      '.ctl-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:12px 0 0}',
       '.ctl-empty{padding:18px 0;display:flex;flex-direction:column;gap:6px}',
+      '@media(max-width:640px){',
+      '.VOzbGW_overlay{inset:0!important;width:100vw!important;height:100%!important;height:100dvh!important;max-height:100%!important;display:flex!important;align-items:stretch!important;justify-content:stretch!important;position:fixed!important;z-index:1000!important;background:var(--dsw-alias-bg-layer-1,#121214)!important}',
+      '.VOzbGW_mask{display:none!important}',
+      '.VOzbGW_panel{position:relative!important;width:100vw!important;max-width:100vw!important;height:100%!important;max-height:100%!important;border-radius:0!important;border:none!important;box-shadow:none!important;flex-direction:column!important;background:var(--dsw-alias-bg-layer-1,#121214)!important;overflow:hidden!important}',
+      '.VOzbGW_nav{box-sizing:border-box!important;width:100%!important;flex-direction:row!important;align-items:center!important;gap:8px!important;height:auto!important;min-height:48px!important;padding:max(12px,env(safe-area-inset-top,12px)) 60px 10px 14px!important;background:var(--dsw-alias-bg-layer-2,#1c1c1f)!important;border-bottom:.5px solid var(--dsw-alias-border-l2)!important;overflow-x:auto!important;flex:none!important;scrollbar-width:none!important}',
+      '.VOzbGW_nav::-webkit-scrollbar{display:none!important}',
+      '.VOzbGW_navTitle{display:none!important}',
+      '.VOzbGW_navList{flex-direction:row!important;align-items:center!important;gap:6px!important;flex:1!important;min-width:0!important;overflow-x:auto!important;scrollbar-width:none!important}',
+      '.VOzbGW_navList::-webkit-scrollbar{display:none!important}',
+      '.VOzbGW_navCell{flex:none!important;white-space:nowrap!important;height:32px!important;padding:0 14px!important;border-radius:16px!important;font-size:13.5px!important;font-weight:500!important;color:var(--dsw-alias-label-secondary)!important;background:transparent!important;transition:all .2s ease!important}',
+      '.VOzbGW_navCell:hover{background:var(--dsw-alias-interactive-bg-hover)!important;color:var(--dsw-alias-label-primary)!important}',
+      '.VOzbGW_navCell.VOzbGW_active{background:var(--dsw-alias-interactive-bg-active,#4D6BFE)!important;color:#FFFFFF!important;font-weight:600!important;box-shadow:0 2px 8px rgba(77,107,254,0.3)!important}',
+      '.VOzbGW_content{flex:1!important;display:flex!important;flex-direction:column!important;min-height:0!important;overflow:hidden!important}',
+      '.VOzbGW_header{position:absolute!important;top:max(12px,env(safe-area-inset-top,12px))!important;right:12px!important;width:34px!important;height:34px!important;padding:0!important;margin:0!important;z-index:100!important;display:flex!important;align-items:center!important;justify-content:center!important;background:transparent!important;border:none!important}',
+      '.VOzbGW_actions{display:none!important}',
+      '.VOzbGW_close{width:34px!important;height:34px!important;border-radius:50%!important;background:var(--dsw-alias-interactive-bg-hover,rgba(255,255,255,0.08))!important;color:var(--dsw-alias-label-primary)!important;display:flex!important;align-items:center!important;justify-content:center!important;cursor:pointer!important;border:none!important;font-size:16px!important;flex:none!important;transition:transform .15s ease!important}',
+      '.VOzbGW_close:active{transform:scale(0.9)!important}',
+      '.VOzbGW_options{flex:1!important;overflow-y:auto!important;min-height:0!important;padding:16px 16px max(40px,env(safe-area-inset-bottom,40px))!important;-webkit-overflow-scrolling:touch!important}',
+      '}',
     ].join('');
 
     function ensureCss() {
@@ -339,6 +357,7 @@ window.__ModuleLoader__.load({
           }, r.id)),
           jsx('div', { className: 'ctl-bar', children: jsx(Button, {
             variant: 'outline',
+            size: 'sm',
             onClick: () => ask('重启引擎', '插件的加载与关闭要重启引擎才生效。', 'engine.restart', '', '正在重启引擎…'),
             children: '重启引擎生效',
           }) }),
@@ -358,15 +377,17 @@ window.__ModuleLoader__.load({
           jsx(Row, { title: be.summary || '', desc: be.statusText || '', descWarn: false }),
           be.installing && be.stage ? jsx(Row, { title: be.stage, desc: '正在安装，请保持网络与前台。' }) : null,
           jsx('div', { className: 'ctl-bar', children: be.installing
-            ? jsx(Button, { variant: 'outline', onClick: () => run('buildenv.cancel', ''), children: '取消安装' })
+            ? jsx(Button, { variant: 'outline', size: 'sm', onClick: () => run('buildenv.cancel', ''), children: '取消安装' })
             : jsxs(Fragment, { children: [
                 sources.map((s, i) => jsx(Button, {
                   variant: 'outline',
+                  size: 'sm',
                   onClick: () => ask(be.installed ? '重新安装自建环境' : '下载并安装自建环境', String(s.label) + '：' + (be.installed ? '重新安装 / 修复自建环境？' : '开始下载并安装自建环境？') + '（约 193MB，保持前台与网络）', 'buildenv.install', String(i), '已开始下载安装…'),
                   children: (be.installed ? '用 ' + s.label + ' 重新安装 / 修复' : '从 ' + s.label + ' 下载安装'),
                 }, 'src' + i)),
                 jsx(Button, {
                   variant: 'ghost',
+                  size: 'sm',
                   onClick: () => run('buildenv.resolve', ''),
                   disabled: !!be.resolving,
                   children: be.resolving ? '正在查询…' : (sources.length ? '重新查询两个仓库' : '查询两个仓库'),
@@ -374,6 +395,53 @@ window.__ModuleLoader__.load({
               ] }) }),
           be.err ? jsx(Note, { children: be.err }) : null,
           jsx(Note, { children: '⚠️ 解压必须落在内部存储 —— /sdcard 是 FUSE，存不了 rootfs 里的符号链接（918 个）。分卷会留在 /sdcard/DeepSeekHarness/buildenv，重装 App 后不用重新下载，重新解压即可。' }),
+          confirmBar,
+          flashBar,
+        ] });
+      }
+
+      // ---------------- 语音设置页
+      if (page === 'voice') {
+        const vo = state.voice || {};
+        return jsxs('div', { className: 'ctl-root', children: [
+          jsx(Back, { title: '语音交互与唤醒词', onBack: () => setPage('main') }),
+          jsx(Note, { children: '支持三种唤醒方式：①长按小鲸鱼悬浮球；②按蓝牙耳机播放/暂停键；③纯语音热词唤醒。' }),
+          jsx('div', { className: 'ctl-sep' }),
+          jsx(Row, {
+            title: '语音热词唤醒 (实验性)',
+            desc: vo.hotwordEnabled ? '后台麦克风监听中，喊出唤醒词自动开麦' : '已关闭（更省电，仍可通过长按悬浮球或耳机键随时唤醒）',
+            right: jsx(Switch, {
+              checked: !!vo.hotwordEnabled,
+              label: '语音热词唤醒',
+              onChange: (next) => run('voice.hotword.toggle', next ? '1' : '0'),
+            }),
+          }),
+          jsx(Row, {
+            title: '自定义唤醒词',
+            desc: '当前唤醒词：' + (vo.wakeWords || '小鲸鱼,DeepSeek') + '（多个词用逗号隔开）',
+            right: jsx(Button, {
+              variant: 'outline',
+              size: 'sm',
+              onClick: () => {
+                const cur = vo.wakeWords || '小鲸鱼,DeepSeek';
+                const input = window.prompt('请输入自定义唤醒词（支持多个，逗号隔开）：', cur);
+                if (input !== null && input.trim() !== '') {
+                  run('voice.wakewords.set', input.trim());
+                }
+              },
+              children: '修改',
+            }),
+          }),
+          jsx(Row, {
+            title: '音效与播报测试',
+            desc: '测试提示音、TTS 语音播报与麦克风录音',
+            right: jsxs('div', { className: 'ctl-btn-group', children: [
+              jsx(Button, { variant: 'outline', size: 'sm', onClick: () => run('voice.test.tone', ''), children: '提示音' }),
+              jsx(Button, { variant: 'outline', size: 'sm', onClick: () => run('voice.test.tts', ''), children: 'TTS' }),
+              jsx(Button, { variant: 'primary', size: 'sm', onClick: () => run('voice.test.listen', ''), children: '开麦' }),
+            ] }),
+          }),
+          jsx(Note, { children: '提示：戴蓝牙耳机时，按一下耳机上的播放/暂停键可直接唤醒，无需掏出手机。' }),
           confirmBar,
           flashBar,
         ] });
@@ -387,10 +455,11 @@ window.__ModuleLoader__.load({
           jsx(Row, { title: log.summary || '', desc: log.path || '' }),
           jsx(Note, { children: '「查看」直接看末尾 200 行；「分享」调用系统分享（QQ / 微信 / 邮件…都能选），正文里带完整日志路径与末尾 400 行。日志会随使用不断追加，太长不好读时可「清空日志」。' }),
           jsx('div', { className: 'ctl-bar', children: [
-            jsx(Button, { variant: 'outline', onClick: () => run('log.view', ''), children: '查看日志' }),
-            jsx(Button, { variant: 'outline', onClick: () => run('log.share', ''), children: '分享' }),
+            jsx(Button, { variant: 'outline', size: 'sm', onClick: () => run('log.view', ''), children: '查看日志' }),
+            jsx(Button, { variant: 'outline', size: 'sm', onClick: () => run('log.share', ''), children: '分享' }),
             jsx(Button, {
               variant: 'ghost',
+              size: 'sm',
               onClick: () => ask('清空日志', (log.summary || '') + '\n\n清空不影响正在运行的引擎，之后的新日志会继续正常写入。', 'log.clear', '', '日志已清空'),
               children: '清空日志',
             }),
@@ -420,6 +489,7 @@ window.__ModuleLoader__.load({
           desc: ex.meta || '',
           right: jsx(Button, {
             variant: ex.ready ? 'outline' : 'primary',
+            size: 'sm',
             disabled: !!(ex.busy || en.starting),
             onClick: () => {
               if (ex.ready) ask('重新解压', '会覆盖内部运行环境与内核树（会话 / 凭证 / 设置都在 dshhome，不受影响）。继续？', 'extract', '', '正在重新解压…');
@@ -431,13 +501,13 @@ window.__ModuleLoader__.load({
         jsx(Row, {
           title: en.state || '',
           desc: en.meta || '',
-          right: jsxs(Fragment, { children: en.running
+          right: jsxs('div', { className: 'ctl-btn-group', children: en.running
             ? [
-                jsx(Button, { key: 'restart', variant: 'outline', onClick: () => ask('重启引擎', '当前会话会被中断一会儿，界面会自己连回来。', 'engine.restart', '', '正在重启引擎…'), children: '重启' }),
-                jsx(Button, { key: 'stop', variant: 'outline', onClick: () => ask('停止引擎', '停止后这个设置页也会跟着断开，需要重新启动引擎。', 'engine.stop', '', '正在停止引擎…'), children: '停止' }),
+                jsx(Button, { key: 'restart', variant: 'outline', size: 'sm', onClick: () => ask('重启引擎', '当前会话会被中断一会儿，界面会自己连回来。', 'engine.restart', '', '正在重启引擎…'), children: '重启' }),
+                jsx(Button, { key: 'stop', variant: 'outline', size: 'sm', onClick: () => ask('停止引擎', '停止后这个设置页也会跟着断开，需要重新启动引擎。', 'engine.stop', '', '正在停止引擎…'), children: '停止' }),
               ]
             : [
-                jsx(Button, { key: 'start', variant: 'primary', disabled: !!(en.busy || !ex.ready), onClick: () => run('engine.start', ''), children: en.busy ? '启动中…' : '启动引擎' }),
+                jsx(Button, { key: 'start', variant: 'primary', size: 'sm', disabled: !!(en.busy || !ex.ready), onClick: () => run('engine.start', ''), children: en.busy ? '启动中…' : '启动引擎' }),
               ] }),
         }),
 
@@ -448,23 +518,32 @@ window.__ModuleLoader__.load({
           descWarn: !!rescue.warn,
           right: jsx(Button, {
             variant: rescue.safeMode ? 'primary' : 'outline',
+            size: 'sm',
             onClick: () => ask(rescue.safeMode ? '退出安全模式' : '安全模式启动', rescue.safeMode ? '会把旁置的用户层还回去，并重启引擎。' : '会旁置 profile 的用户层，用出厂配置启动引擎（会话 / 凭证 / 设置都还在）。', 'rescue.toggle', '', rescue.safeMode ? '正在退出安全模式…' : '正在进入安全模式…'),
             children: rescue.safeMode ? '退出安全模式' : '安全模式启动',
           }),
         }),
         jsx(Row, {
           title: '导出全部数据',
-          desc: '把 dshhome（会话 / 凭证 / 设置 / 技能）打包到 /sdcard/Download/DSH_Backups/DSH备份-时间戳.zip',
-          right: jsx(Button, { variant: 'outline', onClick: () => run('backup.export', ''), children: '导出' }),
+          desc: '把 dshhome（会话/凭证/设置）打包至 DSH_Backups',
+          right: jsx(Button, { variant: 'outline', size: 'sm', onClick: () => run('backup.export', ''), children: '导出' }),
         }),
         jsx(Row, {
           title: '从备份导入还原',
-          desc: '选择之前导出的 zip，还原 dshhome',
-          right: jsx(Button, { variant: 'outline', onClick: () => run('backup.import', ''), children: '选择文件' }),
-          last: true,
+          desc: '选择之前导出的 zip 压缩包，还原 dshhome',
+          right: jsx(Button, { variant: 'outline', size: 'sm', onClick: () => run('backup.import', ''), children: '选择文件' }),
         }),
 
         jsx('div', { className: 'ctl-group', children: '设置' }),
+        jsx(Row, {
+          title: '语音唤醒与交互',
+          desc: (state.voice && state.voice.summary) || '自定义唤醒词 · 蓝牙耳机控制 · 开麦测试',
+          right: jsxs(Fragment, { children: [
+            jsx('span', { className: 'ctl-state', children: state.voice && state.voice.hotwordEnabled ? '已开启' : '已配置' }),
+            jsx(primitives.IconChevronRightOutlineRegular, { size: 14 }),
+          ] }),
+          onClick: () => setPage('voice'),
+        }),
         jsx(Row, {
           title: '授予权限',
           desc: '存储 · 通知 · 悬浮窗 · 电池 · root · Shizuku · 无障碍',
@@ -504,14 +583,12 @@ window.__ModuleLoader__.load({
         }),
         jsx(Row, {
           title: '时光机全站备份',
-          desc: '一键打包记忆库、所有历史会话与配置（存至 /sdcard/Download/DSH_Backups）',
-          right: jsx(Button, { variant: 'outline', onClick: () => run('snapshot', ''), children: '立即备份' }),
+          desc: '一键打包记忆库、历史会话与配置',
+          right: jsx(Button, { variant: 'outline', size: 'sm', onClick: () => run('snapshot', ''), children: '立即备份' }),
         }),
         jsx(Row, {
           title: '界面主题',
           desc: theme.label || '',
-          // 三选一用上游的 SegmentedControl（滑块指示器），不用三颗按钮 ——
-          // 三颗按钮里那颗"选中"的会是实心蓝，在这一页里太扎眼。
           right: jsx(primitives.SegmentedControl, {
             id: 'dshctl-theme',
             value: String(theme.mode == null ? 0 : theme.mode),
@@ -526,14 +603,15 @@ window.__ModuleLoader__.load({
         }),
         jsx(Row, {
           title: '检查更新',
-          desc: '当前 ' + (state.version || ''),
-          right: jsx(Button, { variant: 'outline', onClick: () => run('update.check', ''), children: '检查' }),
+          desc: '当前版本 ' + (state.version || ''),
+          right: jsx(Button, { variant: 'outline', size: 'sm', onClick: () => run('update.check', ''), children: '检查' }),
         }),
         jsx(Row, {
           title: '开源主页与 Star 支持',
-          desc: '如果觉得好用，欢迎前往 GitHub 给作者点一颗 ⭐ 支持！',
+          desc: '欢迎前往 GitHub 给作者点一颗 ⭐ 支持！',
           right: jsx(Button, {
             variant: 'outline',
+            size: 'sm',
             onClick: () => {
               openUrl('https://github.com/guzhou079-arch/deepseek-harness-android');
               say('正在打开 GitHub 开源主页…');
