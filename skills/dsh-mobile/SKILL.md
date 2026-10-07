@@ -43,7 +43,7 @@ whenToUse: 任务涉及操作手机上的其他 App（微信/QQ/飞书/WPS/浏�
 - **取微信收到的文件**：先看 `Download/WeiXin`（免特权，用户点过"保存到手机"的都在这里）；
   没有再看特权通道下的 `/sdcard/Android/data/com.tencent.mm/MicroMsg/Download`；
   两条都不行就提示用户点一次"保存到手机"。
-- **给某人发消息**：`/tap?text=<联系人>` → `/find?text=<联系人>` 核对 → `/input?text=<内容>`
+- **给某人发消息**：`/tap?text=<联系人>` → `/dump` 脚本内过滤核对 → `/input?text=<内容>`
   → **确认闸门** → `/tap?text=发送` → `/screenshot` 回证。
 - **文档整理**：不要点 WPS 界面。xlsx/docx/pptx 本质是 zip+XML，用 python 标准库直接读改
   （需要更强能力时 `pip install openpyxl python-docx`）。

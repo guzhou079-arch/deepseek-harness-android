@@ -605,7 +605,13 @@ public class MainActivity extends Activity {
             //   · 其余情况 → 直接 startEngine()，界面显示启动页，引擎就绪后
             //     waitForServer() → loadHome() 自动进聊天页，**零点击**。
             // 控制台本身没删：常驻通知的「控制台」按钮是它的入口（见 EngineService.buildNotification）。
-            if (in != null && in.getBooleanExtra("open_console", false)) {
+            // 动态注册桌面长按快捷方式 (App Shortcuts)
+            initDynamicShortcuts();
+
+            if (in != null && in.getBooleanExtra("safe_mode_boot", false)) {
+                conToast("正在通过桌面快捷方式进入安全模式…");
+                conSafeModeNow();
+            } else if (in != null && in.getBooleanExtra("open_console", false)) {
                 showConsole();
             } else if (!conFilesReady()) {
                 showConsole();
@@ -622,9 +628,49 @@ public class MainActivity extends Activity {
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
-        if (intent != null && intent.getBooleanExtra("open_console", false)) {
+        if (intent != null && intent.getBooleanExtra("safe_mode_boot", false)) {
+            conToast("正在通过桌面快捷方式进入安全模式…");
+            conSafeModeNow();
+        } else if (intent != null && intent.getBooleanExtra("open_console", false)) {
             showEngineScreen();
             showConsole();
+        }
+    }
+
+    private void initDynamicShortcuts() {
+        if (Build.VERSION.SDK_INT < 25) return;
+        try {
+            android.content.pm.ShortcutManager sm = getSystemService(android.content.pm.ShortcutManager.class);
+            if (sm == null) return;
+
+            Intent safeIntent = new Intent(Intent.ACTION_VIEW, null, this, MainActivity.class);
+            safeIntent.putExtra("safe_mode_boot", true);
+            safeIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+
+            android.content.pm.ShortcutInfo safeShortcut = new android.content.pm.ShortcutInfo.Builder(this, "shortcut_safe_mode")
+                    .setShortLabel("安全模式启动")
+                    .setLongLabel("安全模式启动（跳过用户层，保护数据）")
+                    .setIcon(android.graphics.drawable.Icon.createWithResource(this, R.drawable.ic_launcher))
+                    .setIntent(safeIntent)
+                    .build();
+
+            Intent conIntent = new Intent(Intent.ACTION_VIEW, null, this, MainActivity.class);
+            conIntent.putExtra("open_console", true);
+            conIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+
+            android.content.pm.ShortcutInfo conShortcut = new android.content.pm.ShortcutInfo.Builder(this, "shortcut_console")
+                    .setShortLabel("原生控制台")
+                    .setLongLabel("打开原生控制台（解压/引擎/日志）")
+                    .setIcon(android.graphics.drawable.Icon.createWithResource(this, R.drawable.ic_launcher))
+                    .setIntent(conIntent)
+                    .build();
+
+            java.util.List<android.content.pm.ShortcutInfo> list = new java.util.ArrayList<android.content.pm.ShortcutInfo>();
+            list.add(safeShortcut);
+            list.add(conShortcut);
+            sm.setDynamicShortcuts(list);
+        } catch (Throwable t) {
+            Log.w(TAG, "initDynamicShortcuts failed", t);
         }
     }
 
