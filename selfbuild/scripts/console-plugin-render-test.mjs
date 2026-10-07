@@ -98,6 +98,16 @@ const sampleState = {
     stage: '', resolving: false, err: '', sources: [{ index: 0, label: 'GitHub' }, { index: 1, label: 'Gitee' }],
   },
   log: { summary: 'dsh-web.log · 120 KB · 10-07 01:31', path: '/data/user/0/com.deepseek.harness/files/dsh-web.log' },
+  life: {
+    daemonRunning: true,
+    todayExpense: 61.0,
+    todayIncome: 0.0,
+    summary: '🟢 守护中 · 今日支出 ¥61.00 · 📦 待取快递 1 件',
+    packages: [{ id: 1, pickup_code: '88-3-4012', station: '5栋大堂丰巢柜', carrier: '顺丰', created_at: Date.now() }],
+    codes: [{ id: 1, code: '719305', source: '中国移动', created_at: Date.now() }],
+    transactions: [{ id: 1, type: 'expense', amount: 28.5, merchant: '美团外卖', category: '餐饮', account: '微信支付', created_at: Date.now() }],
+    tasks: [{ id: 'morning_brief', name: '晨间早报', cron_expr: 'daily:08:30', enabled: true, next_run_at: Date.now() + 3600000 }],
+  },
 };
 
 let bridgeOn = true;
@@ -368,6 +378,70 @@ step('子页：日志', () => {
   const c = settle({ close() {} });
   if (texts(c).indexOf('确定') < 0) throw new Error('清空日志没有二次确认');
   clickByText(c, '日志');   // 返回
+  settle({ close() {} });
+});
+
+step('子页：智能生活助理', () => {
+  let tree = freshMain();
+  clickByText(tree, '智能生活助理');
+  tree = settle({ close() {} });
+  const t = texts(tree);
+  for (const want of ['智能生活助理', '待取快递包裹', '88-3-4012', '今日记账与消费流水', '美团外卖', '最近验证码', '719305', '定时自动化任务']) {
+    if (t.indexOf(want) < 0) throw new Error('生活助理页缺文案：' + want);
+  }
+  clickByText(tree, '已取');
+  if (acts[acts.length - 1][0] !== 'life.pkg.pick' || acts[acts.length - 1][1] !== '1') {
+    throw new Error('点击已取没有发出 life.pkg.pick:1');
+  }
+  clickByText(tree, '复制');
+  if (acts[acts.length - 1][0] !== 'life.code.copy' || acts[acts.length - 1][1] !== '719305') {
+    throw new Error('点击复制没有发出 life.code.copy:719305');
+  }
+  clickByText(tree, '智能生活助理'); // 返回
+  settle({ close() {} });
+});
+
+step('子页：语音交互与 TTS 调音台', () => {
+  let tree = freshMain();
+  clickByText(tree, '语音交互');
+  tree = settle({ close() {} });
+  const t = texts(tree);
+  for (const want of ['语音交互与 TTS 调音台', '语音热词唤醒', '自定义唤醒词', 'TTS 播报引擎', '精选音色预设库', '播报语速', '试听文案与声音测试']) {
+    if (t.indexOf(want) < 0) throw new Error('语音调音台页缺文案：' + want);
+  }
+  clickByText(tree, '提示音');
+  if (acts[acts.length - 1][0] !== 'voice.test.tone') {
+    throw new Error('点击提示音没有发出 voice.test.tone');
+  }
+  clickByText(tree, '实时开麦');
+  if (acts[acts.length - 1][0] !== 'voice.test.listen') {
+    throw new Error('点击实时开麦没有发出 voice.test.listen');
+  }
+  clickByText(tree, '语音交互与 TTS 调音台'); // 返回
+  settle({ close() {} });
+});
+
+step('子页：本地知识库与全域检索 (RAG)', () => {
+  let tree = freshMain();
+  clickByText(tree, '本地知识库与全域检索');
+  tree = settle({ close() {} });
+  const t = texts(tree);
+  for (const want of ['本地知识库与全域检索', '本地全域秒级检索', '随手剪藏', '保存并索引']) {
+    if (t.indexOf(want) < 0) throw new Error('本地知识库页缺文案：' + want);
+  }
+  clickByText(tree, '本地知识库与全域检索'); // 返回
+  settle({ close() {} });
+});
+
+step('子页：局域网协同与隔空投送 (LAN Mesh)', () => {
+  let tree = freshMain();
+  clickByText(tree, '局域网协同与隔空投送');
+  tree = settle({ close() {} });
+  const t = texts(tree);
+  for (const want of ['局域网协同与隔空投送', '局域网访问地址', '跨设备双向剪贴板', '隔空投送文件箱']) {
+    if (t.indexOf(want) < 0) throw new Error('局域网协同页缺文案：' + want);
+  }
+  clickByText(tree, '局域网协同与隔空投送'); // 返回
   settle({ close() {} });
 });
 

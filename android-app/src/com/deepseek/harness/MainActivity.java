@@ -5705,6 +5705,10 @@ public class MainActivity extends Activity {
             vo.put("wakeWords", vm.getWakeWords());
             vo.put("summary", (vm.isHotwordEnabled() ? "语音唤醒已开启" : "语音唤醒已关闭") + " · 唤醒词: " + vm.getWakeWords());
             o.put("voice", vo);
+
+            org.json.JSONObject lf = new org.json.JSONObject();
+            readLifeDbState(lf);
+            o.put("life", lf);
         } catch (Throwable t) {
             try { o.put("error", String.valueOf(t.getMessage())); } catch (Throwable ignored) {}
         }
@@ -5807,10 +5811,209 @@ public class MainActivity extends Activity {
                 VoiceManager.get(this).triggerVoiceInteraction();
                 return;
             }
+            if ("life.daemon.start".equals(id)) {
+                runLifeToolCommand("daemon", "start");
+                conToast("正在启动生活助理守护进程…");
+                return;
+            }
+            if ("life.daemon.stop".equals(id)) {
+                runLifeToolCommand("daemon", "stop");
+                conToast("已停止生活助理守护进程");
+                return;
+            }
+            if ("life.daemon.restart".equals(id)) {
+                runLifeToolCommand("daemon", "restart");
+                conToast("正在重启生活助理守护进程…");
+                return;
+            }
+            if ("life.pkg.pick".equals(id)) {
+                runLifeToolCommand("pkg", "pick", arg);
+                conToast("已标记包裹为已取件");
+                return;
+            }
+            if ("life.code.copy".equals(id)) {
+                copyToClipboardDirect(arg);
+                conToast("验证码 [" + arg + "] 已复制到剪贴板");
+                return;
+            }
+            if ("life.scan".equals(id)) {
+                runLifeToolCommand("scan", "50");
+                conToast("正在回溯扫描最近 50 条历史通知…");
+                return;
+            }
+            if ("life.task.run".equals(id)) {
+                runLifeToolCommand("cron", "run", arg);
+                conToast("已触发任务: " + arg);
+                return;
+            }
         } catch (Throwable t) {
             Log.w(TAG, "ctlAction " + id, t);
             conToast("操作失败：" + t.getMessage());
         }
+    }
+
+    private void copyToClipboardDirect(String text) {
+        try {
+            android.content.ClipboardManager cm = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            if (cm != null) {
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("code", text));
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    private void runLifeToolCommand(final String... args) {
+        new Thread(new Runnable() {
+            @Override public void run() {
+                try {
+                    File node = new File(getFilesDir(), "payload/runtime/bin/node");
+                    File tool = new File("/sdcard/DeepSeekHarness/tools/life.js");
+                    if (!tool.exists()) return;
+                    java.util.List<String> cmd = new java.util.ArrayList<>();
+                    cmd.add(node.getAbsolutePath());
+                    cmd.add(tool.getAbsolutePath());
+                    for (String a : args) cmd.add(a);
+                    ProcessBuilder pb = new ProcessBuilder(cmd);
+                    pb.redirectErrorStream(true);
+                    Process p = pb.start();
+                    p.waitFor();
+                } catch (Throwable ignored) {}
+            }
+        }).start();
+    }
+
+    private void readLifeDbState(org.json.JSONObject lf) {
+        try {
+            // 1. 守护进程存活检查
+            File pidFile = new File(getFilesDir(), "tmp/life-daemon.pid");
+            boolean daemonRunning = false;
+            if (pidFile.exists()) {
+                try {
+                    String pidStr = readFileText(pidFile).trim();
+                    int pid = Integer.parseInt(pidStr);
+                    if (pid > 0 && new File("/proc/" + pid).exists()) {
+                        daemonRunning = true;
+                    }
+                } catch (Throwable ignored) {}
+            }
+            lf.put("daemonRunning", daemonRunning);
+
+            // 2. 读取 SQLite
+            File dbFile = new File("/sdcard/DeepSeekHarness/life.db");
+            if (!dbFile.exists()) {
+                lf.put("ready", false);
+                lf.put("summary", (daemonRunning ? "🟢 守护中" : "⚪ 未启动") + " · 数据库就绪中");
+                return;
+            }
+            lf.put("ready", true);
+
+            android.database.sqlite.SQLiteDatabase db = null;
+            try {
+                db = android.database.sqlite.SQLiteDatabase.openDatabase(
+                        dbFile.getAbsolutePath(), null, android.database.sqlite.SQLiteDatabase.OPEN_READONLY);
+
+                // A. 待取包裹
+                org.json.JSONArray pkgs = new org.json.JSONArray();
+                android.database.Cursor cPkg = db.rawQuery(
+                        "SELECT id, pickup_code, station, carrier, created_at FROM packages WHERE status = 'pending' ORDER BY id DESC LIMIT 10", null);
+                while (cPkg.moveToNext()) {
+                    org.json.JSONObject p = new org.json.JSONObject();
+                    p.put("id", cPkg.getInt(0));
+                    p.put("pickup_code", cPkg.getString(1));
+                    p.put("station", cPkg.getString(2));
+                    p.put("carrier", cPkg.getString(3));
+                    p.put("created_at", cPkg.getLong(4));
+                    pkgs.put(p);
+                }
+                cPkg.close();
+                lf.put("packages", pkgs);
+
+                // B. 最近验证码
+                org.json.JSONArray codes = new org.json.JSONArray();
+                android.database.Cursor cCode = db.rawQuery(
+                        "SELECT id, code, source, created_at FROM verification_codes ORDER BY id DESC LIMIT 5", null);
+                while (cCode.moveToNext()) {
+                    org.json.JSONObject cd = new org.json.JSONObject();
+                    cd.put("id", cCode.getInt(0));
+                    cd.put("code", cCode.getString(1));
+                    cd.put("source", cCode.getString(2));
+                    cd.put("created_at", cCode.getLong(3));
+                    codes.put(cd);
+                }
+                cCode.close();
+                lf.put("codes", codes);
+
+                // C. 今日收支统计
+                long todayStart = getTodayStartMillis();
+                double totalExp = 0.0;
+                double totalInc = 0.0;
+                android.database.Cursor cSum = db.rawQuery(
+                        "SELECT type, SUM(amount) FROM transactions WHERE created_at >= ? GROUP BY type",
+                        new String[]{String.valueOf(todayStart)});
+                while (cSum.moveToNext()) {
+                    String type = cSum.getString(0);
+                    double amt = cSum.getDouble(1);
+                    if ("expense".equalsIgnoreCase(type)) totalExp = amt;
+                    else if ("income".equalsIgnoreCase(type)) totalInc = amt;
+                }
+                cSum.close();
+                lf.put("todayExpense", totalExp);
+                lf.put("todayIncome", totalInc);
+
+                // D. 最近交易明细
+                org.json.JSONArray txs = new org.json.JSONArray();
+                android.database.Cursor cTx = db.rawQuery(
+                        "SELECT id, type, amount, merchant, category, account, created_at FROM transactions ORDER BY id DESC LIMIT 10", null);
+                while (cTx.moveToNext()) {
+                    org.json.JSONObject tx = new org.json.JSONObject();
+                    tx.put("id", cTx.getInt(0));
+                    tx.put("type", cTx.getString(1));
+                    tx.put("amount", cTx.getDouble(2));
+                    tx.put("merchant", cTx.getString(3));
+                    tx.put("category", cTx.getString(4));
+                    tx.put("account", cTx.getString(5));
+                    tx.put("created_at", cTx.getLong(6));
+                    txs.put(tx);
+                }
+                cTx.close();
+                lf.put("transactions", txs);
+
+                // E. 活跃定时任务
+                org.json.JSONArray tasks = new org.json.JSONArray();
+                android.database.Cursor cTask = db.rawQuery(
+                        "SELECT id, name, cron_expr, action_type, enabled, last_status, next_run_at FROM scheduled_tasks ORDER BY id ASC", null);
+                while (cTask.moveToNext()) {
+                    org.json.JSONObject t = new org.json.JSONObject();
+                    t.put("id", cTask.getString(0));
+                    t.put("name", cTask.getString(1));
+                    t.put("cron_expr", cTask.getString(2));
+                    t.put("action_type", cTask.getString(3));
+                    t.put("enabled", cTask.getInt(4) == 1);
+                    t.put("last_status", cTask.getString(5));
+                    t.put("next_run_at", cTask.getLong(6));
+                    tasks.put(t);
+                }
+                cTask.close();
+                lf.put("tasks", tasks);
+
+                // F. 摘要
+                String summary = (daemonRunning ? "🟢 守护中" : "⚪ 未启动") + " · 今日支出 ¥" + String.format(java.util.Locale.US, "%.2f", totalExp)
+                        + (pkgs.length() > 0 ? " · 📦 待取快递 " + pkgs.length() + " 件" : "");
+                lf.put("summary", summary);
+            } finally {
+                if (db != null) db.close();
+            }
+        } catch (Throwable t) {
+            try { lf.put("error", t.getMessage()); } catch (Throwable ignored) {}
+        }
+    }
+
+    private long getTodayStartMillis() {
+        java.util.Calendar cal = java.util.Calendar.getInstance();
+        cal.set(java.util.Calendar.HOUR_OF_DAY, 0);
+        cal.set(java.util.Calendar.MINUTE, 0);
+        cal.set(java.util.Calendar.SECOND, 0);
+        cal.set(java.util.Calendar.MILLISECOND, 0);
+        return cal.getTimeInMillis();
     }
 
     private void showConsole() {

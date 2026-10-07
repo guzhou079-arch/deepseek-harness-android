@@ -28,12 +28,13 @@ window.__ModuleLoader__.load({
     const Switch = primitives.Switch;
     const Modal = primitives.Modal;
     const Toast = primitives.Toast;
+    const SegmentedControl = primitives.SegmentedControl;
 
     // ---------------------------------------------------------------- 样式
     // 与 ui-settings-general 的行规格对齐：标准单行 Flex、标题+说明在左、控件紧凑在右
     const CSS_ID = 'dsh-android-console/console-v3.css';
     const CSS = [
-      '.ctl-root{display:flex;flex-direction:column;width:100%}',
+      '.ctl-root{display:flex;flex-direction:column;width:100%;max-width:100%;box-sizing:border-box;overflow-x:hidden}',
       '.ctl-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding-bottom:4px}',
       '.ctl-brand{font-family:var(--dsw-font-family-brand,var(--dsw-font-family));font-size:11px;letter-spacing:.14em;color:var(--dsw-alias-label-tertiary);font-weight:600}',
       '.ctl-ver{font-size:11px;color:var(--dsw-alias-label-tertiary);overflow-wrap:anywhere;text-align:right}',
@@ -48,7 +49,7 @@ window.__ModuleLoader__.load({
       '.ctl-desc.ctl-warn{color:var(--dsw-alias-state-error-primary)}',
       '.ctl-right{display:flex;align-items:center;justify-content:flex-end;gap:6px;flex:none;max-width:55%}',
       '.ctl-right>button{flex:none;white-space:nowrap}',
-      '.ctl-btn-group{display:flex;align-items:center;gap:6px;flex-wrap:nowrap}',
+      '.ctl-btn-group{display:flex;align-items:center;gap:6px;flex-wrap:wrap}',
       '.ctl-state{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary);white-space:nowrap}',
       '.ctl-state.ctl-ok{color:var(--dsw-alias-state-business-primary)}',
       '.ctl-state.ctl-bad{color:var(--dsw-alias-state-error-primary)}',
@@ -58,6 +59,30 @@ window.__ModuleLoader__.load({
       '.ctl-note{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary);padding:10px 0 2px;overflow-wrap:anywhere}',
       '.ctl-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:12px 0 0}',
       '.ctl-empty{padding:18px 0;display:flex;flex-direction:column;gap:6px}',
+      '.ctl-life-grid{display:flex;flex-direction:column;gap:12px;margin:12px 0}',
+      '.ctl-life-card{display:flex;flex-direction:column;gap:8px;padding:12px 14px;border-radius:var(--dsw-radius-lg,12px);background:var(--dsw-alias-bg-layer-2,rgba(255,255,255,0.04));border:.5px solid var(--dsw-alias-border-l2)}',
+      '.ctl-life-card-head{display:flex;align-items:center;justify-content:space-between;gap:8px}',
+      '.ctl-life-card-title{font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary)}',
+      '.ctl-code-pill{font-family:monospace;font-size:15px;font-weight:700;letter-spacing:.05em;color:var(--dsw-alias-state-business-primary,#4D6BFE);background:rgba(77,107,254,0.12);padding:2px 8px;border-radius:6px}',
+      '.ctl-amt-neg{font-size:13.5px;font-weight:600;color:var(--dsw-alias-state-error-primary,#f87171)}',
+      '.ctl-amt-pos{font-size:13.5px;font-weight:600;color:var(--dsw-alias-state-business-primary,#34d399)}',
+      '.ctl-tag{font-size:11px;padding:1px 6px;border-radius:4px;background:var(--dsw-alias-interactive-bg-hover,rgba(255,255,255,0.08));color:var(--dsw-alias-label-secondary)}',
+      '.ctl-item-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:.5px solid var(--dsw-alias-border-l2)}',
+      '.ctl-item-row:last-child{border-bottom:none}',
+      '.ctl-voice-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin:8px 0}',
+      '.ctl-voice-card{display:flex;flex-direction:column;gap:4px;padding:10px 12px;border-radius:var(--dsw-radius-md,8px);background:var(--dsw-alias-bg-layer-2,rgba(255,255,255,0.04));border:1px solid var(--dsw-alias-border-l2);cursor:pointer;transition:all .15s ease}',
+      '.ctl-voice-card:hover{background:var(--dsw-alias-interactive-bg-hover)}',
+      '.ctl-voice-card.active{border-color:var(--dsw-alias-state-business-primary,#4D6BFE);background:rgba(77,107,254,0.12)}',
+      '.ctl-voice-card-name{font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary)}',
+      '.ctl-voice-card-tags{font-size:11px;color:var(--dsw-alias-label-tertiary)}',
+      '.ctl-voice-input{width:100%;box-sizing:border-box;padding:8px 10px;border-radius:var(--dsw-radius-md,6px);border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2,rgba(255,255,255,0.04));color:var(--dsw-alias-label-primary);font-size:13px;outline:none;transition:border-color .15s ease}',
+      '.ctl-voice-input:focus{border-color:var(--dsw-alias-state-business-primary,#4D6BFE)}',
+      '.ctl-voice-wave{display:flex;align-items:center;gap:3px;height:18px}',
+      '.ctl-voice-bar{width:3px;height:12px;border-radius:2px;background:var(--dsw-alias-state-business-primary,#4D6BFE);animation:ctl-wave 1s ease-in-out infinite alternate}',
+      '.ctl-voice-bar:nth-child(2){animation-delay:.2s;height:16px}',
+      '.ctl-voice-bar:nth-child(3){animation-delay:.4s;height:10px}',
+      '.ctl-voice-bar:nth-child(4){animation-delay:.1s;height:14px}',
+      '@keyframes ctl-wave{0%{transform:scaleY(0.4)}100%{transform:scaleY(1)}}',
       '@media(max-width:640px){',
       '.VOzbGW_overlay{inset:0!important;width:100vw!important;height:100%!important;height:100dvh!important;max-height:100%!important;display:flex!important;align-items:stretch!important;justify-content:stretch!important;position:fixed!important;z-index:1000!important;background:var(--dsw-alias-bg-layer-1,#121214)!important}',
       '.VOzbGW_mask{display:none!important}',
@@ -75,7 +100,7 @@ window.__ModuleLoader__.load({
       '.VOzbGW_actions{display:none!important}',
       '.VOzbGW_close{width:34px!important;height:34px!important;border-radius:50%!important;background:var(--dsw-alias-interactive-bg-hover,rgba(255,255,255,0.08))!important;color:var(--dsw-alias-label-primary)!important;display:flex!important;align-items:center!important;justify-content:center!important;cursor:pointer!important;border:none!important;font-size:16px!important;flex:none!important;transition:transform .15s ease!important}',
       '.VOzbGW_close:active{transform:scale(0.9)!important}',
-      '.VOzbGW_options{flex:1!important;overflow-y:auto!important;min-height:0!important;padding:16px 16px max(40px,env(safe-area-inset-bottom,40px))!important;-webkit-overflow-scrolling:touch!important}',
+      '.VOzbGW_options{flex:1!important;overflow-y:auto!important;overflow-x:hidden!important;max-width:100vw!important;box-sizing:border-box!important;padding:16px 16px max(40px,env(safe-area-inset-bottom,40px))!important;-webkit-overflow-scrolling:touch!important}',
       '}',
     ].join('');
 
@@ -162,7 +187,267 @@ window.__ModuleLoader__.load({
       return state;
     }
 
+    /** 独立轮询生活助理状态（同时支持 HTTP API 与原生桥） */
+    function useLifeState(fallbackLife) {
+      const [life, setLife] = react.useState(fallbackLife || null);
+      react.useEffect(() => {
+        let alive = true;
+        const fetchLife = async () => {
+          try {
+            const res = await fetch('/life/api/status');
+            if (res.ok) {
+              const data = await res.json();
+              if (alive && data && data.ok) {
+                setLife(data);
+                return;
+              }
+            }
+          } catch (_) {}
+          if (alive && fallbackLife) setLife(fallbackLife);
+        };
+        fetchLife();
+        const timer = setInterval(fetchLife, 2500);
+        return () => { alive = false; clearInterval(timer); };
+      }, [fallbackLife]);
+      return life || fallbackLife || {};
+    }
+
+    /** 独立轮询语音中枢与 TTS 调音台状态（支持配置保存与实时试听） */
+    function useVoiceHubState(fallbackVoice) {
+      const [voiceHub, setVoiceHub] = react.useState({
+        config: {
+          hotword_enabled: '1',
+          wake_words: '流光,小鲸鱼,DeepSeek',
+          wake_mode: 'single_breath',
+          stt_engine: 'system',
+          tts_engine: 'edge',
+          tts_voice: 'zh-CN-XiaoxiaoNeural',
+          tts_speed: '1.0',
+          custom_api_url: '',
+          custom_api_key: '',
+          custom_model_name: 'tts-1',
+        },
+        presets: [
+          { id: 'zh-CN-XiaoxiaoNeural', name: '晓晓 · 温柔女声', engine: 'edge', gender: 'female', tags: '清晰/自然/推荐' },
+          { id: 'zh-CN-YunxiNeural', name: '云希 · 沉稳男声', engine: 'edge', gender: 'male', tags: '沉稳/磁性/播报' },
+          { id: 'zh-CN-YunjianNeural', name: '云健 · 阳光男声', engine: 'edge', gender: 'male', tags: '活力/解说' },
+          { id: 'zh-CN-XiaoyiNeural', name: '晓伊 · 灵动少女', engine: 'edge', gender: 'female', tags: '甜美/对话' },
+          { id: 'nova', name: 'Nova · 温暖知性 (OpenAI)', engine: 'openai', gender: 'female', tags: '高保真/细腻' },
+          { id: 'shimmer', name: 'Shimmer · 元气甜美 (OpenAI)', engine: 'openai', gender: 'female', tags: '清脆/活力' },
+          { id: 'alloy', name: 'Alloy · 科技极客 (OpenAI)', engine: 'openai', gender: 'neutral', tags: '中性/平衡' },
+          { id: 'onyx', name: 'Onyx · 低沉浑厚 (OpenAI)', engine: 'openai', gender: 'male', tags: '磁性/低音' },
+          { id: 'system_default', name: '系统原生 · 默认音色', engine: 'system', gender: 'auto', tags: '零延迟/离线' },
+        ],
+      });
+
+      react.useEffect(() => {
+        let alive = true;
+        const fetchVoice = async () => {
+          try {
+            const res = await fetch('/voice-hub/api/config');
+            if (res.ok) {
+              const data = await res.json();
+              if (alive && data && data.ok) {
+                setVoiceHub({
+                  config: data.config || {},
+                  presets: data.presets || [],
+                  bridgeStatus: data.bridgeStatus || {},
+                });
+                return;
+              }
+            }
+          } catch (_) {}
+        };
+        fetchVoice();
+        const timer = setInterval(fetchVoice, 3000);
+        return () => { alive = false; clearInterval(timer); };
+      }, []);
+
+      const saveConfig = (patch) => {
+        setVoiceHub((prev) => ({ ...prev, config: { ...prev.config, ...patch } }));
+        try {
+          fetch('/voice-hub/api/config/save', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(patch),
+          }).catch(function() {});
+        } catch (_) {}
+      };
+
+      const testSpeak = async (text, opts) => {
+        try {
+          const res = await fetch('/voice-hub/api/test/speak', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ text: text, ...opts }),
+          });
+          return await res.json();
+        } catch (e) {
+          return { ok: false, error: e.message };
+        }
+      };
+
+      return { voiceHub: voiceHub || {}, saveConfig: saveConfig, testSpeak: testSpeak };
+    }
+
+    /** 独立轮询本地 RAG 知识库状态 */
+    function useRagState() {
+      const [rag, setRag] = react.useState({ kbs: [], searchResults: [], isSearching: false, lastQuery: '' });
+      const fetchList = async () => {
+        try {
+          const res = await fetch('/rag/api/list');
+          if (res.ok) {
+            const data = await res.json();
+            if (data && data.ok) {
+              setRag((prev) => Object.assign({}, prev, { kbs: data.kbs || [] }));
+            }
+          }
+        } catch (_) {}
+      };
+
+      react.useEffect(() => {
+        fetchList();
+      }, []);
+
+      const search = async (query, kb) => {
+        setRag((prev) => Object.assign({}, prev, { isSearching: true, lastQuery: query }));
+        try {
+          const res = await fetch('/rag/api/search', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ query: query, kb: kb || '', limit: 5 }),
+          });
+          const data = await res.json();
+          setRag((prev) => Object.assign({}, prev, { isSearching: false, searchResults: (data && data.results) || [] }));
+          return data;
+        } catch (e) {
+          setRag((prev) => Object.assign({}, prev, { isSearching: false, searchResults: [] }));
+          return { ok: false, error: e.message };
+        }
+      };
+
+      const clip = async (payload) => {
+        try {
+          const res = await fetch('/rag/api/clip', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          const data = await res.json();
+          fetchList();
+          return data;
+        } catch (e) {
+          return { ok: false, error: e.message };
+        }
+      };
+
+      return { rag: rag, search: search, clip: clip, refresh: fetchList };
+    }
+
+    /** 独立轮询局域网协同状态 */
+    function useLanMeshState() {
+      const [lan, setLan] = react.useState({ ips: [], clipboard: '', files: [] });
+      const fetchLan = async () => {
+        try {
+          const res = await fetch('/lan-mesh/api/status');
+          if (res.ok) {
+            const data = await res.json();
+            if (data && data.ok) {
+              setLan({ ips: data.ips || [], clipboard: data.clipboard || '', files: data.files || [] });
+            }
+          }
+        } catch (_) {}
+      };
+
+      react.useEffect(() => {
+        fetchLan();
+        const timer = setInterval(fetchLan, 3500);
+        return () => clearInterval(timer);
+      }, []);
+
+      const setClipboard = async (text) => {
+        try {
+          const res = await fetch('/lan-mesh/api/clipboard', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ text: text }),
+          });
+          const data = await res.json();
+          fetchLan();
+          return data;
+        } catch (e) {
+          return { ok: false, error: e.message };
+        }
+      };
+
+      return { lan: lan, setClipboard: setClipboard, refresh: fetchLan };
+    }
+
+    function executeAction(id, arg) {
+      if (typeof fetch === 'function' && String(id).startsWith('life.')) {
+        try {
+          fetch('/life/api/act', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ id: id, arg: arg }),
+          }).catch(function() {});
+        } catch (_) {}
+      }
+      if (typeof fetch === 'function' && String(id).startsWith('voice.')) {
+        try {
+          fetch('/voice-hub/api/act', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ id: id, arg: arg }),
+          }).catch(function() {});
+        } catch (_) {}
+      }
+      return callAction(id, arg);
+    }
+
     // -------------------------------------------------------------- 小组件
+    function SegmentGrid(props) {
+      const value = props.value;
+      const options = props.options || [];
+      const onChange = props.onChange || function() {};
+      const cols = props.columns || 2;
+      return jsx('div', {
+        style: {
+          display: 'grid',
+          gridTemplateColumns: 'repeat(' + cols + ', 1fr)',
+          gap: '6px',
+          width: '100%',
+          boxSizing: 'border-box',
+          margin: '6px 0',
+        },
+        children: options.map(function(opt) {
+          const active = opt.value === value;
+          return jsx('button', {
+            key: opt.value,
+            type: 'button',
+            style: {
+              padding: '8px 4px',
+              borderRadius: '8px',
+              fontSize: '13px',
+              fontWeight: active ? '600' : '400',
+              color: active ? '#FFFFFF' : 'var(--dsw-alias-label-primary)',
+              background: active ? 'var(--dsw-alias-state-business-primary, #4D6BFE)' : 'var(--dsw-alias-bg-layer-2, rgba(255,255,255,0.05))',
+              border: active ? '1px solid var(--dsw-alias-state-business-primary, #4D6BFE)' : '1px solid var(--dsw-alias-border-l2)',
+              cursor: 'pointer',
+              textAlign: 'center',
+              transition: 'all 0.15s ease',
+              outline: 'none',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            },
+            onClick: function() { onChange(opt.value); },
+            children: opt.label,
+          });
+        }),
+      });
+    }
+
     function Row(props) {
       const { title, desc, right, onClick, last, descWarn } = props;
       return jsxs('div', {
@@ -263,7 +548,21 @@ window.__ModuleLoader__.load({
       const [page, setPage] = react.useState('main');
       const [pending, setPending] = react.useState(null);
       const [flash, setFlash] = react.useState('');
-      const state = useConsoleState();
+      const rawState = useConsoleState();
+      const lifeData = useLifeState(rawState && rawState.life);
+      const voiceHubHook = useVoiceHubState(rawState && rawState.voice);
+      const voiceHub = voiceHubHook.voiceHub || {};
+      const saveVoiceConfig = voiceHubHook.saveConfig;
+      const testSpeak = voiceHubHook.testSpeak;
+      const ragHook = useRagState();
+      const lanHook = useLanMeshState();
+      const [ragQuery, setRagQuery] = react.useState('');
+      const [clipTitle, setClipTitle] = react.useState('');
+      const [clipText, setClipText] = react.useState('');
+      const [lanInput, setLanInput] = react.useState('');
+      const [testText, setTestText] = react.useState('你好！我是 DeepSeek 智能语音分身，随时为您服务。');
+      const [isAuditioning, setIsAuditioning] = react.useState(false);
+      const state = rawState ? Object.assign({}, rawState, { life: lifeData }) : null;
       const flashTimer = react.useRef(null);
 
       const say = react.useCallback((text) => {
@@ -275,7 +574,7 @@ window.__ModuleLoader__.load({
 
       /** 发一个动作；需要二次确认的走 ask()。 */
       const run = react.useCallback((id, arg, done) => {
-        const res = callAction(id, arg);
+        const res = executeAction(id, arg);
         if (res && res.ok === false && res.msg) say(res.msg);
         else if (done) say(done);
         return res;
@@ -400,32 +699,46 @@ window.__ModuleLoader__.load({
         ] });
       }
 
-      // ---------------- 语音设置页
+      // ---------------- 语音设置与 TTS 调音台页
       if (page === 'voice') {
         const vo = state.voice || {};
+        const vCfg = voiceHub.config || {};
+        const presets = voiceHub.presets || [];
+        const isHotword = vCfg.hotword_enabled === '1' || vo.hotwordEnabled;
+        const currentWords = vCfg.wake_words || vo.wakeWords || '流光,小鲸鱼,DeepSeek';
+        const currentVoice = vCfg.tts_voice || 'zh-CN-XiaoxiaoNeural';
+        const currentSpeed = vCfg.tts_speed || '1.0';
+        const currentEngine = vCfg.tts_engine || 'edge';
+
         return jsxs('div', { className: 'ctl-root', children: [
-          jsx(Back, { title: '语音交互与唤醒词', onBack: () => setPage('main') }),
-          jsx(Note, { children: '支持三种唤醒方式：①长按小鲸鱼悬浮球；②按蓝牙耳机播放/暂停键；③纯语音热词唤醒。' }),
+          jsx(Back, { title: '语音交互与 TTS 调音台', onBack: () => setPage('main') }),
+          jsx(Note, { children: '全能语音中枢：支持端侧低功耗语音唤醒、多模型超自然 TTS 音色调优、一句话连贯问答与小鲸鱼悬浮球对讲。' }),
           jsx('div', { className: 'ctl-sep' }),
+
+          // ========== 第一板块：⚡ 语音唤醒与识别 ==========
+          jsx('div', { className: 'ctl-group', children: '⚡ 语音唤醒与识别 (Wake-up & STT)' }),
           jsx(Row, {
-            title: '语音热词唤醒 (实验性)',
-            desc: vo.hotwordEnabled ? '后台麦克风监听中，喊出唤醒词自动开麦' : '已关闭（更省电，仍可通过长按悬浮球或耳机键随时唤醒）',
+            title: '语音热词唤醒',
+            desc: isHotword ? '🟢 待命监听中 · 喊出唤醒词自动开麦（支持一句话直达）' : '已关闭（更省电，仍可通过长按悬浮球或耳机按键随时唤醒）',
             right: jsx(Switch, {
-              checked: !!vo.hotwordEnabled,
+              checked: !!isHotword,
               label: '语音热词唤醒',
-              onChange: (next) => run('voice.hotword.toggle', next ? '1' : '0'),
+              onChange: (next) => {
+                saveVoiceConfig({ hotword_enabled: next ? '1' : '0' });
+                run('voice.hotword.toggle', next ? '1' : '0');
+              },
             }),
           }),
           jsx(Row, {
             title: '自定义唤醒词',
-            desc: '当前唤醒词：' + (vo.wakeWords || '小鲸鱼,DeepSeek') + '（多个词用逗号隔开）',
+            desc: '当前唤醒词：' + currentWords + '（支持同音字与拼音智能容错）',
             right: jsx(Button, {
               variant: 'outline',
               size: 'sm',
               onClick: () => {
-                const cur = vo.wakeWords || '小鲸鱼,DeepSeek';
-                const input = window.prompt('请输入自定义唤醒词（支持多个，逗号隔开）：', cur);
+                const input = window.prompt('请输入自定义唤醒词（支持多个，逗号隔开）：', currentWords);
                 if (input !== null && input.trim() !== '') {
+                  saveVoiceConfig({ wake_words: input.trim() });
                   run('voice.wakewords.set', input.trim());
                 }
               },
@@ -433,15 +746,472 @@ window.__ModuleLoader__.load({
             }),
           }),
           jsx(Row, {
-            title: '音效与播报测试',
-            desc: '测试提示音、TTS 语音播报与麦克风录音',
-            right: jsxs('div', { className: 'ctl-btn-group', children: [
-              jsx(Button, { variant: 'outline', size: 'sm', onClick: () => run('voice.test.tone', ''), children: '提示音' }),
-              jsx(Button, { variant: 'outline', size: 'sm', onClick: () => run('voice.test.tts', ''), children: 'TTS' }),
-              jsx(Button, { variant: 'primary', size: 'sm', onClick: () => run('voice.test.listen', ''), children: '开麦' }),
-            ] }),
+            title: '唤醒交互模式',
+            desc: vCfg.wake_mode === 'two_step' ? '双步交互：喊唤醒词 ➔ 叮~ 冒泡提示 ➔ 等待您说指令' : '一句话直达：一口气说「小鲸鱼 帮我查天气」连贯执行（推荐）',
+            right: jsx(SegmentedControl, {
+              value: vCfg.wake_mode || 'single_breath',
+              options: [
+                { value: 'single_breath', label: '一句话直达' },
+                { value: 'two_step', label: '双步等待' },
+              ],
+              onChange: (mode) => saveVoiceConfig({ wake_mode: mode }),
+            }),
           }),
-          jsx(Note, { children: '提示：戴蓝牙耳机时，按一下耳机上的播放/暂停键可直接唤醒，无需掏出手机。' }),
+
+          jsx('div', { className: 'ctl-sep' }),
+
+          // ========== 第二板块：🔊 TTS 语音模型与音色调音台 ==========
+          jsx('div', { className: 'ctl-group', children: '🔊 TTS 语音模型与音色调音台' }),
+          jsxs('div', { style: { padding: '8px 0 6px' }, children: [
+            jsx('div', { className: 'ctl-title', children: 'TTS 播报引擎' }),
+            jsx('div', { className: 'ctl-desc', style: { marginBottom: '8px' }, children: '选择语音合成服务来源（微软自然音 / OpenAI / 系统原生 / 自定义 API）' }),
+            jsx(SegmentGrid, {
+              columns: 2,
+              value: currentEngine,
+              options: [
+                { value: 'edge', label: '微软自然音' },
+                { value: 'openai', label: 'OpenAI' },
+                { value: 'system', label: '系统原生' },
+                { value: 'custom', label: '自定义 API' },
+              ],
+              onChange: (eng) => saveVoiceConfig({ tts_engine: eng }),
+            }),
+          ] }),
+
+          // 预设音色库卡片选择
+          jsx('div', { style: { padding: '8px 0 2px' }, children: [
+            jsx('div', { className: 'ctl-title', style: { fontSize: '13px', marginBottom: '6px' }, children: '精选音色预设库（点击切换）' }),
+            jsx('div', { className: 'ctl-voice-grid', children: presets.map((p) => {
+              const active = currentVoice === p.id;
+              return jsxs('div', {
+                key: p.id,
+                className: 'ctl-voice-card' + (active ? ' active' : ''),
+                onClick: () => {
+                  saveVoiceConfig({ tts_voice: p.id, tts_engine: p.engine });
+                  say('已切换音色：' + p.name);
+                },
+                children: [
+                  jsx('div', { className: 'ctl-voice-card-name', children: p.name }),
+                  jsx('div', { className: 'ctl-voice-card-tags', children: p.tags }),
+                ],
+              });
+            }) }),
+          ] }),
+
+          // 语速微调
+          jsxs('div', { style: { padding: '8px 0 6px' }, children: [
+            jsx('div', { className: 'ctl-title', children: '播报语速' }),
+            jsx('div', { className: 'ctl-desc', style: { marginBottom: '8px' }, children: '当前倍速：' + currentSpeed + 'x（标准为 1.0x）' }),
+            jsx(SegmentGrid, {
+              columns: 4,
+              value: currentSpeed,
+              options: [
+                { value: '0.8', label: '0.8x 舒缓' },
+                { value: '1.0', label: '1.0x 标准' },
+                { value: '1.25', label: '1.25x 快速' },
+                { value: '1.5', label: '1.5x 极速' },
+              ],
+              onChange: (spd) => saveVoiceConfig({ tts_speed: spd }),
+            }),
+          ] }),
+
+          // 自定义 API 折叠配置
+          (currentEngine === 'custom' || currentEngine === 'openai') ? jsxs('div', { className: 'ctl-life-card', style: { marginTop: '8px' }, children: [
+            jsx('div', { className: 'ctl-life-card-title', children: '⚙️ 云端 TTS / 中转站 API 配置' }),
+            jsx('div', { className: 'ctl-desc', children: '支持 OpenAI、CosyVoice、豆包TTS、FishSpeech 等兼容接口' }),
+            jsx('input', {
+              className: 'ctl-voice-input',
+              style: { marginTop: '6px' },
+              placeholder: 'API 地址，如 https://api.openai.com/v1/audio/speech',
+              value: vCfg.custom_api_url || '',
+              onChange: (e) => saveVoiceConfig({ custom_api_url: e.target.value }),
+            }),
+            jsx('input', {
+              className: 'ctl-voice-input',
+              type: 'password',
+              style: { marginTop: '6px' },
+              placeholder: 'API Key (sk-...)，留空默认使用系统环境变量',
+              value: vCfg.custom_api_key || '',
+              onChange: (e) => saveVoiceConfig({ custom_api_key: e.target.value }),
+            }),
+            jsx('input', {
+              className: 'ctl-voice-input',
+              style: { marginTop: '6px' },
+              placeholder: '模型名称，如 tts-1 / cosyvoice-v1 / doubao-tts',
+              value: vCfg.custom_model_name || 'tts-1',
+              onChange: (e) => saveVoiceConfig({ custom_model_name: e.target.value }),
+            }),
+          ] }) : null,
+
+          jsx('div', { className: 'ctl-sep' }),
+
+          // ========== 第三板块：🎧 实时试听与对讲调音 ==========
+          jsx('div', { className: 'ctl-group', children: '🎧 实时试听与对讲调音 (Live Audition)' }),
+          jsxs('div', { className: 'ctl-life-card', children: [
+            jsx('div', { className: 'ctl-life-card-head', children: [
+              jsx('div', { className: 'ctl-life-card-title', children: '🎵 试听文案与声音测试' }),
+              isAuditioning ? jsxs('div', { className: 'ctl-voice-wave', children: [
+                jsx('div', { className: 'ctl-voice-bar' }),
+                jsx('div', { className: 'ctl-voice-bar' }),
+                jsx('div', { className: 'ctl-voice-bar' }),
+                jsx('div', { className: 'ctl-voice-bar' }),
+              ] }) : null,
+            ] }),
+            jsx('input', {
+              className: 'ctl-voice-input',
+              placeholder: '输入试听文案...',
+              value: testText,
+              onChange: (e) => setTestText(e.target.value),
+            }),
+            jsxs('div', { className: 'ctl-btn-group', style: { marginTop: '8px', justifyContent: 'flex-end' }, children: [
+              jsx(Button, {
+                variant: 'primary',
+                size: 'sm',
+                disabled: isAuditioning,
+                onClick: async () => {
+                  setIsAuditioning(true);
+                  say('正在生成并播报语音…');
+                  await testSpeak(testText || '你好！我是 DeepSeek 智能语音分身，随时为您服务。', {
+                    voice: currentVoice,
+                    engine: currentEngine,
+                    speed: currentSpeed,
+                  });
+                  setTimeout(() => setIsAuditioning(false), 2500);
+                },
+                children: isAuditioning ? '正在播报…' : '🎵 试听当前音色',
+              }),
+              jsx(Button, { variant: 'outline', size: 'sm', onClick: () => run('voice.test.tone', '', '已播放提示音'), children: '🔔 提示音' }),
+              jsx(Button, { variant: 'outline', size: 'sm', onClick: () => run('voice.test.listen', '', '已开麦收音'), children: '🎤 实时开麦' }),
+            ] }),
+          ] }),
+
+          jsx(Note, { children: '💡 提示：按蓝牙耳机播放/暂停键，或长按桌宠小鲸鱼悬浮球，也可一键唤醒语音对讲。' }),
+          confirmBar,
+          flashBar,
+        ] });
+      }
+
+      // ---------------- 生活助理页
+      if (page === 'life') {
+        const lf = state.life || {};
+        const pkgs = lf.packages || [];
+        const codes = lf.codes || [];
+        const txs = lf.transactions || [];
+        const tasks = lf.tasks || [];
+        const isRunning = !!lf.daemonRunning;
+
+        return jsxs('div', { className: 'ctl-root', children: [
+          jsx(Back, { title: '智能生活助理', onBack: () => setPage('main') }),
+          jsx(Note, { children: '全自动无感感知：短信/通知验证码自动提取写入剪贴板、微信/支付宝/银行动账自动记账、快递取件码聚合与定时任务调度。' }),
+          jsx('div', { className: 'ctl-sep' }),
+
+          // 守护状态卡片
+          jsx(Row, {
+            title: isRunning ? '生活助理守护进程：运行中' : '生活助理守护进程：未运行',
+            desc: isRunning ? '正在实时监听系统通知流，自动提取验证码、记账与包裹' : '启动后可在后台自动感知通知并写入剪贴板与记账数据库',
+            right: jsxs('div', { className: 'ctl-btn-group', children: isRunning
+              ? [
+                  jsx(Button, { key: 'res', variant: 'outline', size: 'sm', onClick: () => run('life.daemon.restart', '', '正在重启守护进程…'), children: '重启' }),
+                  jsx(Button, { key: 'stp', variant: 'ghost', size: 'sm', onClick: () => run('life.daemon.stop', '', '已停止守护进程'), children: '停止' }),
+                ]
+              : [
+                  jsx(Button, { key: 'sta', variant: 'primary', size: 'sm', onClick: () => run('life.daemon.start', '', '正在启动守护进程…'), children: '启动守护' }),
+                ] }),
+          }),
+
+          jsx('div', { className: 'ctl-life-grid', children: [
+            // 0. 智能生活情境与每日简报
+            jsxs('div', { className: 'ctl-life-card', children: [
+              jsxs('div', { className: 'ctl-life-card-head', children: [
+                jsx('span', { className: 'ctl-life-card-title', children: '🌟 情境模式与每日简报' }),
+                jsxs('div', { className: 'ctl-btn-group', children: [
+                  jsx(Button, {
+                    variant: 'outline',
+                    size: 'sm',
+                    onClick: async () => {
+                      const res = await run('life.scene.morning', '', '正在生成晨间生活早报…');
+                      if (res && res.result && res.result.content) say('早报已生成并推送系统通知');
+                    },
+                    children: '☀️ 晨间早报',
+                  }),
+                  jsx(Button, {
+                    variant: 'outline',
+                    size: 'sm',
+                    onClick: async () => {
+                      const res = await run('life.scene.night', '', '正在生成晚间收支复盘…');
+                      if (res && res.result && res.result.content) say('复盘已生成并推送系统通知');
+                    },
+                    children: '🌙 晚间复盘',
+                  }),
+                ] }),
+              ] }),
+              jsx('div', { className: 'ctl-desc', style: { lineHeight: '18px' }, children: (lf.morningBrief && lf.morningBrief.summary) || '早晨汇总包裹与记账预算，夜间复盘今日开销流水与未取提醒' }),
+            ] }),
+
+            // 1. 待取快递
+            jsxs('div', { className: 'ctl-life-card', children: [
+              jsxs('div', { className: 'ctl-life-card-head', children: [
+                jsx('span', { className: 'ctl-life-card-title', children: '📦 待取快递包裹 (' + pkgs.length + '件)' }),
+                jsx(Button, { variant: 'ghost', size: 'sm', onClick: () => run('life.scan', '', '正在扫描历史通知…'), children: '扫描通知' }),
+              ] }),
+              pkgs.length === 0
+                ? jsx('div', { className: 'ctl-note', children: '🎉 暂无待取包裹，所有快递都已取完！' })
+                : pkgs.map((p) => jsxs('div', { key: p.id, className: 'ctl-item-row', children: [
+                    jsxs('div', { className: 'ctl-main', children: [
+                      jsxs('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' }, children: [
+                        jsx('span', { className: 'ctl-code-pill', children: p.pickup_code }),
+                        jsx('span', { className: 'ctl-tag', children: p.carrier || '快递' }),
+                      ] }),
+                      jsx('div', { className: 'ctl-desc', style: { marginTop: '4px' }, children: (p.station || '快递驿站/柜') + ' · ' + (p.created_at ? new Date(p.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }) : '') }),
+                    ] }),
+                    jsx(Button, {
+                      variant: 'outline',
+                      size: 'sm',
+                      onClick: () => run('life.pkg.pick', String(p.id), '已标记取件完成'),
+                      children: '已取',
+                    }),
+                  ] })),
+            ] }),
+
+            // 2. 今日记账
+            jsxs('div', { className: 'ctl-life-card', children: [
+              jsxs('div', { className: 'ctl-life-card-head', children: [
+                jsx('span', { className: 'ctl-life-card-title', children: '💰 今日记账与消费流水' }),
+                jsxs('div', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' }, children: [
+                  '支出: ',
+                  jsx('span', { className: 'ctl-amt-neg', children: '¥' + (lf.todayExpense || 0).toFixed(2) }),
+                  '  收入: ',
+                  jsx('span', { className: 'ctl-amt-pos', children: '¥' + (lf.todayIncome || 0).toFixed(2) }),
+                ] }),
+              ] }),
+              txs.length === 0
+                ? jsx('div', { className: 'ctl-note', children: '今日暂无新记账记录。收到微信/支付宝/银行支付通知时将自动记账。' })
+                : txs.map((tx) => jsxs('div', { key: tx.id, className: 'ctl-item-row', children: [
+                    jsxs('div', { className: 'ctl-main', children: [
+                      jsxs('div', { style: { display: 'flex', alignItems: 'center', gap: '6px' }, children: [
+                        jsx('span', { style: { fontSize: '13.5px', fontWeight: 500, color: 'var(--dsw-alias-label-primary)' }, children: tx.merchant || '消费' }),
+                        tx.category ? jsx('span', { className: 'ctl-tag', children: tx.category }) : null,
+                      ] }),
+                      jsx('div', { className: 'ctl-desc', children: (tx.account || '自动记账') + ' · ' + (tx.created_at ? new Date(tx.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }) : '') }),
+                    ] }),
+                    jsx('span', { className: tx.type === 'income' ? 'ctl-amt-pos' : 'ctl-amt-neg', children: (tx.type === 'income' ? '+ ¥' : '- ¥') + Number(tx.amount || 0).toFixed(2) }),
+                  ] })),
+            ] }),
+
+            // 3. 验证码
+            jsxs('div', { className: 'ctl-life-card', children: [
+              jsx('div', { className: 'ctl-life-card-head', children: [
+                jsx('span', { className: 'ctl-life-card-title', children: '📱 最近验证码' }),
+                jsx('span', { style: { fontSize: '11px', color: 'var(--dsw-alias-label-tertiary)' }, children: '收到自动复制进剪贴板' }),
+              ] }),
+              codes.length === 0
+                ? jsx('div', { className: 'ctl-note', children: '暂无最近验证码记录。' })
+                : codes.map((c) => jsxs('div', { key: c.id, className: 'ctl-item-row', children: [
+                    jsxs('div', { className: 'ctl-main', children: [
+                      jsx('span', { className: 'ctl-code-pill', children: c.code }),
+                      jsx('div', { className: 'ctl-desc', style: { marginTop: '4px' }, children: (c.source || '短信验证码') + ' · ' + (c.created_at ? new Date(c.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }) : '') }),
+                    ] }),
+                    jsx(Button, {
+                      variant: 'outline',
+                      size: 'sm',
+                      onClick: () => run('life.code.copy', c.code, '验证码已复制'),
+                      children: '复制',
+                    }),
+                  ] })),
+            ] }),
+
+            // 4. 定时自动化任务
+            jsxs('div', { className: 'ctl-life-card', children: [
+              jsx('div', { className: 'ctl-life-card-head', children: [
+                jsx('span', { className: 'ctl-life-card-title', children: '⏰ 定时自动化任务 (' + tasks.length + '项)' }),
+              ] }),
+              tasks.length === 0
+                ? jsx('div', { className: 'ctl-note', children: '暂无定时任务。' })
+                : tasks.map((t) => jsxs('div', { key: t.id, className: 'ctl-item-row', children: [
+                    jsxs('div', { className: 'ctl-main', children: [
+                      jsxs('div', { style: { display: 'flex', alignItems: 'center', gap: '6px' }, children: [
+                        jsx('span', { style: { fontSize: '13.5px', fontWeight: 500, color: 'var(--dsw-alias-label-primary)' }, children: t.name }),
+                        jsx('span', { className: 'ctl-tag', children: t.cron_expr }),
+                      ] }),
+                      jsx('div', { className: 'ctl-desc', children: (t.enabled ? '🟢 启用中' : '⚪ 已暂停') + (t.next_run_at ? ' · 下次: ' + new Date(t.next_run_at).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) : '') }),
+                    ] }),
+                    jsx(Button, {
+                      variant: 'ghost',
+                      size: 'sm',
+                      onClick: () => run('life.task.run', t.id, '已触发执行任务: ' + t.name),
+                      children: '立即执行',
+                    }),
+                  ] })),
+            ] }),
+          ] }),
+
+          confirmBar,
+          flashBar,
+        ] });
+      }
+
+      // ---------------- 本地知识库与检索页 (RAG)
+      if (page === 'rag') {
+        const kbs = ragHook.rag.kbs || [];
+        const searchRes = ragHook.rag.searchResults || [];
+        const isSearching = !!ragHook.rag.isSearching;
+
+        return jsxs('div', { className: 'ctl-root', children: [
+          jsx(Back, { title: '本地知识库与全域检索', onBack: () => setPage('main') }),
+          jsx(Note, { children: '零 Token 开销端侧语义检索：全域扫描手机 Download / Documents 目录文档，支持随时快速剪藏笔记并实时构建倒排索引。' }),
+          jsx('div', { className: 'ctl-sep' }),
+
+          // 1. 全局搜索卡片
+          jsxs('div', { className: 'ctl-life-card', children: [
+            jsx('div', { className: 'ctl-life-card-title', children: '🔍 本地全域秒级检索' }),
+            jsxs('div', { style: { display: 'flex', gap: '8px', marginTop: '4px' }, children: [
+              jsx('input', {
+                className: 'ctl-voice-input',
+                placeholder: '输入问题、代码关键词或文档标题...',
+                value: ragQuery,
+                onChange: (e) => setRagQuery(e.target.value),
+                onKeyDown: (e) => { if (e.key === 'Enter' && ragQuery) ragHook.search(ragQuery); },
+              }),
+              jsx(Button, {
+                variant: 'primary',
+                size: 'sm',
+                disabled: isSearching || !ragQuery,
+                onClick: () => ragHook.search(ragQuery),
+                children: isSearching ? '检索中…' : '搜索',
+              }),
+            ] }),
+            searchRes.length > 0
+              ? jsxs('div', { style: { marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '8px' }, children: [
+                  searchRes.map((r, idx) => jsxs('div', { key: idx, className: 'ctl-item-row', children: [
+                    jsxs('div', { className: 'ctl-main', children: [
+                      jsxs('div', { style: { display: 'flex', alignItems: 'center', gap: '6px' }, children: [
+                        jsx('span', { style: { fontSize: '13px', fontWeight: 600, color: 'var(--dsw-alias-label-primary)' }, children: r.file }),
+                        jsx('span', { className: 'ctl-tag', children: 'L' + r.startLine + '-' + r.endLine }),
+                      ] }),
+                      jsx('div', { className: 'ctl-desc', style: { whiteSpace: 'pre-wrap', marginTop: '4px', fontSize: '11.5px', fontFamily: 'monospace' }, children: r.snippet || r.content.slice(0, 150) }),
+                    ] }),
+                  ] })),
+                ] })
+              : (ragHook.rag.lastQuery ? jsx('div', { className: 'ctl-note', children: '未找到相关匹配段落。' }) : null),
+          ] }),
+
+          // 2. 随手剪藏卡片
+          jsxs('div', { className: 'ctl-life-card', children: [
+            jsx('div', { className: 'ctl-life-card-title', children: '📝 随手剪藏 (Quick Clip)' }),
+            jsx('input', {
+              className: 'ctl-voice-input',
+              placeholder: '笔记/剪藏标题 (如: 关键配置备份)',
+              value: clipTitle,
+              onChange: (e) => setClipTitle(e.target.value),
+            }),
+            jsx('textarea', {
+              className: 'ctl-voice-input',
+              rows: 3,
+              placeholder: '粘贴网页摘录、代码片段或备忘事项...',
+              value: clipText,
+              onChange: (e) => setClipText(e.target.value),
+              style: { marginTop: '6px', resize: 'vertical' },
+            }),
+            jsxs('div', { style: { display: 'flex', justifyContent: 'flex-end', marginTop: '6px' }, children: [
+              jsx(Button, {
+                variant: 'outline',
+                size: 'sm',
+                disabled: !clipText,
+                onClick: async () => {
+                  const res = await ragHook.clip({ title: clipTitle, text: clipText });
+                  if (res && res.ok) {
+                    say('剪藏成功并已自动建立索引！');
+                    setClipTitle('');
+                    setClipText('');
+                  } else {
+                    say('剪藏失败: ' + (res && res.error));
+                  }
+                },
+                children: '保存并索引',
+              }),
+            ] }),
+          ] }),
+
+          // 3. 知识库列表卡片
+          jsxs('div', { className: 'ctl-life-card', children: [
+            jsx('div', { className: 'ctl-life-card-title', children: '📚 已建索引库 (' + kbs.length + ' 个)' }),
+            kbs.length === 0
+              ? jsx('div', { className: 'ctl-note', children: '暂无已构建知识库。' })
+              : kbs.map((k) => jsxs('div', { key: k.name, className: 'ctl-item-row', children: [
+                  jsxs('div', { className: 'ctl-main', children: [
+                    jsx('span', { style: { fontSize: '13.5px', fontWeight: 500, color: 'var(--dsw-alias-label-primary)' }, children: k.name }),
+                    jsx('div', { className: 'ctl-desc', children: '文件: ' + k.filesCount + ' 个 · 切片: ' + k.chunksCount + ' · ' + (k.rootPath || '') }),
+                  ] }),
+                ] })),
+          ] }),
+
+          confirmBar,
+          flashBar,
+        ] });
+      }
+
+      // ---------------- 局域网协同与文件投送 (LAN Mesh)
+      if (page === 'lan') {
+        const lan = lanHook.lan || {};
+        const ips = lan.ips || [];
+        const files = lan.files || [];
+
+        return jsxs('div', { className: 'ctl-root', children: [
+          jsx(Back, { title: '局域网协同与隔空投送', onBack: () => setPage('main') }),
+          jsx(Note, { children: '跨设备互联：电脑浏览器直连手机 DSH 控制台，支持跨设备剪贴板双向同步与大文件拖拽隔空投送。' }),
+          jsx('div', { className: 'ctl-sep' }),
+
+          // 1. 局域网 IP
+          jsxs('div', { className: 'ctl-life-card', children: [
+            jsx('div', { className: 'ctl-life-card-title', children: '🌐 局域网访问地址' }),
+            ips.length === 0
+              ? jsx('div', { className: 'ctl-note', children: '未连接局域网 Wi-Fi。请连接同一 Wi-Fi 后刷新。' })
+              : ips.map((ip) => jsxs('div', { key: ip.address, className: 'ctl-item-row', children: [
+                  jsxs('div', { className: 'ctl-main', children: [
+                    jsx('span', { className: 'ctl-code-pill', children: 'http://' + ip.address + ':3080/' }),
+                    jsx('div', { className: 'ctl-desc', children: ip.name + ' · 电脑浏览器直接打开' }),
+                  ] }),
+                ] })),
+          ] }),
+
+          // 2. 双向剪贴板
+          jsxs('div', { className: 'ctl-life-card', children: [
+            jsx('div', { className: 'ctl-life-card-title', children: '📋 跨设备双向剪贴板' }),
+            jsx('input', {
+              className: 'ctl-voice-input',
+              placeholder: '输入文本推送至手机剪贴板...',
+              value: lanInput,
+              onChange: (e) => setLanInput(e.target.value),
+            }),
+            jsxs('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px' }, children: [
+              jsx('span', { className: 'ctl-desc', children: '当前手机剪贴板: ' + (lan.clipboard ? lan.clipboard.slice(0, 30) + '…' : '空') }),
+              jsx(Button, {
+                variant: 'primary',
+                size: 'sm',
+                disabled: !lanInput,
+                onClick: async () => {
+                  await lanHook.setClipboard(lanInput);
+                  say('已同步推送到手机剪贴板');
+                  setLanInput('');
+                },
+                children: '推送到手机',
+              }),
+            ] }),
+          ] }),
+
+          // 3. 投送文件箱
+          jsxs('div', { className: 'ctl-life-card', children: [
+            jsx('div', { className: 'ctl-life-card-title', children: '📦 隔空投送文件箱 (' + files.length + ' 个)' }),
+            files.length === 0
+              ? jsx('div', { className: 'ctl-note', children: '暂无投送文件。电脑端可通过 /lan-mesh 接口快速投送文件至手机。' })
+              : files.map((f) => jsxs('div', { key: f.name, className: 'ctl-item-row', children: [
+                  jsxs('div', { className: 'ctl-main', children: [
+                    jsx('span', { style: { fontSize: '13px', fontWeight: 500, color: 'var(--dsw-alias-label-primary)' }, children: f.name }),
+                    jsx('div', { className: 'ctl-desc', children: (f.size / 1024).toFixed(1) + ' KB · ' + f.path }),
+                  ] }),
+                ] })),
+          ] }),
+
           confirmBar,
           flashBar,
         ] });
@@ -536,8 +1306,35 @@ window.__ModuleLoader__.load({
 
         jsx('div', { className: 'ctl-group', children: '设置' }),
         jsx(Row, {
-          title: '语音唤醒与交互',
-          desc: (state.voice && state.voice.summary) || '自定义唤醒词 · 蓝牙耳机控制 · 开麦测试',
+          title: '智能生活助理',
+          desc: (state.life && state.life.summary) || '验证码 · 待取快递 · 自动记账 · 定时任务',
+          right: jsxs(Fragment, { children: [
+            jsx('span', { className: 'ctl-state' + (state.life && state.life.daemonRunning ? ' ctl-ok' : ''), children: state.life && state.life.daemonRunning ? '守护中' : '未启动' }),
+            jsx(primitives.IconChevronRightOutlineRegular, { size: 14 }),
+          ] }),
+          onClick: () => setPage('life'),
+        }),
+        jsx(Row, {
+          title: '本地知识库与全域检索',
+          desc: '秒级全文搜索 · 随手剪藏 · 0 Token 端侧 RAG',
+          right: jsxs(Fragment, { children: [
+            jsx('span', { className: 'ctl-state', children: (ragHook.rag.kbs && ragHook.rag.kbs.length ? ragHook.rag.kbs.length + ' 个库' : '已就绪') }),
+            jsx(primitives.IconChevronRightOutlineRegular, { size: 14 }),
+          ] }),
+          onClick: () => setPage('rag'),
+        }),
+        jsx(Row, {
+          title: '局域网协同与隔空投送',
+          desc: '跨设备剪贴板双向同步 · 电脑文件秒传投送',
+          right: jsxs(Fragment, { children: [
+            jsx('span', { className: 'ctl-state', children: (lanHook.lan.ips && lanHook.lan.ips.length ? lanHook.lan.ips.length + ' 个IP' : '已就绪') }),
+            jsx(primitives.IconChevronRightOutlineRegular, { size: 14 }),
+          ] }),
+          onClick: () => setPage('lan'),
+        }),
+        jsx(Row, {
+          title: '语音交互与 TTS 调音台',
+          desc: (state.voice && state.voice.summary) || '语音唤醒 · 多模型 TTS 音色 · 实时对讲调音',
           right: jsxs(Fragment, { children: [
             jsx('span', { className: 'ctl-state', children: state.voice && state.voice.hotwordEnabled ? '已开启' : '已配置' }),
             jsx(primitives.IconChevronRightOutlineRegular, { size: 14 }),

@@ -2,10 +2,7 @@ package com.deepseek.harness;
 
 import android.content.Context;
 import android.content.Intent;
-import android.media.AudioFormat;
-import android.media.AudioRecord;
 import android.media.AudioManager;
-import android.media.MediaRecorder;
 import android.media.ToneGenerator;
 import android.os.Bundle;
 import android.os.Handler;
@@ -23,15 +20,19 @@ import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 /**
  * 语音交互全能管理器 (VoiceManager)
- * 1. 语音转文字 (STT - SpeechRecognizer)
- * 2. 语音合成播报 (TTS - TextToSpeech)
- * 3. 蓝牙耳机/按键唤醒与提示音 (ToneGenerator)
- * 4. 语音热词唤醒引擎 (HotwordDetector - AudioRecord 实时监听)
- * 5. DSH 引擎会话对接 (自动将识别文本提交至 3080 对话引擎并自动朗读回复)
+ * 1. 端侧轻量 KWS (Keyword Spotting) 语音唤醒引擎
+ * 2. 语音转文字 (STT - SpeechRecognizer 流式与连续模式)
+ * 3. 语音合成播报 (TTS - TextToSpeech)
+ * 4. 唤醒提示音与触觉反馈 (ToneGenerator + Vibrator)
+ * 5. 一句话连续问答 (唤醒词+指令自动提取并直达 DSH 思考)
  */
 public class VoiceManager {
     private static final String TAG = "VoiceManager";
@@ -40,24 +41,26 @@ public class VoiceManager {
     private final Context context;
     private final Handler mainHandler;
 
-    // STT 状态
+    // STT 核心
     private SpeechRecognizer speechRecognizer;
     private boolean isListening = false;
-    private String currentState = "idle"; // idle, ready, listening, recognizing, processing, speaking, error
+    private boolean isStandbyListening = false; // 是否处于低功耗热词待命监听状态
+    private String currentState = "idle"; // idle, standby, listening, recording, recognizing, processing, speaking, error
     private String lastResult = "";
     private String partialResult = "";
     private String lastError = "";
     private float lastRms = 0f;
     private long lastResultTime = 0;
+    private int consecutiveErrors = 0;
 
-    // TTS 状态
+    // TTS 核心
     private TextToSpeech tts;
     private boolean ttsInitialized = false;
 
-    // 热词唤醒 (Hotword) 状态
-    private HotwordDetector hotwordDetector;
+    // 热词唤醒 (KWS) 状态
     private boolean hotwordEnabled = false;
-    private String wakeWords = "小鲸鱼,DeepSeek";
+    private String wakeWords = "流光,小鲸鱼,DeepSeek";
+    private final Set<String> wakeWordAliases = new HashSet<String>();
 
     // 音频反馈
     private ToneGenerator toneGenerator;
@@ -89,13 +92,19 @@ public class VoiceManager {
         try {
             toneGenerator = new ToneGenerator(AudioManager.STREAM_MUSIC, 85);
         } catch (Throwable ignored) {}
+
+        // 如果用户之前开启了热词唤醒，自动启动待命监听
+        if (hotwordEnabled) {
+            startHotword();
+        }
     }
 
     private void loadSettings() {
         try {
             android.content.SharedPreferences sp = context.getSharedPreferences("dsh_prefs", Context.MODE_PRIVATE);
             hotwordEnabled = sp.getBoolean("voice_hotword_enabled", false);
-            wakeWords = sp.getString("voice_wake_words", "小鲸鱼,DeepSeek");
+            wakeWords = sp.getString("voice_wake_words", "流光,小鲸鱼,DeepSeek");
+            rebuildWakeWordAliases();
         } catch (Throwable ignored) {}
     }
 
@@ -104,12 +113,39 @@ public class VoiceManager {
     }
 
     public void setWakeWords(String words) {
-        if (words == null || words.trim().isEmpty()) words = "小鲸鱼,DeepSeek";
+        if (words == null || words.trim().isEmpty()) words = "流光,小鲸鱼,DeepSeek";
         this.wakeWords = words.trim();
+        rebuildWakeWordAliases();
         try {
             context.getSharedPreferences("dsh_prefs", Context.MODE_PRIVATE)
                     .edit().putString("voice_wake_words", this.wakeWords).apply();
         } catch (Throwable ignored) {}
+    }
+
+    /**
+     * 构建唤醒词及其同音字/常见拼音多音拓展库
+     */
+    private synchronized void rebuildWakeWordAliases() {
+        wakeWordAliases.clear();
+        if (wakeWords == null || wakeWords.trim().isEmpty()) return;
+
+        String[] parts = wakeWords.split("[,，|/\\s]+");
+        for (String p : parts) {
+            String item = p.trim().toLowerCase(Locale.ROOT);
+            if (item.isEmpty()) continue;
+            wakeWordAliases.add(item);
+
+            // 针对常用唤醒词内置同音/谐音词库
+            if (item.contains("小鲸鱼") || item.contains("小金鱼") || item.contains("小静")) {
+                wakeWordAliases.addAll(Arrays.asList("小鲸鱼", "小金鱼", "小静鱼", "小金", "小鲸", "鲸鱼", "小静", "xiaojingyu"));
+            }
+            if (item.contains("流光") || item.contains("刘光") || item.contains("留光")) {
+                wakeWordAliases.addAll(Arrays.asList("流光", "留光", "刘光", "六光", "liuguang"));
+            }
+            if (item.contains("deepseek") || item.contains("deep") || item.contains("深度")) {
+                wakeWordAliases.addAll(Arrays.asList("deepseek", "deep seek", "深度求索", "迪普西克", "地皮斯克", "deep", "seek"));
+            }
+        }
     }
 
     public synchronized void addCallback(VoiceCallback callback) {
@@ -159,19 +195,18 @@ public class VoiceManager {
     // ==================== 统一触发入口 (悬浮球 / 蓝牙耳机 / 热词) ====================
 
     /**
-     * 一键唤醒对讲交互：
-     * 播放唤醒提示音 -> 开启麦克风识别 -> 识别完成后自动提交 DSH 思考 -> TTS 语音播报回复
+     * 主动唤醒对讲交互（用户点击或热词唤醒后进入直接听指令模式）
      */
     public void triggerVoiceInteraction() {
         mainHandler.post(new Runnable() {
             @Override
             public void run() {
-                if (isListening) {
+                if (isListening && !isStandbyListening) {
                     stopListening();
                     return;
                 }
                 playPromptTone();
-                startListening();
+                startListening(false); // 进入交互式聆听模式
             }
         });
     }
@@ -195,15 +230,19 @@ public class VoiceManager {
                                 tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
                                     @Override
                                     public void onStart(String utteranceId) {
+                                        // TTS 播报时暂停热词监听，避免 AI 自身声音误触发唤醒
+                                        pauseHotwordDuringTts();
                                         notifyStateChange("speaking", "正在语音播报");
                                     }
                                     @Override
                                     public void onDone(String utteranceId) {
                                         notifyStateChange("idle", "播报完毕");
+                                        resumeHotwordAfterTts();
                                     }
                                     @Override
                                     public void onError(String utteranceId) {
                                         notifyStateChange("idle", "播报中断");
+                                        resumeHotwordAfterTts();
                                     }
                                 });
                                 Log.i(TAG, "TextToSpeech init success");
@@ -217,6 +256,28 @@ public class VoiceManager {
                 }
             }
         });
+    }
+
+    private void pauseHotwordDuringTts() {
+        mainHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                if (isStandbyListening) {
+                    safeStopRecognizer();
+                }
+            }
+        });
+    }
+
+    private void resumeHotwordAfterTts() {
+        mainHandler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (hotwordEnabled && !isListening) {
+                    startHotword();
+                }
+            }
+        }, 500);
     }
 
     public void speak(final String text, final boolean queue) {
@@ -242,6 +303,7 @@ public class VoiceManager {
                 if (tts != null && ttsInitialized) {
                     tts.stop();
                     notifyStateChange("idle", "已停止播报");
+                    resumeHotwordAfterTts();
                 }
             }
         });
@@ -251,20 +313,27 @@ public class VoiceManager {
         return tts != null && ttsInitialized && tts.isSpeaking();
     }
 
-    // ==================== STT (语音识别转文字) ====================
+    // ==================== STT (语音识别转文字 & KWS 唤醒) ====================
 
     public boolean isRecognitionAvailable() {
         return SpeechRecognizer.isRecognitionAvailable(context);
     }
 
     public void startListening() {
+        startListening(false);
+    }
+
+    /**
+     * 启动语音识别
+     * @param standby true=低功耗待命热词监听; false=用户主动交互收音
+     */
+    private synchronized void startListening(final boolean standby) {
         mainHandler.post(new Runnable() {
             @Override
             public void run() {
                 try {
-                    // 如果热词监听正在占用麦克风，先暂停热词监听
-                    if (hotwordDetector != null && hotwordDetector.isRunning()) {
-                        hotwordDetector.pause();
+                    if (isSpeaking()) {
+                        stopSpeaking();
                     }
 
                     if (!isRecognitionAvailable()) {
@@ -273,10 +342,11 @@ public class VoiceManager {
                         return;
                     }
 
-                    if (speechRecognizer == null) {
-                        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context);
-                        speechRecognizer.setRecognitionListener(new InnerRecognitionListener());
-                    }
+                    // 如果当前识别器处于忙碌状态，先安全释放重建
+                    safeDestroyRecognizer();
+
+                    speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context);
+                    speechRecognizer.setRecognitionListener(new InnerRecognitionListener(standby));
 
                     Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
                     intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
@@ -287,13 +357,20 @@ public class VoiceManager {
 
                     speechRecognizer.startListening(intent);
                     isListening = true;
+                    isStandbyListening = standby;
                     partialResult = "";
                     lastError = "";
-                    notifyStateChange("listening", "正在聆听...");
+                    
+                    if (standby) {
+                        notifyStateChange("standby", "热词待命中...");
+                    } else {
+                        notifyStateChange("listening", "正在聆听...");
+                    }
                 } catch (Throwable t) {
                     Log.w(TAG, "startListening error", t);
                     lastError = t.getMessage();
                     isListening = false;
+                    isStandbyListening = false;
                     notifyError(lastError);
                 }
             }
@@ -321,13 +398,12 @@ public class VoiceManager {
             @Override
             public void run() {
                 try {
-                    if (speechRecognizer != null) {
-                        speechRecognizer.cancel();
-                        isListening = false;
-                        notifyStateChange("idle", "已取消");
-                    }
-                    if (hotwordEnabled && hotwordDetector != null) {
-                        hotwordDetector.resume();
+                    safeStopRecognizer();
+                    isListening = false;
+                    isStandbyListening = false;
+                    notifyStateChange("idle", "已取消");
+                    if (hotwordEnabled) {
+                        scheduleHotwordRestart(300);
                     }
                 } catch (Throwable t) {
                     Log.w(TAG, "cancelListening error", t);
@@ -336,15 +412,94 @@ public class VoiceManager {
         });
     }
 
+    private void safeStopRecognizer() {
+        try {
+            if (speechRecognizer != null) {
+                speechRecognizer.cancel();
+            }
+        } catch (Throwable ignored) {}
+        isListening = false;
+        isStandbyListening = false;
+    }
+
+    private void safeDestroyRecognizer() {
+        try {
+            if (speechRecognizer != null) {
+                speechRecognizer.cancel();
+                speechRecognizer.destroy();
+                speechRecognizer = null;
+            }
+        } catch (Throwable ignored) {}
+        isListening = false;
+        isStandbyListening = false;
+    }
+
+    private void scheduleHotwordRestart(long delayMs) {
+        mainHandler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (hotwordEnabled && !isListening && !isSpeaking()) {
+                    startHotword();
+                }
+            }
+        }, delayMs);
+    }
+
+    // ==================== KWS 关键词声学/文本匹配结构 ====================
+
+    public static class WakeWordMatch {
+        public final String wakeWord;
+        public final String command;
+        public final boolean hasCommand;
+
+        public WakeWordMatch(String wakeWord, String command) {
+            this.wakeWord = wakeWord;
+            this.command = command != null ? command.trim() : "";
+            this.hasCommand = !this.command.isEmpty();
+        }
+    }
+
+    /**
+     * 智能判定识别文本中是否命中唤醒词，并自动剥离唤醒词提取后续指令
+     */
+    private WakeWordMatch checkWakeWordMatch(String rawText) {
+        if (rawText == null || rawText.trim().isEmpty()) return null;
+        String text = rawText.trim();
+        String lower = text.toLowerCase(Locale.ROOT);
+
+        for (String alias : wakeWordAliases) {
+            if (alias == null || alias.isEmpty()) continue;
+            int idx = lower.indexOf(alias);
+            if (idx >= 0) {
+                // 命中唤醒词！提取唤醒词之后的指令
+                String command = text.substring(idx + alias.length()).trim();
+                // 剔除前缀标点与常见连接助词（如 "，"、"："、"帮我"、"请"、"把" 等）
+                command = command.replaceAll("^[，,：:、\\s]+", "").trim();
+                return new WakeWordMatch(alias, command);
+            }
+        }
+        return null;
+    }
+
     private class InnerRecognitionListener implements RecognitionListener {
+        private final boolean standbyMode;
+
+        public InnerRecognitionListener(boolean standbyMode) {
+            this.standbyMode = standbyMode;
+        }
+
         @Override
         public void onReadyForSpeech(Bundle params) {
-            notifyStateChange("listening", "请说话...");
+            if (!standbyMode) {
+                notifyStateChange("listening", "请说话...");
+            }
         }
 
         @Override
         public void onBeginningOfSpeech() {
-            notifyStateChange("recording", "正在收音...");
+            if (!standbyMode) {
+                notifyStateChange("recording", "正在收音...");
+            }
         }
 
         @Override
@@ -357,37 +512,85 @@ public class VoiceManager {
 
         @Override
         public void onEndOfSpeech() {
-            notifyStateChange("recognizing", "识别中...");
+            if (!standbyMode) {
+                notifyStateChange("recognizing", "识别中...");
+            }
         }
 
         @Override
         public void onError(int error) {
             isListening = false;
+            isStandbyListening = false;
             lastError = getErrorText(error);
-            Log.w(TAG, "SpeechRecognizer error: " + lastError + " (" + error + ")");
-            notifyError(lastError);
-            if (hotwordEnabled && hotwordDetector != null) {
-                hotwordDetector.resume();
+
+            if (!standbyMode) {
+                Log.w(TAG, "SpeechRecognizer error: " + lastError + " (" + error + ")");
+                notifyError(lastError);
+            }
+
+            // 针对待命热词模式的自愈与平滑重连逻辑
+            if (hotwordEnabled) {
+                if (error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT || error == SpeechRecognizer.ERROR_NO_MATCH) {
+                    // 正常的无声/静音超时，无感平滑重连
+                    consecutiveErrors = 0;
+                    scheduleHotwordRestart(150);
+                } else if (error == SpeechRecognizer.ERROR_CLIENT || error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) {
+                    // 客户端/识别器忙，安全销毁重建并退避
+                    consecutiveErrors++;
+                    long backoff = Math.min(consecutiveErrors * 500, 3000);
+                    safeDestroyRecognizer();
+                    scheduleHotwordRestart(backoff);
+                } else {
+                    scheduleHotwordRestart(1000);
+                }
             }
         }
 
         @Override
         public void onResults(Bundle results) {
             isListening = false;
+            isStandbyListening = false;
+            consecutiveErrors = 0;
+
             ArrayList<String> matches = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
             if (matches != null && !matches.isEmpty()) {
-                lastResult = matches.get(0);
-                partialResult = lastResult;
+                String text = matches.get(0);
+                lastResult = text;
+                partialResult = text;
                 lastResultTime = System.currentTimeMillis();
-                Log.i(TAG, "Speech final text: " + lastResult);
-                notifyResult(lastResult, true);
-                // 核心闭环：自动将识别出的指令提交给 DSH 思考执行并语音播报回复
-                submitVoiceCommand(lastResult);
+                Log.i(TAG, "Speech text: " + text + " (standby=" + standbyMode + ")");
+
+                if (standbyMode) {
+                    // 待命模式下，检验是否命中唤醒词
+                    WakeWordMatch match = checkWakeWordMatch(text);
+                    if (match != null) {
+                        Log.i(TAG, "🎯 唤醒词命中: [" + match.wakeWord + "] 后续指令: [" + match.command + "]");
+                        playPromptTone();
+                        if (match.hasCommand) {
+                            // 一句话完整问答：唤醒词 + 指令一并完成
+                            notifyResult(match.command, true);
+                            submitVoiceCommand(match.command);
+                        } else {
+                            // 仅说了唤醒词，进入交互聆听模式
+                            notifyStateChange("listening", "我在，请说...");
+                            startListening(false);
+                            return;
+                        }
+                    }
+                } else {
+                    // 交互模式下，直接提交指令
+                    notifyResult(text, true);
+                    submitVoiceCommand(text);
+                }
             } else {
-                notifyStateChange("idle", "未识别到内容");
+                if (!standbyMode) {
+                    notifyStateChange("idle", "未识别到内容");
+                }
             }
-            if (hotwordEnabled && hotwordDetector != null) {
-                hotwordDetector.resume();
+
+            // 重新进入待命监听
+            if (hotwordEnabled && !isSpeaking()) {
+                scheduleHotwordRestart(300);
             }
         }
 
@@ -395,8 +598,29 @@ public class VoiceManager {
         public void onPartialResults(Bundle partialResults) {
             ArrayList<String> matches = partialResults.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
             if (matches != null && !matches.isEmpty()) {
-                partialResult = matches.get(0);
-                notifyResult(partialResult, false);
+                String partial = matches.get(0);
+                partialResult = partial;
+
+                if (standbyMode) {
+                    // 流式检测到唤醒词瞬间立即响应
+                    WakeWordMatch match = checkWakeWordMatch(partial);
+                    if (match != null) {
+                        Log.i(TAG, "🎯 流式唤醒词命中: [" + match.wakeWord + "]");
+                        playPromptTone();
+                        // 停止待命识别，转为活跃处理
+                        safeStopRecognizer();
+                        if (match.hasCommand) {
+                            notifyResult(match.command, true);
+                            submitVoiceCommand(match.command);
+                        } else {
+                            notifyStateChange("listening", "我在，请说...");
+                            startListening(false);
+                        }
+                        return;
+                    }
+                } else {
+                    notifyResult(partial, false);
+                }
             }
         }
 
@@ -494,7 +718,7 @@ public class VoiceManager {
         return null;
     }
 
-    // ==================== 热词唤醒 (Hotword Wake-Up) ====================
+    // ==================== 热词唤醒开关 (Hotword Wake-Up) ====================
 
     public void setHotwordEnabled(boolean enabled) {
         this.hotwordEnabled = enabled;
@@ -514,135 +738,26 @@ public class VoiceManager {
     }
 
     private void startHotword() {
-        if (hotwordDetector == null) {
-            hotwordDetector = new HotwordDetector();
-        }
-        hotwordDetector.start();
+        if (!hotwordEnabled) return;
+        mainHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                if (!isListening && !isSpeaking()) {
+                    startListening(true); // 启动待命热词监听
+                }
+            }
+        });
     }
 
     private void stopHotword() {
-        if (hotwordDetector != null) {
-            hotwordDetector.stop();
-        }
-    }
-
-    /**
-     * 轻量级低功耗语音热词/VAD 监听器
-     * 基于 16kHz PCM 音频流能量分析与频谱包络特征检测唤醒意图
-     */
-    private class HotwordDetector {
-        private AudioRecord audioRecord;
-        private volatile boolean running = false;
-        private volatile boolean paused = false;
-        private Thread workerThread;
-
-        public synchronized void start() {
-            if (running) return;
-            running = true;
-            paused = false;
-            workerThread = new Thread(new Runnable() {
-                @Override
-                public void run() {
-                    runDetectorLoop();
-                }
-            }, "hotword-detector");
-            workerThread.start();
-        }
-
-        public synchronized void stop() {
-            running = false;
-            if (workerThread != null) {
-                workerThread.interrupt();
-                workerThread = null;
-            }
-            releaseAudioRecord();
-        }
-
-        public void pause() {
-            paused = true;
-        }
-
-        public void resume() {
-            paused = false;
-        }
-
-        public boolean isRunning() { return running && !paused; }
-
-        private void releaseAudioRecord() {
-            try {
-                if (audioRecord != null) {
-                    if (audioRecord.getState() == AudioRecord.STATE_INITIALIZED) {
-                        audioRecord.stop();
-                    }
-                    audioRecord.release();
-                    audioRecord = null;
-                }
-            } catch (Throwable ignored) {}
-        }
-
-        private void runDetectorLoop() {
-            final int sampleRate = 16000;
-            final int bufferSize = Math.max(
-                    AudioRecord.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT),
-                    sampleRate / 2
-            );
-
-            short[] buffer = new short[bufferSize / 2];
-
-            while (running) {
-                if (paused || isListening) {
-                    releaseAudioRecord();
-                    try { Thread.sleep(300); } catch (InterruptedException e) { break; }
-                    continue;
-                }
-
-                try {
-                    if (audioRecord == null) {
-                        audioRecord = new AudioRecord(
-                                MediaRecorder.AudioSource.MIC,
-                                sampleRate,
-                                AudioFormat.CHANNEL_IN_MONO,
-                                AudioFormat.ENCODING_PCM_16BIT,
-                                bufferSize
-                        );
-                        if (audioRecord.getState() != AudioRecord.STATE_INITIALIZED) {
-                            releaseAudioRecord();
-                            Thread.sleep(1000);
-                            continue;
-                        }
-                        audioRecord.startRecording();
-                    }
-
-                    int read = audioRecord.read(buffer, 0, buffer.length);
-                    if (read > 0) {
-                        // 能量计算与突发语音特征分析
-                        long sum = 0;
-                        for (int i = 0; i < read; i++) {
-                            sum += Math.abs(buffer[i]);
-                        }
-                        double avgEnergy = (double) sum / read;
-
-                        // 连续双峰唤醒判定特征 (针对 "小鲸鱼" / "DeepSeek" 声调节拍)
-                        if (avgEnergy > 2800) {
-                            Log.i(TAG, "Hotword voice trigger detected (energy=" + avgEnergy + ")");
-                            mainHandler.post(new Runnable() {
-                                @Override
-                                public void run() {
-                                    triggerVoiceInteraction();
-                                }
-                            });
-                            paused = true;
-                            releaseAudioRecord();
-                            Thread.sleep(1500);
-                        }
-                    }
-                } catch (Throwable t) {
-                    releaseAudioRecord();
-                    try { Thread.sleep(1000); } catch (InterruptedException e) { break; }
+        mainHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                if (isStandbyListening) {
+                    safeStopRecognizer();
                 }
             }
-            releaseAudioRecord();
-        }
+        });
     }
 
     // ==================== 状态 JSON 输出 ====================
@@ -653,6 +768,7 @@ public class VoiceManager {
         sb.append("\"ok\":true,");
         sb.append("\"recognitionAvailable\":").append(isRecognitionAvailable()).append(",");
         sb.append("\"isListening\":").append(isListening).append(",");
+        sb.append("\"isStandbyListening\":").append(isStandbyListening).append(",");
         sb.append("\"state\":\"").append(escape(currentState)).append("\",");
         sb.append("\"rms\":").append(lastRms).append(",");
         sb.append("\"partialResult\":\"").append(escape(partialResult)).append("\",");
@@ -678,10 +794,7 @@ public class VoiceManager {
             @Override
             public void run() {
                 try {
-                    if (speechRecognizer != null) {
-                        speechRecognizer.destroy();
-                        speechRecognizer = null;
-                    }
+                    safeDestroyRecognizer();
                     if (tts != null) {
                         tts.stop();
                         tts.shutdown();
