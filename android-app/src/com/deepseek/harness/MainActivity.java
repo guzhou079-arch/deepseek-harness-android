@@ -3071,6 +3071,10 @@ public class MainActivity extends Activity {
                         respBody = handleLanRequest(h, body.toString());
                     } else if (path.startsWith("/changelog")) {   // v1.35：应用更新日志
                         respBody = handleChangelogRequest();
+                    } else if (path.startsWith("/voice")) {       // 语音识别 (STT) 与状态
+                        respBody = handleVoiceRequest(fullPath, body.toString());
+                    } else if (path.startsWith("/tts")) {         // 语音播报 (TTS)
+                        respBody = handleTtsRequest(fullPath, body.toString());
                     } else {
                         respBody = handleNotifyRequest(body.toString());
                     }
@@ -3590,6 +3594,68 @@ public class MainActivity extends Activity {
                 return "{\"ok\":true,\"running\":false}";
             }
             return "{\"ok\":false,\"error\":\"未知 action（show/hide/toggle/status）\"}";
+        } catch (Throwable t) {
+            return "{\"ok\":false,\"error\":\"" + String.valueOf(t.getMessage()).replace("\"", "'") + "\"}";
+        }
+    }
+
+    /** 处理 /voice：控制语音识别 (STT) 与状态查询。
+     *  action=start|stop|cancel|status
+     */
+    private String handleVoiceRequest(String path, String raw) {
+        try {
+            String action = jsonField(raw, "action");
+            if (action.isEmpty()) action = queryField(path, "action");
+            if (action.isEmpty()) action = "status";
+
+            VoiceManager vm = VoiceManager.get(this);
+            if ("start".equals(action)) {
+                vm.startListening();
+                return vm.getStatusJson();
+            } else if ("stop".equals(action)) {
+                vm.stopListening();
+                return vm.getStatusJson();
+            } else if ("cancel".equals(action)) {
+                vm.cancelListening();
+                return vm.getStatusJson();
+            } else if ("status".equals(action)) {
+                return vm.getStatusJson();
+            }
+            return "{\"ok\":false,\"error\":\"未知 action（start/stop/cancel/status）\"}";
+        } catch (Throwable t) {
+            return "{\"ok\":false,\"error\":\"" + String.valueOf(t.getMessage()).replace("\"", "'") + "\"}";
+        }
+    }
+
+    /** 处理 /tts：控制系统语音朗读 (TTS)。
+     *  action=speak|stop|status, text=要朗读的文本, queue=0|1
+     */
+    private String handleTtsRequest(String path, String raw) {
+        try {
+            String action = jsonField(raw, "action");
+            if (action.isEmpty()) action = queryField(path, "action");
+            if (action.isEmpty()) action = "status";
+
+            VoiceManager vm = VoiceManager.get(this);
+            if ("speak".equals(action)) {
+                String text = jsonField(raw, "text");
+                if (text.isEmpty()) text = queryField(path, "text");
+                String queueStr = jsonField(raw, "queue");
+                if (queueStr.isEmpty()) queueStr = queryField(path, "queue");
+                boolean queue = "1".equals(queueStr) || "true".equalsIgnoreCase(queueStr);
+
+                if (text.isEmpty()) {
+                    return "{\"ok\":false,\"error\":\"text 字段不能为空\"}";
+                }
+                vm.speak(text, queue);
+                return "{\"ok\":true,\"speaking\":true}";
+            } else if ("stop".equals(action)) {
+                vm.stopSpeaking();
+                return "{\"ok\":true,\"speaking\":false}";
+            } else if ("status".equals(action)) {
+                return "{\"ok\":true,\"isSpeaking\":" + vm.isSpeaking() + "}";
+            }
+            return "{\"ok\":false,\"error\":\"未知 action（speak/stop/status）\"}";
         } catch (Throwable t) {
             return "{\"ok\":false,\"error\":\"" + String.valueOf(t.getMessage()).replace("\"", "'") + "\"}";
         }

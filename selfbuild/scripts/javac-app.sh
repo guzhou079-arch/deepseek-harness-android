@@ -79,7 +79,7 @@ rm -rf "$SB/work/appbuild/classes" "$SB/work/appbuild/dex" \
 # 同时准备两份路径：APP_SRCS=Android 视角（给本脚本检查/生成 R），APP_SRCS_P=proot 视角
 APP_SRCS=""; APP_SRCS_P=""
 for c in MainActivity EngineService AlarmReceiver ScheduleExecutor OverlayService \
-         UsageStatsHelper AccessibilityService VsreenBridgeService LogShareProvider NfcStore BuildEnvInstaller; do
+         UsageStatsHelper AccessibilityService VsreenBridgeService LogShareProvider NfcStore BuildEnvInstaller VoiceManager; do
   [ -f "$HARNESS/$c.java" ] || { echo "✗ 缺少源码 $HARNESS/$c.java" >&2; exit 1; }
   APP_SRCS="$APP_SRCS $HARNESS/$c.java"
   APP_SRCS_P="$APP_SRCS_P $R/v118/android-app/src/com/deepseek/harness/$c.java"

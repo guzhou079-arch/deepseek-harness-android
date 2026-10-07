@@ -20,10 +20,13 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <!-- 定时任务：精确闹钟（Android 12+ 需要；setAlarmClock 不受此权限限制，双保险） -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <!-- 语音交互与录音：SpeechRecognizer 语音转文字 / 语音唤醒监听 -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- v1.16 NFC 读卡：NFC 是 normal 权限，安装即授予，无需运行时申请 -->
     <uses-permission android:name="android.permission.NFC" />
     <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
-    <!-- v1.16：NFC 硬件可选——没有 NFC 的机型照装不误 -->
+    <!-- 硬件特性（可选，兼容无麦克风/无 NFC 设备） -->
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
     <uses-feature android:name="android.hardware.nfc" android:required="false" />
     <application
         android:label="@string/app_name"
