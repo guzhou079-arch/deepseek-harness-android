@@ -39,15 +39,17 @@ window.__ModuleLoader__.load({
       '.ctl-brand{font-family:var(--dsw-font-family-brand,var(--dsw-font-family));font-size:10px;letter-spacing:.14em;color:var(--dsw-alias-label-tertiary)}',
       '.ctl-ver{font-size:11px;color:var(--dsw-alias-label-tertiary);overflow-wrap:anywhere;text-align:right}',
       '.ctl-group{font-size:12px;line-height:18px;font-weight:600;color:var(--dsw-alias-label-tertiary);padding:18px 0 2px}',
-      '.ctl-row{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 0;border-bottom:.5px solid var(--dsw-alias-border-l2)}',
+      '.ctl-row{display:flex;flex-direction:column;align-items:stretch;gap:10px;padding:14px 0;border-bottom:.5px solid var(--dsw-alias-border-l2)}',
+      '@media(min-width:480px){.ctl-row{flex-direction:row;align-items:center;justify-content:space-between;gap:16px}}',
       '.ctl-row.ctl-click{cursor:pointer}',
       '.ctl-row.ctl-click:hover{background:var(--dsw-alias-interactive-bg-hover)}',
       '.ctl-row.ctl-last{border-bottom:none}',
       '.ctl-main{min-width:0;flex:1}',
-      '.ctl-title{font-size:14px;line-height:20px;color:var(--dsw-alias-label-primary);overflow-wrap:anywhere}',
-      '.ctl-desc{font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);margin-top:4px;overflow-wrap:anywhere}',
+      '.ctl-title{font-size:14px;line-height:20px;color:var(--dsw-alias-label-primary);word-break:break-word}',
+      '.ctl-desc{font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);margin-top:4px;word-break:break-word}',
       '.ctl-desc.ctl-warn{color:var(--dsw-alias-state-error-primary)}',
-      '.ctl-right{display:flex;align-items:center;gap:8px;flex:none}',
+      '.ctl-right{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex:none}',
+      '@media(max-width:479px){.ctl-right{width:100%}.ctl-right>*{width:100%;justify-content:center}}',
       '.ctl-state{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary);white-space:nowrap}',
       '.ctl-state.ctl-ok{color:var(--dsw-alias-state-business-primary)}',
       '.ctl-state.ctl-bad{color:var(--dsw-alias-state-error-primary)}',
@@ -504,25 +506,6 @@ window.__ModuleLoader__.load({
           title: '时光机全站备份',
           desc: '一键打包记忆库、所有历史会话与配置（存至 /sdcard/Download/DSH_Backups）',
           right: jsx(Button, { variant: 'outline', onClick: () => run('snapshot', ''), children: '立即备份' }),
-        }),
-        jsx(Row, {
-          title: '思考程度 / 智力分档',
-          desc: '控制 AI 深度推理预算（当前 ' + (reasoning.label || '标准（平衡）') + '）',
-          right: jsx(primitives.SegmentedControl, {
-            id: 'dshctl-reasoning',
-            value: reasoning.effort || 'high',
-            label: '思考程度',
-            options: [
-              { value: 'off', label: '关闭' },
-              { value: 'low', label: '轻度' },
-              { value: 'high', label: '标准' },
-              { value: 'max', label: '极致' },
-            ],
-            onChange: (v) => {
-              const lbl = v === 'off' ? '关闭（极速）' : (v === 'low' ? '轻度（经济）' : (v === 'max' ? '极致（深度）' : '标准（平衡）'));
-              run('reasoning.set', v, '思考程度已设为：' + lbl);
-            },
-          }),
         }),
         jsx(Row, {
           title: '界面主题',
