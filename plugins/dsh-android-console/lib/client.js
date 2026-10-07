@@ -505,6 +505,15 @@ window.__ModuleLoader__.load({
           title: '检查更新',
           desc: '当前 ' + (state.version || ''),
           right: jsx(Button, { variant: 'outline', onClick: () => run('update.check', ''), children: '检查' }),
+        }),
+        jsx(Row, {
+          title: '开源主页与 Star 支持',
+          desc: '如果觉得好用，欢迎前往 GitHub 给作者点一颗 ⭐ 支持！',
+          right: jsx(Button, {
+            variant: 'outline',
+            onClick: () => run('open.url', 'https://github.com/guzhou079-arch/deepseek-harness-android'),
+            children: '去 Star ⭐',
+          }),
           last: true,
         }),
 

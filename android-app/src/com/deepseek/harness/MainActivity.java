@@ -5638,6 +5638,16 @@ public class MainActivity extends Activity {
                 recreate();   // 主题（含 WebView 的 prefers-color-scheme）随 onCreate 重新生效
                 return;
             }
+            if ("open.url".equals(id)) {
+                if (arg != null && (arg.startsWith("https://") || arg.startsWith("http://"))) {
+                    try {
+                        startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(arg)));
+                    } catch (Throwable t) {
+                        conToast("无法打开链接: " + t.getMessage());
+                    }
+                }
+                return;
+            }
             if ("update.check".equals(id)) { checkForUpdate(true); return; }
             if ("perm.action".equals(id)) { conPermAction(arg); return; }
             if ("workspace.change".equals(id)) { onWorkspaceRowClick(); return; }
