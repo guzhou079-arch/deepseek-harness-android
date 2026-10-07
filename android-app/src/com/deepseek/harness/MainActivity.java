@@ -185,7 +185,9 @@ public class MainActivity extends Activity {
         // 同目录的 whale-shota.png 授权"仅限本机自用、不得随包分发"，**绝不能**被这条带上。
         "pet/pet.json",
         // v1.33：网页设置页「控制台」插件 —— 解压/引擎/救援/权限/插件/自建环境/时光机/主题/更新
-        "dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-android-console/"
+        "dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-android-console/",
+        // v1.34：模型与思考分档弹窗 —— 修复移动端 touch/onBlur 闪退与点击冲突
+        "dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-model-selection/lib/client.js"
     };
     // 外部 dshroot 解压完成标记（App 在 dshroot 补齐后写入；清空/重置时随目录删除）。
     // 用于识别「解压中途被打断」：即使 REVISION 一致也强制补齐缺失文件。
