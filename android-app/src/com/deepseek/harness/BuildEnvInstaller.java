@@ -327,45 +327,108 @@ public final class BuildEnvInstaller {
 
     // ══════════════════════════ 下载 ══════════════════════════
 
-    /** 下载到文件，带进度。pctFrom/pctTo 把这段映射到总进度区间。 */
-    private static void downloadTo(String url, File dst, Cb cb, int pctFrom, int pctTo) throws IOException {
-        File tmp = new File(dst.getAbsolutePath() + ".tmp");
-        HttpURLConnection c = null;
-        InputStream in = null;
-        OutputStream out = null;
-        try {
-            c = (HttpURLConnection) new URL(url).openConnection();
-            c.setConnectTimeout(15000);
-            c.setReadTimeout(60000);   // 大文件，读超时给宽一点
-            c.setRequestProperty("User-Agent", "dsh-android");
-            c.setInstanceFollowRedirects(true);
-            int code = c.getResponseCode();
-            if (code != 200) throw new IOException("HTTP " + code + "（" + url + "）");
-            long total = c.getContentLength();
-            in = c.getInputStream();
-            out = new FileOutputStream(tmp);
-            byte[] buf = new byte[65536];
-            long got = 0;
-            int n, lastPct = -1;
-            while ((n = in.read(buf)) > 0) {
-                checkCancel();
-                out.write(buf, 0, n);
-                got += n;
-                if (cb != null && total > 0) {
-                    int p = pctFrom + (int) ((pctTo - pctFrom) * (got / (double) total));
-                    if (p != lastPct) { lastPct = p; cb.onStage(dst.getName() + "  " + mb(got) + " / " + mb(total), p); }
-                }
-            }
-            out.flush();
-            out.close(); out = null;
-            in.close(); in = null;
-            if (dst.exists()) dst.delete();
-            if (!tmp.renameTo(dst)) throw new IOException("改名失败：" + dst.getName());
-        } finally {
-            closeQuietly(out); closeQuietly(in);
-            if (c != null) try { c.disconnect(); } catch (Throwable ignored) {}
-            if (tmp.exists()) tmp.delete();
+    private static List<String> buildCandidates(String url) {
+        List<String> list = new ArrayList<String>();
+        if (url == null || url.isEmpty()) return list;
+        // GitHub 直链自动补充常用国内高速镜像
+        if (url.startsWith("https://github.com/") || url.startsWith("http://github.com/")) {
+            // 优先放主流加速镜像，然后再放原站与其他镜像，防国内直连 15s 超时
+            list.add("https://ghproxy.net/" + url);
+            list.add("https://mirror.ghproxy.com/" + url);
+            list.add("https://gh-proxy.com/" + url);
+            list.add("https://ghfast.top/" + url);
+            list.add(url);
+        } else {
+            list.add(url);
         }
+        return list;
+    }
+
+    /** 下载到文件，带进度、多源智能重试与断点续传。pctFrom/pctTo 把这段映射到总进度区间。 */
+    private static void downloadTo(String primaryUrl, File dst, Cb cb, int pctFrom, int pctTo) throws IOException {
+        File tmp = new File(dst.getAbsolutePath() + ".tmp");
+        List<String> candidates = buildCandidates(primaryUrl);
+        IOException lastErr = null;
+
+        for (int i = 0; i < candidates.size(); i++) {
+            checkCancel();
+            String tryUrl = candidates.get(i);
+            HttpURLConnection c = null;
+            InputStream in = null;
+            OutputStream out = null;
+            try {
+                long existing = tmp.exists() ? tmp.length() : 0;
+                c = (HttpURLConnection) new URL(tryUrl).openConnection();
+                c.setConnectTimeout(8000);   // 8s 连不上快速切下一源，避免死等 15s 超时
+                c.setReadTimeout(45000);
+                c.setRequestProperty("User-Agent", "dsh-android");
+                c.setInstanceFollowRedirects(true);
+                if (existing > 0) {
+                    c.setRequestProperty("Range", "bytes=" + existing + "-");
+                }
+                int code = c.getResponseCode();
+                long total = -1;
+                if (code == 206) {
+                    out = new FileOutputStream(tmp, true);
+                    long remaining = c.getContentLength();
+                    total = remaining > 0 ? (existing + remaining) : -1;
+                } else if (code == 200) {
+                    existing = 0;
+                    out = new FileOutputStream(tmp, false);
+                    total = c.getContentLength();
+                } else if (code == 416) {
+                    // Range 不对，重置从头下
+                    tmp.delete();
+                    existing = 0;
+                    c.disconnect();
+                    c = (HttpURLConnection) new URL(tryUrl).openConnection();
+                    c.setConnectTimeout(8000);
+                    c.setReadTimeout(45000);
+                    c.setRequestProperty("User-Agent", "dsh-android");
+                    c.setInstanceFollowRedirects(true);
+                    code = c.getResponseCode();
+                    if (code != 200) throw new IOException("HTTP " + code + " (" + tryUrl + ")");
+                    out = new FileOutputStream(tmp, false);
+                    total = c.getContentLength();
+                } else {
+                    throw new IOException("HTTP " + code + " (" + tryUrl + ")");
+                }
+
+                in = c.getInputStream();
+                byte[] buf = new byte[65536];
+                long got = existing;
+                int n, lastPct = -1;
+                while ((n = in.read(buf)) > 0) {
+                    checkCancel();
+                    out.write(buf, 0, n);
+                    got += n;
+                    if (cb != null && total > 0) {
+                        int p = pctFrom + (int) ((pctTo - pctFrom) * (got / (double) total));
+                        if (p != lastPct) {
+                            lastPct = p;
+                            cb.onStage(dst.getName() + "  " + mb(got) + " / " + mb(total), p);
+                        }
+                    }
+                }
+                out.flush();
+                out.close(); out = null;
+                in.close(); in = null;
+                if (dst.exists()) dst.delete();
+                if (!tmp.renameTo(dst)) throw new IOException("改名失败：" + dst.getName());
+                // 下载成功，退出循环
+                return;
+            } catch (IOException e) {
+                if (cancelFlag) throw e;
+                lastErr = e;
+                // 继续尝试下一个候选源
+            } finally {
+                closeQuietly(out); closeQuietly(in);
+                if (c != null) try { c.disconnect(); } catch (Throwable ignored) {}
+            }
+        }
+
+        if (tmp.exists() && tmp.length() == 0) tmp.delete();
+        throw (lastErr != null ? lastErr : new IOException("下载全部来源失败：" + dst.getName()));
     }
 
     /** 把分卷按清单顺序拼成整包（流式，不把 193MB 读进内存） */

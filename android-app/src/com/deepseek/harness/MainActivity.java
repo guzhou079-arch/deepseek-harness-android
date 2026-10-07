@@ -67,6 +67,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
@@ -1319,6 +1320,20 @@ public class MainActivity extends Activity {
     //   两个仓库是**并行对等**的，谁也不是谁的镜像/备胎，两边都要照顾到。
     //   现在：两边都查、两个链接都列出来且都可点、按钮打开"报出更新版本"的那一边
     //   （并列时固定取 GitHub —— 那只是确定性取舍，不代表优先级）。
+    public static class ReleaseInfo {
+        public String tag = "";
+        public String name = "";
+        public String body = "";
+        public String pageUrl = "";
+        public String apkName = "";
+        public String apkUrl = "";
+        public long apkSize = 0;
+        public String sha256 = "";
+        public String source = ""; // "GitHub" / "Gitee"
+    }
+
+    // ⑧ 更新提示：**两个仓库对等并行**，各查各的，谁更新用谁。
+    //   支持多源智能测速（Gitee/GitHub/加速镜像）与应用内一键下载覆盖安装。
     private static final String GH_RELEASES_API =
             "https://api.github.com/repos/guzhou079-arch/deepseek-harness-android/releases/latest";
     private static final String GH_RELEASES_PAGE =
@@ -1328,32 +1343,64 @@ public class MainActivity extends Activity {
     private static final String GI_RELEASES_PAGE =
             "https://gitee.com/zhou-gu24/deepseek-harness-android/releases";
 
-    /** 查一个 release 端点要 tag_name；失败返回 null。两个仓库**对等**调用，谁也不特殊。 */
-    private String fetchLatestTag(String api) {
+    private ReleaseInfo parseReleaseJson(String json, String source, String pageUrl) {
+        if (json == null || json.isEmpty()) return null;
+        try {
+            org.json.JSONObject obj = new org.json.JSONObject(json);
+            ReleaseInfo info = new ReleaseInfo();
+            info.source = source;
+            info.pageUrl = pageUrl;
+            info.tag = obj.optString("tag_name", "");
+            info.name = obj.optString("name", "");
+            info.body = obj.optString("body", "");
+            if (info.body.length() > 0) {
+                java.util.regex.Matcher m = java.util.regex.Pattern.compile("([a-fA-F0-9]{64})").matcher(info.body);
+                if (m.find()) {
+                    info.sha256 = m.group(1).toLowerCase();
+                }
+            }
+            org.json.JSONArray assets = obj.optJSONArray("assets");
+            if (assets != null) {
+                for (int i = 0; i < assets.length(); i++) {
+                    org.json.JSONObject a = assets.getJSONObject(i);
+                    String aname = a.optString("name", "");
+                    String aurl = a.optString("browser_download_url", "");
+                    long asize = a.optLong("size", 0);
+                    if (aname.toLowerCase().endsWith(".apk") && aurl.length() > 0) {
+                        info.apkName = aname;
+                        info.apkUrl = aurl;
+                        info.apkSize = asize;
+                        break;
+                    }
+                }
+            }
+            return info;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private ReleaseInfo fetchLatestRelease(String api, String source, String pageUrl) {
         HttpURLConnection c = null;
         try {
             c = (HttpURLConnection) new URL(api).openConnection();
-            c.setConnectTimeout(5000);
-            c.setReadTimeout(5000);
+            c.setConnectTimeout(6000);
+            c.setReadTimeout(8000);
             c.setRequestProperty("User-Agent", "dsh-android");
             c.setRequestProperty("Accept", "application/json");
             if (c.getResponseCode() != 200) return null;
             InputStream in = c.getInputStream();
             ByteArrayOutputStream out = new ByteArrayOutputStream();
-            byte[] b = new byte[4096];
+            byte[] b = new byte[8192];
             int n;
             while ((n = in.read(b)) > 0) out.write(b, 0, n);
             in.close();
             String json = new String(out.toByteArray(), "UTF-8");
-            int ti = json.indexOf("\"tag_name\"");
-            if (ti < 0) return null;
-            int q1 = json.indexOf('"', ti + 10);
-            int q2 = q1 >= 0 ? json.indexOf('"', q1 + 1) : -1;
-            return (q1 >= 0 && q2 > q1) ? json.substring(q1 + 1, q2) : null;
+            return parseReleaseJson(json, source, pageUrl);
         } catch (Throwable t) {
             return null;
         } finally {
-            if (c != null) { try { c.disconnect(); } catch (Throwable ignored) {} }
+            if (c != null) try { c.disconnect(); } catch (Throwable ignored) {}
         }
     }
 
@@ -1367,45 +1414,71 @@ public class MainActivity extends Activity {
             @Override public void run() {
                 try {
                     // 两个渠道**对等**：各查各的，一个挂了不影响另一个
-                    String ghTag = fetchLatestTag(GH_RELEASES_API);
-                    String giTag = fetchLatestTag(GI_RELEASES_API);
-                    if (ghTag == null && giTag == null) {
+                    ReleaseInfo ghRel = fetchLatestRelease(GH_RELEASES_API, "GitHub", GH_RELEASES_PAGE);
+                    ReleaseInfo giRel = fetchLatestRelease(GI_RELEASES_API, "Gitee", GI_RELEASES_PAGE);
+                    if (ghRel == null && giRel == null) {
                         if (manual) ui.post(new Runnable() { @Override public void run() { conToast("检查更新失败（两个仓库都没连上）"); } });
                         return;
                     }
-                    String tag = ghTag != null ? ghTag : giTag;
-                    String page = ghTag != null ? GH_RELEASES_PAGE : GI_RELEASES_PAGE;
-                    if (giTag != null && (ghTag == null || isNewerVersion(normalizeTag(giTag), normalizeTag(ghTag)))) {
-                        tag = giTag;
-                        page = GI_RELEASES_PAGE;
+                    ReleaseInfo target = ghRel != null ? ghRel : giRel;
+                    if (giRel != null && (ghRel == null || isNewerVersion(normalizeTag(giRel.tag), normalizeTag(ghRel.tag)))) {
+                        target = giRel;
                     }
-                    final String ftag = tag;
-                    final String fpage = page;
-                    final boolean ghOk = ghTag != null, giOk = giTag != null;
+                    final ReleaseInfo fTarget = target;
+                    final boolean ghOk = ghRel != null, giOk = giRel != null;
                     String local = "";
                     try { local = getPackageManager().getPackageInfo(getPackageName(), 0).versionName; } catch (Throwable ignored) {}
                     final String fLocal = local;
-                    if (isNewerVersion(normalizeTag(tag), fLocal)) {
+                    if (isNewerVersion(normalizeTag(fTarget.tag), fLocal)) {
+                        // 构建多源候选下载列表（Gitee 极速直连，GitHub 加速镜像多源回退）
+                        final List<String> candidateUrls = new ArrayList<String>();
+                        if (giRel != null && giRel.apkUrl.length() > 0) {
+                            candidateUrls.add(giRel.apkUrl);
+                        }
+                        if (ghRel != null && ghRel.apkUrl.length() > 0) {
+                            String gh = ghRel.apkUrl;
+                            candidateUrls.add("https://ghproxy.net/" + gh);
+                            candidateUrls.add("https://mirror.ghproxy.com/" + gh);
+                            candidateUrls.add("https://gh-proxy.com/" + gh);
+                            candidateUrls.add("https://ghfast.top/" + gh);
+                            candidateUrls.add(gh);
+                        } else if (giRel == null && fTarget.apkUrl.length() > 0) {
+                            candidateUrls.add(fTarget.apkUrl);
+                        }
+
                         ui.post(new Runnable() {
                             @Override public void run() {
                                 try {
-                                    // 正文里**两条链接都列、都可点** —— 不把任何一家做成唯一入口
-                                    String html = "当前版本 " + fLocal + "，最新 " + ftag + "。<br><br>"
-                                            + "两个仓库并行发布同一版本，任选其一：<br>"
+                                    String sizeText = fTarget.apkSize > 0 ? ("（约 " + (fTarget.apkSize / 1048576) + "MB）") : "";
+                                    String title = "发现新版本 " + fTarget.tag;
+                                    String html = "当前版本 <b>" + fLocal + "</b>，最新 <b>" + fTarget.tag + "</b>" + sizeText + "。<br><br>"
+                                            + (fTarget.name.length() > 0 ? ("<b>" + android.text.TextUtils.htmlEncode(fTarget.name) + "</b><br><br>") : "")
+                                            + "发布仓库状态：<br>"
                                             + "· <a href=\"" + GH_RELEASES_PAGE + "\">GitHub Releases</a>"
-                                            + (ghOk ? "" : "（本次没连上）") + "<br>"
+                                            + (ghOk ? "" : "（直连未响应）") + "<br>"
                                             + "· <a href=\"" + GI_RELEASES_PAGE + "\">Gitee Releases</a>"
-                                            + (giOk ? "" : "（本次没连上）");
-                                    android.widget.TextView tv = cText("", 12.5f, cSub(), false);
+                                            + (giOk ? "" : "（直连未响应）");
+                                    TextView tv = cText("", 12.5f, cSub(), false);
                                     tv.setText(android.text.Html.fromHtml(html));
                                     tv.setMovementMethod(android.text.method.LinkMovementMethod.getInstance());
-                                    conDialogView("发现新版本 " + ftag, tv, "打开更新页", new Runnable() {
-                                        @Override public void run() {
-                                            try {
-                                                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(fpage)));
-                                            } catch (Throwable ignored) {}
-                                        }
-                                    }, "稍后");
+
+                                    if (!candidateUrls.isEmpty()) {
+                                        showUpdateChoiceDialog(title, tv, "立即更新 (应用内)", new Runnable() {
+                                            @Override public void run() {
+                                                startInAppUpdate(fTarget, candidateUrls);
+                                            }
+                                        }, "网页查看", new Runnable() {
+                                            @Override public void run() {
+                                                try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(fTarget.pageUrl))); } catch (Throwable ignored) {}
+                                            }
+                                        }, "稍后");
+                                    } else {
+                                        conDialogView(title, tv, "打开更新页", new Runnable() {
+                                            @Override public void run() {
+                                                try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(fTarget.pageUrl))); } catch (Throwable ignored) {}
+                                            }
+                                        }, "稍后");
+                                    }
                                 } catch (Throwable ignored) {}
                             }
                         });
@@ -1413,11 +1486,315 @@ public class MainActivity extends Activity {
                         ui.post(new Runnable() { @Override public void run() { conToast("已是最新版本（" + fLocal + "）"); } });
                     }
                 } catch (final Throwable t) {
-                    // 网络失败/离线：启动时的自动检查静默跳过；手动检查给反馈
                     if (manual) ui.post(new Runnable() { @Override public void run() { conToast("检查更新失败：" + t.getMessage()); } });
                 }
             }
         }, "update-check").start();
+    }
+
+    private void showUpdateChoiceDialog(String title, View content, String primaryLabel, final Runnable onPrimary,
+                                        String secondaryLabel, final Runnable onSecondary, String cancelLabel) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setBackground(cShape(cBg(), 0, 0, 16));
+        box.setPadding(dp(22), dp(22), dp(22), dp(14));
+        if (title != null && title.length() > 0) box.addView(cText(title, 16f, cText(), true));
+        if (content != null) box.addView(content, cTop(dp(12)));
+
+        LinearLayout acts = new LinearLayout(this);
+        acts.setOrientation(LinearLayout.HORIZONTAL);
+        acts.setGravity(Gravity.RIGHT);
+
+        if (cancelLabel != null) {
+            Button cb = cButton(cancelLabel, false);
+            cb.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) { closeDialogOverlay(); }
+            });
+            acts.addView(cb);
+        }
+        if (secondaryLabel != null) {
+            Button sb = cButton(secondaryLabel, false);
+            sb.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    closeDialogOverlay();
+                    if (onSecondary != null) onSecondary.run();
+                }
+            });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.leftMargin = dp(8);
+            acts.addView(sb, lp);
+        }
+        if (primaryLabel != null) {
+            Button pb = cButton(primaryLabel, true);
+            pb.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    closeDialogOverlay();
+                    if (onPrimary != null) onPrimary.run();
+                }
+            });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.leftMargin = dp(8);
+            acts.addView(pb, lp);
+        }
+        box.addView(acts, cTop(dp(18)));
+        showDialogOverlay(box);
+    }
+
+    private volatile boolean updateDownloadCancelled = false;
+
+    private void startInAppUpdate(final ReleaseInfo info, final List<String> candidateUrls) {
+        updateDownloadCancelled = false;
+
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setBackground(cShape(cBg(), 0, 0, 16));
+        box.setPadding(dp(22), dp(22), dp(22), dp(16));
+
+        box.addView(cText("正在下载更新 (" + info.tag + ")", 16f, cText(), true));
+
+        final TextView statusTv = cText("正在连接加速节点…", 12.5f, cSub(), false);
+        box.addView(statusTv, cTop(dp(12)));
+
+        final LinearLayout progressTrack = new LinearLayout(this);
+        progressTrack.setOrientation(LinearLayout.HORIZONTAL);
+        progressTrack.setBackground(cShape(cTrack(), 0, 0, 4));
+        final View fillView = new View(this);
+        fillView.setBackground(cShape(cAccent(), 0, 0, 4));
+        final View spacerView = new View(this);
+
+        progressTrack.addView(fillView, new LinearLayout.LayoutParams(0, dp(8), 0));
+        progressTrack.addView(spacerView, new LinearLayout.LayoutParams(0, dp(8), 100));
+        box.addView(progressTrack, cTop(dp(12)));
+
+        final TextView pctTv = cText("0%", 11.5f, cAccent(), false);
+        pctTv.setGravity(Gravity.RIGHT);
+        box.addView(pctTv, cTop(dp(4)));
+
+        LinearLayout acts = new LinearLayout(this);
+        acts.setOrientation(LinearLayout.HORIZONTAL);
+        acts.setGravity(Gravity.RIGHT);
+        Button cancelBtn = cButton("取消", false);
+        cancelBtn.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                updateDownloadCancelled = true;
+                closeDialogOverlay();
+                conToast("已取消下载");
+            }
+        });
+        acts.addView(cancelBtn);
+        box.addView(acts, cTop(dp(16)));
+
+        showDialogOverlay(box);
+
+        new Thread(new Runnable() {
+            @Override public void run() {
+                File dir = new File(Environment.getExternalStorageDirectory(), "DeepSeekHarness/updates");
+                if (!dir.exists()) dir.mkdirs();
+                String saveName = (info.apkName != null && info.apkName.length() > 0) ? info.apkName : ("DeepSeekHarness-" + info.tag + ".apk");
+                File apkFile = new File(dir, saveName);
+                File tmpFile = new File(apkFile.getAbsolutePath() + ".tmp");
+
+                boolean ok = false;
+                String errMsg = "";
+
+                for (int i = 0; i < candidateUrls.size(); i++) {
+                    if (updateDownloadCancelled) break;
+                    String tryUrl = candidateUrls.get(i);
+                    HttpURLConnection conn = null;
+                    InputStream in = null;
+                    OutputStream out = null;
+                    try {
+                        final String hostLabel = tryUrl.contains("gitee.com") ? "Gitee 高速源" :
+                                (tryUrl.contains("ghproxy") || tryUrl.contains("ghfast") ? "GitHub 加速节点" : "GitHub 官方源");
+                        ui.post(new Runnable() {
+                            @Override public void run() { statusTv.setText("连接中: " + hostLabel + "…"); }
+                        });
+
+                        long existing = tmpFile.exists() ? tmpFile.length() : 0;
+                        conn = (HttpURLConnection) new URL(tryUrl).openConnection();
+                        conn.setConnectTimeout(8000);
+                        conn.setReadTimeout(45000);
+                        conn.setRequestProperty("User-Agent", "dsh-android");
+                        conn.setInstanceFollowRedirects(true);
+                        if (existing > 0) {
+                            conn.setRequestProperty("Range", "bytes=" + existing + "-");
+                        }
+                        int code = conn.getResponseCode();
+                        long total = -1;
+                        if (code == 206) {
+                            out = new FileOutputStream(tmpFile, true);
+                            long remaining = conn.getContentLength();
+                            total = remaining > 0 ? (existing + remaining) : -1;
+                        } else if (code == 200) {
+                            existing = 0;
+                            out = new FileOutputStream(tmpFile, false);
+                            total = conn.getContentLength();
+                        } else if (code == 416) {
+                            tmpFile.delete();
+                            existing = 0;
+                            conn.disconnect();
+                            conn = (HttpURLConnection) new URL(tryUrl).openConnection();
+                            conn.setConnectTimeout(8000);
+                            conn.setReadTimeout(45000);
+                            conn.setRequestProperty("User-Agent", "dsh-android");
+                            conn.setInstanceFollowRedirects(true);
+                            code = conn.getResponseCode();
+                            if (code != 200) throw new IOException("HTTP " + code);
+                            out = new FileOutputStream(tmpFile, false);
+                            total = conn.getContentLength();
+                        } else {
+                            throw new IOException("HTTP " + code);
+                        }
+
+                        in = conn.getInputStream();
+                        byte[] buf = new byte[65536];
+                        long got = existing;
+                        int n;
+                        long lastUpdate = System.currentTimeMillis();
+                        long bytesSinceUpdate = 0;
+                        int lastPct = -1;
+
+                        while ((n = in.read(buf)) > 0) {
+                            if (updateDownloadCancelled) throw new IOException("已取消");
+                            out.write(buf, 0, n);
+                            got += n;
+                            bytesSinceUpdate += n;
+
+                            long now = System.currentTimeMillis();
+                            if (now - lastUpdate >= 200 || (total > 0 && got == total)) {
+                                double sec = Math.max(0.001, (now - lastUpdate) / 1000.0);
+                                double speedMb = (bytesSinceUpdate / 1048576.0) / sec;
+                                lastUpdate = now;
+                                bytesSinceUpdate = 0;
+
+                                final int pct = total > 0 ? (int) (got * 100 / total) : 0;
+                                final String statusStr = "已下载 " + (got / 1048576) + "MB"
+                                        + (total > 0 ? (" / " + (total / 1048576) + "MB") : "")
+                                        + String.format(Locale.US, " (%.1fMB/s)", speedMb);
+
+                                if (pct != lastPct || (now - lastUpdate >= 400)) {
+                                    lastPct = pct;
+                                    ui.post(new Runnable() {
+                                        @Override public void run() {
+                                            statusTv.setText(statusStr);
+                                            pctTv.setText(pct + "%");
+                                            LinearLayout.LayoutParams fp = (LinearLayout.LayoutParams) fillView.getLayoutParams();
+                                            LinearLayout.LayoutParams sp = (LinearLayout.LayoutParams) spacerView.getLayoutParams();
+                                            fp.weight = Math.max(0, Math.min(100, pct));
+                                            sp.weight = 100 - fp.weight;
+                                            progressTrack.requestLayout();
+                                        }
+                                    });
+                                }
+                            }
+                        }
+                        out.flush();
+                        out.close(); out = null;
+                        in.close(); in = null;
+                        if (apkFile.exists()) apkFile.delete();
+                        if (!tmpFile.renameTo(apkFile)) throw new IOException("安装包重命名失败");
+                        ok = true;
+                        break;
+                    } catch (Throwable t) {
+                        if (updateDownloadCancelled) return;
+                        errMsg = t.getMessage();
+                    } finally {
+                        if (out != null) try { out.close(); } catch (Throwable ignored) {}
+                        if (in != null) try { in.close(); } catch (Throwable ignored) {}
+                        if (conn != null) try { conn.disconnect(); } catch (Throwable ignored) {}
+                    }
+                }
+
+                if (updateDownloadCancelled) {
+                    if (tmpFile.exists()) tmpFile.delete();
+                    return;
+                }
+
+                if (!ok || !apkFile.exists()) {
+                    final String failMsg = errMsg != null && errMsg.length() > 0 ? errMsg : "网络连接失败";
+                    ui.post(new Runnable() {
+                        @Override public void run() {
+                            closeDialogOverlay();
+                            conDialog("下载更新失败", "下载过程中发生错误：" + failMsg + "\n\n可尝试在控制台手动点击检查更新重试，或直接在网页下载。", "我知道了", null, null);
+                        }
+                    });
+                    return;
+                }
+
+                ui.post(new Runnable() {
+                    @Override public void run() {
+                        statusTv.setText("正在校验安装包…");
+                        pctTv.setText("100%");
+                    }
+                });
+
+                boolean hashPass = true;
+                if (info.sha256 != null && info.sha256.length() == 64) {
+                    String actualSha = calculateFileSha256(apkFile);
+                    if (!info.sha256.equalsIgnoreCase(actualSha)) {
+                        hashPass = false;
+                        apkFile.delete();
+                    }
+                }
+
+                final boolean finalHashPass = hashPass;
+                ui.post(new Runnable() {
+                    @Override public void run() {
+                        closeDialogOverlay();
+                        if (!finalHashPass) {
+                            conDialog("安装包校验失败", "下载的文件 SHA-256 校验不通过，可能下载不完整或被篡改，已自动清理损坏文件，请重试。", "我知道了", null, null);
+                        } else {
+                            promptInstallApk(apkFile);
+                        }
+                    }
+                });
+            }
+        }, "dsh-inapp-update").start();
+    }
+
+    private String calculateFileSha256(File f) {
+        try {
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+            FileInputStream in = new FileInputStream(f);
+            byte[] buf = new byte[65536];
+            int n;
+            while ((n = in.read(buf)) > 0) md.update(buf, 0, n);
+            in.close();
+            byte[] digest = md.digest();
+            StringBuilder sb = new StringBuilder();
+            for (byte b : digest) sb.append(String.format("%02x", b));
+            return sb.toString();
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
+    private void promptInstallApk(final File apkFile) {
+        if (Build.VERSION.SDK_INT >= 26) {
+            if (!getPackageManager().canRequestPackageInstalls()) {
+                conDialog("需要安装权限", "系统需要授予「安装未知应用」权限才能自动执行覆盖安装。\n\n点击「去授权」开启后即可一键安装。", "去授权", new Runnable() {
+                    @Override public void run() {
+                        openSystemSetting(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES);
+                    }
+                }, "取消");
+                return;
+            }
+        }
+        try {
+            Uri uri = LogShareProvider.uriForAbs(this, apkFile.getAbsolutePath());
+            if (uri == null) {
+                conToast("生成安装链接失败");
+                return;
+            }
+            Intent intent = new Intent(Intent.ACTION_VIEW);
+            intent.setDataAndType(uri, "application/vnd.android.package-archive");
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(intent);
+        } catch (Throwable t) {
+            conDialog("唤起安装失败", "无法启动系统安装器：" + t.getMessage() + "\n\n文件已保存至：\n" + apkFile.getAbsolutePath(), "确定", null, null);
+        }
     }
 
     /** 简单版本号比较："1.4.0" vs "1.3.3" → true（1.4.0 更新）。 */
