@@ -605,16 +605,12 @@ public class MainActivity extends Activity {
             //   · 其余情况 → 直接 startEngine()，界面显示启动页，引擎就绪后
             //     waitForServer() → loadHome() 自动进聊天页，**零点击**。
             // 控制台本身没删：常驻通知的「控制台」按钮是它的入口（见 EngineService.buildNotification）。
-            // 动态注册桌面长按快捷方式 (App Shortcuts)
+            // 动态注册桌面长按快捷方式 (App Shortcuts: 仅保留安全模式)
             initDynamicShortcuts();
 
             if (in != null && in.getBooleanExtra("safe_mode_boot", false)) {
                 conToast("正在通过桌面快捷方式进入安全模式…");
                 conSafeModeNow();
-            } else if (in != null && in.getBooleanExtra("open_console", false)) {
-                showConsole();
-            } else if (!conFilesReady()) {
-                showConsole();
             } else {
                 startEngine();
             }
@@ -623,7 +619,6 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** v1.14：常驻通知的「控制台」按钮 —— Activity 已存在时走这里。 */
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
@@ -631,9 +626,6 @@ public class MainActivity extends Activity {
         if (intent != null && intent.getBooleanExtra("safe_mode_boot", false)) {
             conToast("正在通过桌面快捷方式进入安全模式…");
             conSafeModeNow();
-        } else if (intent != null && intent.getBooleanExtra("open_console", false)) {
-            showEngineScreen();
-            showConsole();
         }
     }
 
@@ -654,20 +646,8 @@ public class MainActivity extends Activity {
                     .setIntent(safeIntent)
                     .build();
 
-            Intent conIntent = new Intent(Intent.ACTION_VIEW, null, this, MainActivity.class);
-            conIntent.putExtra("open_console", true);
-            conIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-
-            android.content.pm.ShortcutInfo conShortcut = new android.content.pm.ShortcutInfo.Builder(this, "shortcut_console")
-                    .setShortLabel("原生控制台")
-                    .setLongLabel("打开原生控制台（解压/引擎/日志）")
-                    .setIcon(android.graphics.drawable.Icon.createWithResource(this, R.drawable.ic_launcher))
-                    .setIntent(conIntent)
-                    .build();
-
             java.util.List<android.content.pm.ShortcutInfo> list = new java.util.ArrayList<android.content.pm.ShortcutInfo>();
             list.add(safeShortcut);
-            list.add(conShortcut);
             sm.setDynamicShortcuts(list);
         } catch (Throwable t) {
             Log.w(TAG, "initDynamicShortcuts failed", t);
@@ -1043,12 +1023,12 @@ public class MainActivity extends Activity {
         llp.gravity = Gravity.CENTER_HORIZONTAL;
         box.addView(splashLogoView, llp);
 
-        // 2. 品牌名（排版质感升级：22sp + 0.28em 大字距 + 错峰入场）
+        // 2. 品牌名（排版质感升级：22sp + 0.35em 大字距 + 错峰入场）
         splashBrand = new TextView(this);
-        splashBrand.setText("DEEPSEEK HARNESS");
+        splashBrand.setText("DSH");
         splashBrand.setTextColor(cText());
         splashBrand.setTextSize(TypedValue.COMPLEX_UNIT_PX, getResources().getDimension(R.dimen.text_title));
-        splashBrand.setLetterSpacing(0.28f);
+        splashBrand.setLetterSpacing(0.35f);
         splashBrand.setGravity(Gravity.CENTER);
         splashBrand.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         splashBrand.setAlpha(0f);
@@ -3599,8 +3579,8 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** 处理 /voice：控制语音识别 (STT) 与状态查询。
-     *  action=start|stop|cancel|status
+    /** 处理 /voice：控制语音识别 (STT)、热词唤醒与状态查询。
+     *  action=start|stop|cancel|status|trigger|hotword_on|hotword_off
      */
     private String handleVoiceRequest(String path, String raw) {
         try {
@@ -3618,10 +3598,19 @@ public class MainActivity extends Activity {
             } else if ("cancel".equals(action)) {
                 vm.cancelListening();
                 return vm.getStatusJson();
+            } else if ("trigger".equals(action)) {
+                vm.triggerVoiceInteraction();
+                return vm.getStatusJson();
+            } else if ("hotword_on".equals(action)) {
+                vm.setHotwordEnabled(true);
+                return vm.getStatusJson();
+            } else if ("hotword_off".equals(action)) {
+                vm.setHotwordEnabled(false);
+                return vm.getStatusJson();
             } else if ("status".equals(action)) {
                 return vm.getStatusJson();
             }
-            return "{\"ok\":false,\"error\":\"未知 action（start/stop/cancel/status）\"}";
+            return "{\"ok\":false,\"error\":\"未知 action（start/stop/cancel/trigger/hotword_on/hotword_off/status）\"}";
         } catch (Throwable t) {
             return "{\"ok\":false,\"error\":\"" + String.valueOf(t.getMessage()).replace("\"", "'") + "\"}";
         }
@@ -5166,19 +5155,16 @@ public class MainActivity extends Activity {
         // 用户看到的就是"权限引导走完进不了应用"，只能杀掉重开）。改为：
         // ① 回控制台（那里有真实状态与「启动引擎/日志」入口）；② 后台继续等引擎"迟到"——
         // 首启在真机上（首次建 profiles/冷启动）可能超过 90 秒，引擎一旦就绪自动进入主界面。
-        setStatus("引擎启动超时（端口 " + enginePort + "），已回到控制台，引擎就绪后会自动进入");
-        // 累计连续失败：让控制台能把「引擎起不来 → 可用安全模式」这条出路推到用户面前。
+        setStatus("引擎启动超时（端口 " + enginePort + "），后台正在继续守望重试…");
         bumpBootFailure();
         conEngineTimedOut();
     }
 
-    /** 引擎启动超时后的兜底：回控制台 + 后台守望，引擎迟到就绪时自动进入主界面。 */
+    /** 引擎启动超时后的兜底：后台守望，引擎迟到就绪时自动进入主界面。 */
     private void conEngineTimedOut() {
         ui.post(new Runnable() { @Override public void run() {
             try {
-                conToast("引擎启动超时，已回到控制台；就绪后会自动进入");
-                showConsole();
-                refreshConsole();
+                conToast("引擎启动稍慢，后台正在继续连接…");
             } catch (Throwable ignored) {}
         }});
         final long deadline = System.currentTimeMillis() + 600000L; // 最多再守望 10 分钟
@@ -5191,7 +5177,8 @@ public class MainActivity extends Activity {
                         starting = false;
                         ui.post(new Runnable() { @Override public void run() {
                             try {
-                                if (consoleVisible) { conToast("引擎已就绪"); enterMainUi(); refreshConsole(); }
+                                conToast("引擎已就绪");
+                                enterMainUi();
                             } catch (Throwable ignored) {}
                         }});
                         return;
@@ -5711,6 +5698,13 @@ public class MainActivity extends Activity {
             lg.put("summary", conLogSummary());
             lg.put("path", conLogFile().getAbsolutePath());
             o.put("log", lg);
+
+            org.json.JSONObject vo = new org.json.JSONObject();
+            VoiceManager vm = VoiceManager.get(this);
+            vo.put("hotwordEnabled", vm.isHotwordEnabled());
+            vo.put("wakeWords", vm.getWakeWords());
+            vo.put("summary", (vm.isHotwordEnabled() ? "语音唤醒已开启" : "语音唤醒已关闭") + " · 唤醒词: " + vm.getWakeWords());
+            o.put("voice", vo);
         } catch (Throwable t) {
             try { o.put("error", String.valueOf(t.getMessage())); } catch (Throwable ignored) {}
         }
@@ -5790,6 +5784,29 @@ public class MainActivity extends Activity {
                 else conToast("来源已失效，请重新查询");
                 return;
             }
+            if ("voice.hotword.toggle".equals(id)) {
+                boolean enable = "1".equals(arg) || "true".equalsIgnoreCase(arg);
+                VoiceManager.get(this).setHotwordEnabled(enable);
+                conToast(enable ? "已开启语音热词唤醒" : "已关闭语音热词唤醒");
+                return;
+            }
+            if ("voice.wakewords.set".equals(id)) {
+                VoiceManager.get(this).setWakeWords(arg);
+                conToast("自定义唤醒词已保存: " + arg);
+                return;
+            }
+            if ("voice.test.tone".equals(id)) {
+                VoiceManager.get(this).playPromptTone();
+                return;
+            }
+            if ("voice.test.tts".equals(id)) {
+                VoiceManager.get(this).speak("DeepSeek 语音播报测试正常，随时听候您的指令。", false);
+                return;
+            }
+            if ("voice.test.listen".equals(id)) {
+                VoiceManager.get(this).triggerVoiceInteraction();
+                return;
+            }
         } catch (Throwable t) {
             Log.w(TAG, "ctlAction " + id, t);
             conToast("操作失败：" + t.getMessage());
@@ -5797,15 +5814,8 @@ public class MainActivity extends Activity {
     }
 
     private void showConsole() {
-        if (splashLogoView != null) splashLogoView.stopAnim();
-        if (consoleLayer == null) buildConsoleLayer();
-        if (consoleLayer == null) { startEngine(); return; } // 兜底：控制台建不出来就走老路
-        consoleVisible = true;
-        consoleLayer.setVisibility(View.VISIBLE);
-        if (engineRoot != null) engineRoot.bringChildToFront(consoleLayer);
-        renderConsole();
-        startConsoleTick();
-        computeFilesSummaryAsync();
+        // 原生控制台已彻底弃用，统一直接启动引擎
+        startEngine();
     }
 
     private void buildConsoleLayer() {

@@ -221,6 +221,7 @@ public class OverlayService extends Service {
         foregroundWantsHidden = false;
         applyVisibleNow();
         handler.postDelayed(probeRunnable, 200);
+        VoiceManager.get(this).addCallback(voiceCallback);
     }
 
     /**
@@ -301,6 +302,7 @@ public class OverlayService extends Service {
     public void onDestroy() {
         isRunning = false;
         if (instance == this) instance = null;
+        VoiceManager.get(this).removeCallback(voiceCallback);
         stopVscreenPreview();
         handler.removeCallbacksAndMessages(null);
         hideBubble();   // v1.71：气泡是第二个窗口，必须一起 remove
@@ -310,6 +312,48 @@ public class OverlayService extends Service {
         }
         super.onDestroy();
     }
+
+    private final VoiceManager.VoiceCallback voiceCallback = new VoiceManager.VoiceCallback() {
+        @Override
+        public void onStateChange(final String state, final String message) {
+            handler.post(new Runnable() {
+                @Override
+                public void run() {
+                    if ("listening".equals(state) || "recording".equals(state)) {
+                        showBubble("🎤 " + message, 6000);
+                    } else if ("recognizing".equals(state) || "processing".equals(state)) {
+                        showBubble("💭 " + message, 5000);
+                    } else if ("speaking".equals(state)) {
+                        showBubble("🔊 " + message, 4000);
+                    }
+                }
+            });
+        }
+
+        @Override
+        public void onResult(final String text, final boolean isFinal) {
+            handler.post(new Runnable() {
+                @Override
+                public void run() {
+                    if (text != null && !text.isEmpty()) {
+                        showBubble((isFinal ? "🗣️ " : "🎤 ") + text, isFinal ? 5000 : 3000);
+                    }
+                }
+            });
+        }
+
+        @Override
+        public void onError(final String error) {
+            handler.post(new Runnable() {
+                @Override
+                public void run() {
+                    if (error != null && !error.isEmpty()) {
+                        showBubble("⚠️ " + error, 3500);
+                    }
+                }
+            });
+        }
+    };
 
     @Override public IBinder onBind(Intent intent) { return null; }
 
@@ -2513,9 +2557,20 @@ public class OverlayService extends Service {
         rootView.addView(panelView);
         setPanelVisible(false, false);
 
-        // ===== 拖动 + 点击 + 拖底隐藏 =====
+        // ===== 拖动 + 点击 + 长按唤醒语音 + 拖底隐藏 =====
         rootView.setOnTouchListener(new View.OnTouchListener() {
             private long downAt = 0;
+            private boolean longPressFired = false;
+            private final Runnable longPressRunnable = new Runnable() {
+                @Override
+                public void run() {
+                    if (!dragging) {
+                        longPressFired = true;
+                        VoiceManager.get(OverlayService.this).triggerVoiceInteraction();
+                    }
+                }
+            };
+
             @Override public boolean onTouch(View v, MotionEvent ev) {
                 switch (ev.getAction()) {
                     case MotionEvent.ACTION_DOWN:
@@ -2523,10 +2578,13 @@ public class OverlayService extends Service {
                         touchX = ev.getRawX(); touchY = ev.getRawY();
                         startX = lp.x; startY = lp.y;
                         dragging = false;
+                        longPressFired = false;
+                        handler.postDelayed(longPressRunnable, 450);
                         return true;
                     case MotionEvent.ACTION_MOVE:
                         if (Math.abs(ev.getRawX() - touchX) > dp(8) || Math.abs(ev.getRawY() - touchY) > dp(8)) {
                             dragging = true;
+                            handler.removeCallbacks(longPressRunnable);
                         }
                         if (dragging) {
                             lp.x = (int) (startX + (ev.getRawX() - touchX));
@@ -2537,39 +2595,24 @@ public class OverlayService extends Service {
                         }
                         return true;
                     case MotionEvent.ACTION_UP:
-                        // v1.56：判定改回**原版口径**（`!dragging && 按下<400ms` 就算点击）。
-                        // 我在 v1.25/v1.38 陆续加了两个条件：
-                        //   ① v == rootView（要求触点落在根布局本身）
-                        //   ② !insidePanel(rawX, rawY)（要求触点不在面板矩形内）
-                        // 用户的实测反馈是"必须按住白色圆最底部才响应" —— 这与判定被收窄高度吻合：
-                        // 只要触点被判成"面板内部"，这次点击就被丢掉，表现为可点范围整体偏下/偏小。
-                        // 原版没有这两个条件，就是单纯"没拖动 + 按得够短 = 点击"，这里还原。
-                        // （面板内的按钮/输入框本来就会自己消费触摸，不会走到这里。）
+                        handler.removeCallbacks(longPressRunnable);
                         boolean onRoot = true;
-                        if (dragging && dismissHint && !panelVisible) {
-                            // v1.63：隐藏手势收紧成两条 ——
-                            //   ① **面板展开时一律不隐藏**，改为吸附到底边半藏。
-                            //      面板状态下"整个消失"最让人意外，而且"面板展开"
-                            //      和"拖底隐藏"抢的是同一个向下手势（用户反馈"拖到底部直接收起来"）。
-                            //   ② 只有收起态、且真的拖进屏幕最底那一条（DISMISS_ZONE_EDGE_DP）
-                            //      才隐藏。
+                        if (longPressFired) {
+                            // 已经触发长按语音唤醒，松手不再处理点击
+                        } else if (dragging && dismissHint && !panelVisible) {
                             hideByDragToBottom();
                         } else if (dragging) {
-                            // v1.61：按松手时手指位置吸附最近的一条边（四边都支持），
-                            // 并按面板状态决定半藏还是完整贴边。
                             snapToEdge(ev.getRawX(), ev.getRawY());
                             if (panelVisible) setPanelVisible(true, false);
-                            clampBubble();   // v1.73：松手后气泡仍在球旁边，并留在屏内
+                            clampBubble();
                         } else if (System.currentTimeMillis() - downAt < 400) {
-                            // v1.71：单击球 = 吐台词（气泡）；面板开着时先收面板（保留一条触摸出口）。
                             onBallTap();
                         }
                         logDrag("up", ev, v, onRoot);
                         setDismissHintInternal(false);
                         return true;
                     case MotionEvent.ACTION_CANCEL:
-                        // v1.38 诊断：系统/上层窗口把触摸抢走时走到这里。
-                        // 用户报"拖不动"时，这条日志能区分"根本没收到触摸"和"收到了但被取消"。
+                        handler.removeCallbacks(longPressRunnable);
                         logDrag("cancel", ev, v, false);
                         setDismissHintInternal(false);
                         return true;
