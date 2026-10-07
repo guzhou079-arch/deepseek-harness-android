@@ -5528,6 +5528,12 @@ public class MainActivity extends Activity {
             th.put("label", themeModeLabel(mode));
             o.put("theme", th);
 
+            org.json.JSONObject re = new org.json.JSONObject();
+            String eff = conReasoningEffort();
+            re.put("effort", eff);
+            re.put("label", conReasoningLabel(eff));
+            o.put("reasoning", re);
+
             org.json.JSONObject pm = new org.json.JSONObject();
             pm.put("summary", conPermSummary());
             org.json.JSONArray pr = new org.json.JSONArray();
@@ -5636,6 +5642,10 @@ public class MainActivity extends Activity {
                 if (mode < 0 || mode > 2 || mode == themeMode()) return;
                 getSharedPreferences(PREFS, MODE_PRIVATE).edit().putInt("theme_mode", mode).apply();
                 recreate();   // 主题（含 WebView 的 prefers-color-scheme）随 onCreate 重新生效
+                return;
+            }
+            if ("reasoning.set".equals(id)) {
+                conSetReasoningEffort(arg);
                 return;
             }
             if ("open.url".equals(id)) {
@@ -6839,6 +6849,97 @@ public class MainActivity extends Activity {
     }
 
     private String conPatchPath() { return new File(payloadDir(), "dshhome/cordis.patch.yml").getAbsolutePath(); }
+    private String conWebProfilePatchPath() { return new File(payloadDir(), "dshhome/profiles/web/cordis.patch.yml").getAbsolutePath(); }
+
+    private String conReasoningEffort() {
+        try {
+            File f = new File(conWebProfilePatchPath());
+            if (!f.exists()) f = new File(conPatchPath());
+            if (!f.exists()) return "high";
+            BufferedReader r = new BufferedReader(new InputStreamReader(new FileInputStream(f), "UTF-8"));
+            String line;
+            boolean inDefaultModel = false;
+            while ((line = r.readLine()) != null) {
+                String t = line.trim();
+                if (t.startsWith("- id:") && t.contains("agent-default-model")) {
+                    inDefaultModel = true;
+                    continue;
+                }
+                if (inDefaultModel) {
+                    if (t.startsWith("- id:")) break;
+                    if (t.startsWith("reasoningEffort:")) {
+                        r.close();
+                        return t.substring(16).trim();
+                    }
+                }
+            }
+            r.close();
+        } catch (Throwable ignored) {}
+        return "high";
+    }
+
+    private String conReasoningLabel(String effort) {
+        if ("off".equals(effort)) return "关闭（极速）";
+        if ("low".equals(effort)) return "轻度（经济）";
+        if ("max".equals(effort)) return "极致（深度）";
+        return "标准（平衡）";
+    }
+
+    private void conSetReasoningEffort(final String effort) {
+        if (effort == null || effort.isEmpty()) return;
+        try {
+            File f = new File(conWebProfilePatchPath());
+            if (!f.exists()) f = new File(conPatchPath());
+            if (!f.exists()) return;
+            BufferedReader r = new BufferedReader(new InputStreamReader(new FileInputStream(f), "UTF-8"));
+            java.util.List<String> lines = new java.util.ArrayList<String>();
+            String line;
+            while ((line = r.readLine()) != null) lines.add(line);
+            r.close();
+
+            int at = -1;
+            for (int i = 0; i < lines.size(); i++) {
+                String t = lines.get(i).trim();
+                if (t.startsWith("- id:") && t.contains("agent-default-model")) {
+                    at = i;
+                    break;
+                }
+            }
+            if (at >= 0) {
+                int end = conRowEnd(lines, at);
+                int effortIdx = -1;
+                for (int j = at + 1; j <= end; j++) {
+                    if (lines.get(j).trim().startsWith("reasoningEffort:")) {
+                        effortIdx = j;
+                        break;
+                    }
+                }
+                String ind = conSpaces(conIndentOf(lines.get(at)) + 4);
+                if (effortIdx >= 0) {
+                    lines.set(effortIdx, ind + "reasoningEffort: " + effort);
+                } else {
+                    lines.add(at + 2, ind + "reasoningEffort: " + effort);
+                }
+                FileOutputStream out = new FileOutputStream(f);
+                out.write(conJoinLines(lines, "\n").getBytes("UTF-8"));
+                out.close();
+            }
+            new Thread(new Runnable() {
+                @Override public void run() {
+                    try {
+                        String[] cmd = new String[] {
+                            payloadDir() + "/bin/node",
+                            "/sdcard/DeepSeekHarness/tools/tier.mjs",
+                            effort
+                        };
+                        Runtime.getRuntime().exec(cmd);
+                    } catch (Throwable ignored) {}
+                }
+            }).start();
+        } catch (Throwable t) {
+            conToast("设置思考程度失败: " + t.getMessage());
+        }
+    }
 
     // ---------- cordis.patch.yml 读写（v1.13 重写） ----------
     // 文件结构：顶层是**平铺的 patch 条目数组** —— 要么 `- id: <行id>` + `disabled: true` / `config:`

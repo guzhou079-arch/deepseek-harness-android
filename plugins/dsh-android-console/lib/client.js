@@ -403,6 +403,7 @@ window.__ModuleLoader__.load({
       const en = state.engine || {};
       const rescue = state.rescue || {};
       const theme = state.theme || {};
+      const reasoning = state.reasoning || {};
       const log = state.log || {};
 
       return jsxs('div', { className: 'ctl-root', children: [
@@ -503,6 +504,25 @@ window.__ModuleLoader__.load({
           title: '时光机全站备份',
           desc: '一键打包记忆库、所有历史会话与配置（存至 /sdcard/Download/DSH_Backups）',
           right: jsx(Button, { variant: 'outline', onClick: () => run('snapshot', ''), children: '立即备份' }),
+        }),
+        jsx(Row, {
+          title: '思考程度 / 智力分档',
+          desc: '控制 AI 深度推理预算（当前 ' + (reasoning.label || '标准（平衡）') + '）',
+          right: jsx(primitives.SegmentedControl, {
+            id: 'dshctl-reasoning',
+            value: reasoning.effort || 'high',
+            label: '思考程度',
+            options: [
+              { value: 'off', label: '关闭' },
+              { value: 'low', label: '轻度' },
+              { value: 'high', label: '标准' },
+              { value: 'max', label: '极致' },
+            ],
+            onChange: (v) => {
+              const lbl = v === 'off' ? '关闭（极速）' : (v === 'low' ? '轻度（经济）' : (v === 'max' ? '极致（深度）' : '标准（平衡）'));
+              run('reasoning.set', v, '思考程度已设为：' + lbl);
+            },
+          }),
         }),
         jsx(Row, {
           title: '界面主题',
