@@ -100,6 +100,26 @@ window.__ModuleLoader__.load({
       }
     }
 
+    /** 安全打开外部链接（桥 / window.open / 模拟点击三重保险） */
+    function openUrl(url) {
+      try {
+        const s = shell();
+        if (s && typeof s.ctlAct === 'function') s.ctlAct('open.url', url);
+      } catch (e) { /* ignore */ }
+      try {
+        window.open(url, '_blank');
+      } catch (e) { /* ignore */ }
+      try {
+        const a = document.createElement('a');
+        a.href = url;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      } catch (e) { /* ignore */ }
+    }
+
     /** 控制台状态轮询（原生控制台是 1s tick；这里 2s，够用又不吵）。 */
     function useConsoleState() {
       const [state, setState] = react.useState(() => readState());
@@ -511,7 +531,10 @@ window.__ModuleLoader__.load({
           desc: '如果觉得好用，欢迎前往 GitHub 给作者点一颗 ⭐ 支持！',
           right: jsx(Button, {
             variant: 'outline',
-            onClick: () => run('open.url', 'https://github.com/guzhou079-arch/deepseek-harness-android'),
+            onClick: () => {
+              openUrl('https://github.com/guzhou079-arch/deepseek-harness-android');
+              say('正在打开 GitHub 开源主页…');
+            },
             children: '去 Star ⭐',
           }),
           last: true,
