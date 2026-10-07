@@ -31,7 +31,7 @@
 | 🎛️ **设置页内置控制台** | 原生控制台与网页设置页深度融合：引擎管理、救援模式、权限总览、插件开关、时光机备份 |
 | 📱 **手机自动化** | 读屏、点击、输入、通知读取、定时任务、虚拟屏 |
 | 🔧 **手机自己出包** | javac → dex → 打包 → 签名 → 发版，全程不需要电脑（构建环境 App 内按需下载） |
-| 🧩 **全量随包技能** | 内置 11 款官方与实用生产力技能：架构图（`archify`）/ PPT 生成（`ppt-design`）/ 短视频分镜（`vox-director`）/ 记忆中枢（`memos`）/ 文档批处理（`doc-tidy`）/ 时光机备份（`dsh-backup`）/ 本地 RAG 检索（`dsh-doc-search`）/ 手机自动化（`dsh-mobile`）/ 多模型会审（`dsh-review`）等 |
+| 🧩 **全量随包技能** | 内置 11 款官方与实用生产力技能：架构图（`dsh-diagram`）/ PPT 生成（`dsh-slides`）/ 短视频分镜（`dsh-storyboard`）/ 记忆中枢（`dsh-memory-sync`）/ 文档批处理（`dsh-doc-tidy`）/ 时光机备份（`dsh-backup`）/ 本地 RAG 检索（`dsh-doc-search`）/ 手机自动化（`dsh-mobile`）/ 多模型会审（`dsh-review`）等 |
 
 > ⭐ **如果它帮你省了时间，给个 Star 是最好的反馈** —— 也让我知道继续维护值不值得。
 > 用着有问题、或者有想要的功能，欢迎开 [Issue](https://github.com/guzhou079-arch/deepseek-harness-android/issues)。

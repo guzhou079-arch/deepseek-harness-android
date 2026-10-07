@@ -1,5 +1,5 @@
 ---
-name: ppt-design
+name: dsh-slides
 description: 现代演示文稿 (PPTX) 自动化设计与生成技能。输入大纲或需求，一键生成结构清晰、排版专业、原生可编辑的 .pptx 文件（支持手机 WPS / 电脑 PowerPoint 直接打开编辑）。
 whenToUse: 用户说「做个PPT / 生成演示文稿 / 做几页幻灯片 / 把这个报告做成PPT」时调用。
 ---

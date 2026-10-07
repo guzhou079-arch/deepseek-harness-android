@@ -1,5 +1,5 @@
 ---
-name: doc-tidy
+name: dsh-doc-tidy
 description: 读取/汇总/改名 Office 文档（xlsx/docx/pptx）的零依赖方法：用标准库解 zip+XML，不点 WPS 界面。需要"看表格/取正文/统计行列/批量整理"时加载。含自测命令。
 whenToUse: 任务涉及 xlsx/docx/pptx 的内容读取、表头识别、多表汇总、批量改名或生成汇报数据时（尤其文件来自微信/QQ/下载目录）。
 ---

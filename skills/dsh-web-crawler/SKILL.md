@@ -1,5 +1,5 @@
 ---
-name: browser-skill
+name: dsh-web-crawler
 description: 网页与后台数据自动化抓取技能。支持公开网页抓取与基于无障碍/登录态的应用数据提取，自动清洗为结构化 JSON/Markdown，规避反爬与繁琐手动复制。
 whenToUse: 用户说「抓取这个网页 / 查一下某网站后台数据 / 提取网页表格 / 把文章扒下来」时调用。
 ---
