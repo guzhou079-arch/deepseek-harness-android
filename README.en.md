@@ -13,7 +13,8 @@ It can even compile, package, sign and release itself, entirely on the phone, wi
 | ☁️ **Fluid notification card** | While the AI is writing, a capsule appears under the status bar; tap to expand into a card you can scroll by hand |
 | 📱 **Phone automation** | Screen reading, tapping, text input, notification access, scheduled tasks, virtual display |
 | 🔧 **Self-building on the phone** | javac → dex → package → sign → release, all on-device (the build environment is downloaded on demand) |
-| 🧩 **Bundled skills** | Phone automation (`dsh-mobile`), document tidy (`doc-tidy`), cross-vendor multi-model review (`dsh-review`) |
+| 🧩 **21 bundled skills** | Ready out of the box — no plugin hunting: diagrams, slide decks, storyboards, memory hub, Office batch processing, Word/公文 publishing, Excel multi-sheet alignment, meeting notes, business mail, local RAG search, full-site backup, phone automation, cross-vendor review, effort tiering, web crawling, code craft, data insight, deep research, scrum planning, life hub, voice |
+| ⬇️ **Quick install** | Download the APK → allow installing unknown apps → open it, follow the permission guide → paste your own model API key |
 
 **Download**: see **Releases**. Each release lists the APK's SHA-256 so you can verify it before installing.
 

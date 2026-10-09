@@ -31,7 +31,7 @@
 | 🎛️ **设置页内置控制台** | 原生控制台与网页设置页深度融合：引擎管理、救援模式、权限总览、插件开关、时光机备份 |
 | 📱 **手机自动化** | 读屏、点击、输入、通知读取、定时任务、虚拟屏 |
 | 🔧 **手机自己出包** | javac → dex → 打包 → 签名 → 发版，全程不需要电脑（构建环境 App 内按需下载） |
-| 🧩 **全量随包技能** | 内置 11 款官方与实用生产力技能：架构图（`dsh-diagram`）/ PPT 生成（`dsh-slides`）/ 短视频分镜（`dsh-storyboard`）/ 记忆中枢（`dsh-memory-sync`）/ 文档批处理（`dsh-doc-tidy`）/ 时光机备份（`dsh-backup`）/ 本地 RAG 检索（`dsh-doc-search`）/ 手机自动化（`dsh-mobile`）/ 多模型会审（`dsh-review`）等 |
+| 🧩 **随包技能 21 款** | 开箱即用，不用自己装插件：架构图 `dsh-diagram` · 演示稿 `dsh-slides` · 短视频分镜 `dsh-storyboard` · 记忆中枢 `dsh-memory-sync` · Office 批处理 `dsh-doc-tidy` · Word/公文出版 `dsh-doc-publisher` · Excel 多表对齐 `dsh-excel-copilot` · 会议纪要 `dsh-meeting-copilot` · 邮件公函 `dsh-mail-craft` · 本地 RAG 检索 `dsh-doc-search` · 时光机备份 `dsh-backup` · 手机自动化 `dsh-mobile` · 跨厂商会审 `dsh-review` · 智力分档 `dsh-tier` · 网页抓取 `dsh-web-crawler` · 代码工程 `dsh-code-craft` · 数据洞察 `dsh-data-craft` · 深度调研 `dsh-deep-research` · 敏捷排期 `dsh-scrum-master` · 生活中枢 `dsh-life` · 语音交互 `dsh-voice` |
 
 > ⭐ **如果它帮你省了时间，给个 Star 是最好的反馈** —— 也让我知道继续维护值不值得。
 > 用着有问题、或者有想要的功能，欢迎开 [Issue](https://github.com/guzhou079-arch/deepseek-harness-android/issues)。
