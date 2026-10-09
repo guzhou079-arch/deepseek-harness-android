@@ -15,7 +15,7 @@ It can even compile, package, sign and release itself, entirely on the phone, wi
 | 🔧 **Self-building on the phone** | javac → dex → package → sign → release, all on-device (the build environment is downloaded on demand) |
 | 🧩 **Bundled skills** | Phone automation (`dsh-mobile`), document tidy (`doc-tidy`), cross-vendor multi-model review (`dsh-review`) |
 
-**Download**: see **Releases** (GitHub and Gitee carry the same content — either is fine). Each release lists the APK's SHA-256 so you can verify it before installing.
+**Download**: see **Releases**. Each release lists the APK's SHA-256 so you can verify it before installing.
 
 **Docs** (Chinese): [install & requirements](docs/安装与要求.md) · [permissions & privacy](docs/权限与隐私.md) · [FAQ](docs/常见问题.md) · [upgrade & rescue](docs/升级与救援.md) · [build environment](docs/自建环境与出包.md)
 

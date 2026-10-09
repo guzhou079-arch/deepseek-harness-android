@@ -1466,20 +1466,22 @@ public class MainActivity extends Activity {
                     try { local = getPackageManager().getPackageInfo(getPackageName(), 0).versionName; } catch (Throwable ignored) {}
                     final String fLocal = local;
                     if (isNewerVersion(normalizeTag(fTarget.tag), fLocal)) {
-                        // 构建多源候选下载列表（Gitee 极速直连，GitHub 加速镜像多源回退）
+                        // 构建多源候选下载列表 —— ⚠️ **必须只指向 target 那一个 release**
+                        // 2026-10-10 修：以前把「Gitee 最新版」和「GitHub 最新版」混着放进候选，
+                        // 两个仓库版本一旦不一致（例如 Gitee 停在旧版），就会先去下**另一个仓库的旧包**；
+                        // 下完才发现 SHA-256 不对，而校验又在循环之外、不换源 ⇒ 应用内升级直接死。
                         final List<String> candidateUrls = new ArrayList<String>();
-                        if (giRel != null && giRel.apkUrl.length() > 0) {
-                            candidateUrls.add(giRel.apkUrl);
-                        }
-                        if (ghRel != null && ghRel.apkUrl.length() > 0) {
-                            String gh = ghRel.apkUrl;
-                            candidateUrls.add("https://ghproxy.net/" + gh);
-                            candidateUrls.add("https://mirror.ghproxy.com/" + gh);
-                            candidateUrls.add("https://gh-proxy.com/" + gh);
-                            candidateUrls.add("https://ghfast.top/" + gh);
-                            candidateUrls.add(gh);
-                        } else if (giRel == null && fTarget.apkUrl.length() > 0) {
-                            candidateUrls.add(fTarget.apkUrl);
+                        String targetUrl = fTarget.apkUrl == null ? "" : fTarget.apkUrl;
+                        if (targetUrl.length() > 0) {
+                            if ("Gitee".equals(fTarget.source)) {
+                                candidateUrls.add(targetUrl);
+                            } else {
+                                candidateUrls.add("https://ghproxy.net/" + targetUrl);
+                                candidateUrls.add("https://mirror.ghproxy.com/" + targetUrl);
+                                candidateUrls.add("https://gh-proxy.com/" + targetUrl);
+                                candidateUrls.add("https://ghfast.top/" + targetUrl);
+                                candidateUrls.add(targetUrl);
+                            }
                         }
 
                         ui.post(new Runnable() {
@@ -1634,6 +1636,7 @@ public class MainActivity extends Activity {
 
                 boolean ok = false;
                 String errMsg = "";
+                String hashFailMsg = "";
 
                 for (int i = 0; i < candidateUrls.size(); i++) {
                     if (updateDownloadCancelled) break;
@@ -1731,6 +1734,24 @@ public class MainActivity extends Activity {
                         in.close(); in = null;
                         if (apkFile.exists()) apkFile.delete();
                         if (!tmpFile.renameTo(apkFile)) throw new IOException("安装包重命名失败");
+
+                        // ⚠️ 校验必须在**候选循环内**（2026-10-10 修）：不通过就删干净、换下一个源。
+                        // 以前校验在循环之后只做一次：一个坏源（例如另一个仓库的旧版本）就能毒死整条升级链。
+                        if (info.sha256 != null && info.sha256.length() == 64) {
+                            final String vLabel = hostLabel;
+                            ui.post(new Runnable() {
+                                @Override public void run() { statusTv.setText("正在校验（" + vLabel + "）…"); }
+                            });
+                            String actualSha = calculateFileSha256(apkFile);
+                            if (!info.sha256.equalsIgnoreCase(actualSha)) {
+                                apkFile.delete();
+                                // ⚠️ 断点文件也必须清：否则下一个源会从「错误文件的前缀」续传
+                                if (tmpFile.exists()) tmpFile.delete();
+                                hashFailMsg = vLabel;
+                                errMsg = "SHA-256 校验不通过";
+                                continue;
+                            }
+                        }
                         ok = true;
                         break;
                     } catch (Throwable t) {
@@ -1749,7 +1770,10 @@ public class MainActivity extends Activity {
                 }
 
                 if (!ok || !apkFile.exists()) {
-                    final String failMsg = errMsg != null && errMsg.length() > 0 ? errMsg : "网络连接失败";
+                    // 所有候选源都试完仍未通过：区分「网络失败」与「每个源都校验不过」
+                    final String failMsg = hashFailMsg.length() > 0
+                            ? ("所有下载源的安装包都没通过 SHA-256 校验（最后失败：" + hashFailMsg + "）")
+                            : (errMsg != null && errMsg.length() > 0 ? errMsg : "网络连接失败");
                     ui.post(new Runnable() {
                         @Override public void run() {
                             closeDialogOverlay();
@@ -1759,31 +1783,11 @@ public class MainActivity extends Activity {
                     return;
                 }
 
-                ui.post(new Runnable() {
-                    @Override public void run() {
-                        statusTv.setText("正在校验安装包…");
-                        pctTv.setText("100%");
-                    }
-                });
-
-                boolean hashPass = true;
-                if (info.sha256 != null && info.sha256.length() == 64) {
-                    String actualSha = calculateFileSha256(apkFile);
-                    if (!info.sha256.equalsIgnoreCase(actualSha)) {
-                        hashPass = false;
-                        apkFile.delete();
-                    }
-                }
-
-                final boolean finalHashPass = hashPass;
+                // 校验已在候选循环内逐个源完成（不通过的源已被丢弃并换下一个）
                 ui.post(new Runnable() {
                     @Override public void run() {
                         closeDialogOverlay();
-                        if (!finalHashPass) {
-                            conDialog("安装包校验失败", "下载的文件 SHA-256 校验不通过，可能下载不完整或被篡改，已自动清理损坏文件，请重试。", "我知道了", null, null);
-                        } else {
-                            promptInstallApk(apkFile);
-                        }
+                        promptInstallApk(apkFile);
                     }
                 });
             }

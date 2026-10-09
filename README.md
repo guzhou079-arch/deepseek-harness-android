@@ -36,8 +36,7 @@
 > ⭐ **如果它帮你省了时间，给个 Star 是最好的反馈** —— 也让我知道继续维护值不值得。
 > 用着有问题、或者有想要的功能，欢迎开 [Issue](https://github.com/guzhou079-arch/deepseek-harness-android/issues)。
 
-**下载安装**：见本仓库 **Releases**（GitHub 与 Gitee 两边内容一致，用哪个都行；
-每个 Release 的说明里带该 APK 的 SHA-256，装前可以核对）。
+**下载安装**：见本仓库 **Releases**（每个 Release 的说明里带该 APK 的 SHA-256，装前可以核对）。
 
 **文档**：[安装与系统要求](docs/安装与要求.md) · [权限与隐私](docs/权限与隐私.md) · [常见问题](docs/常见问题.md) · [升级与救援](docs/升级与救援.md) · [自建环境与出包](docs/自建环境与出包.md)
 
