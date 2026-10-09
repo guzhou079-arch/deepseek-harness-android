@@ -36,7 +36,17 @@
 > ⭐ **如果它帮你省了时间，给个 Star 是最好的反馈** —— 也让我知道继续维护值不值得。
 > 用着有问题、或者有想要的功能，欢迎开 [Issue](https://github.com/guzhou079-arch/deepseek-harness-android/issues)。
 
-**下载安装**：见本仓库 **Releases**（每个 Release 的说明里带该 APK 的 SHA-256，装前可以核对）。
+### 下载安装（三步）
+
+1. 打开 **[Releases](https://github.com/guzhou079-arch/deepseek-harness-android/releases/latest)**，下载最新的 `DeepSeekHarness-vX.Y-dist.apk`（约 95 MB，Android 8.0 及以上）；
+2. 安装后按首次引导给权限（无障碍、通知、悬浮窗等，可随时在系统设置里收回）；
+3. 在设置页填入自己的模型 API Key 就能开聊 —— 不用装 Termux、不用 root、不用连电脑。
+
+> 🌐 **国内直连 GitHub 打不开？** 每个 Release 说明的**第一条**就是**加速直链**
+> （`ghproxy` 等镜像前缀 + 官方直链，哪个通用哪个）；也可以自己给官方直链加前缀：
+> `https://ghproxy.net/` 、 `https://ghfast.top/` 、 `https://gh-proxy.com/`。
+
+每个 Release 的说明里带该 APK 的 **SHA-256**，装前可以核对。
 
 **文档**：[安装与系统要求](docs/安装与要求.md) · [权限与隐私](docs/权限与隐私.md) · [常见问题](docs/常见问题.md) · [升级与救援](docs/升级与救援.md) · [自建环境与出包](docs/自建环境与出包.md)
 
