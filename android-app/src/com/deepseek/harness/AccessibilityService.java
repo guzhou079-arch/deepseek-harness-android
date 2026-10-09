@@ -201,12 +201,16 @@ public class AccessibilityService extends android.accessibilityservice.Accessibi
                     ss.bind(new InetSocketAddress("127.0.0.1", port));
                     serverSocket = ss;
                     Log.i(TAG, "a11y server listening on " + port);
-                    while (!Thread.currentThread().isInterrupted()) {
+                    while (!Thread.currentThread().isInterrupted() && !ss.isClosed()) {
                         try {
                             final Socket s = ss.accept();
                             handleConnection(s);
                         } catch (Throwable t) {
-                            try { Thread.sleep(100); } catch (Throwable ignored) {}
+                            if (ss.isClosed()) break;
+                            try { Thread.sleep(100); } catch (InterruptedException interrupted) {
+                                Thread.currentThread().interrupt();
+                                break;
+                            }
                         }
                     }
                 } catch (Throwable t) {
@@ -260,14 +264,13 @@ public class AccessibilityService extends android.accessibilityservice.Accessibi
                 try {
                     s.setSoTimeout(SOCKET_TIMEOUT_MS);
                     InputStream in = s.getInputStream();
-                    StringBuilder head = new StringBuilder();
-                    int c;
-                    while ((c = in.read()) != -1) {
-                        head.append((char) c);
-                        if (head.length() >= 4 && head.substring(head.length() - 4).equals("\r\n\r\n")) break;
-                        if (head.length() > 8192) break;
+                    String headStr = com.deepseek.harness.vscreen.LocalHttpFence.readHeader(in);
+                    int rejection = com.deepseek.harness.vscreen.LocalHttpFence.rejection(headStr, s.getLocalPort(), s.getLocalPort() - 101);
+                    if (rejection != 0) {
+                        com.deepseek.harness.vscreen.LocalHttpFence.reject(s.getOutputStream(), rejection);
+                        s.close();
+                        return;
                     }
-                    String headStr = head.toString();
                     String path = parsePath(headStr);
                     // 读取 POST body（/gesture 传 JSON）
                     String body = "";
@@ -278,7 +281,12 @@ public class AccessibilityService extends android.accessibilityservice.Accessibi
                             String v = headStr.substring(ci + 15, eol).trim();
                             try {
                                 int len = Integer.parseInt(v);
-                                if (len > 0 && len < 262144) {
+                                if (len >= 262144) {
+                                    com.deepseek.harness.vscreen.LocalHttpFence.reject(s.getOutputStream(), 413);
+                                    s.close();
+                                    return;
+                                }
+                                if (len > 0) {
                                     byte[] buf = new byte[len];
                                     int off = 0;
                                     while (off < len) {
@@ -286,9 +294,17 @@ public class AccessibilityService extends android.accessibilityservice.Accessibi
                                         if (n < 0) break;
                                         off += n;
                                     }
+                                    if (off != len) {
+                                        com.deepseek.harness.vscreen.LocalHttpFence.reject(s.getOutputStream(), 400);
+                                        s.close();
+                                        return;
+                                    }
                                     body = new String(buf, 0, off, "UTF-8");
                                 }
-                            } catch (Throwable ignored) {
+                            } catch (NumberFormatException invalid) {
+                                com.deepseek.harness.vscreen.LocalHttpFence.reject(s.getOutputStream(), 400);
+                                s.close();
+                                return;
                             }
                         }
                     }

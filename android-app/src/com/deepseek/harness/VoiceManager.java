@@ -15,7 +15,7 @@ import android.speech.tts.TextToSpeech;
 import android.speech.tts.UtteranceProgressListener;
 import android.util.Log;
 
-import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -160,20 +160,20 @@ public class VoiceManager {
 
     private synchronized void notifyStateChange(String state, String message) {
         this.currentState = state;
-        for (VoiceCallback cb : callbacks) {
+        for (VoiceCallback cb : new ArrayList<VoiceCallback>(callbacks)) {
             try { cb.onStateChange(state, message); } catch (Throwable ignored) {}
         }
     }
 
     private synchronized void notifyResult(String text, boolean isFinal) {
-        for (VoiceCallback cb : callbacks) {
+        for (VoiceCallback cb : new ArrayList<VoiceCallback>(callbacks)) {
             try { cb.onResult(text, isFinal); } catch (Throwable ignored) {}
         }
     }
 
     private synchronized void notifyError(String error) {
         this.lastError = error;
-        for (VoiceCallback cb : callbacks) {
+        for (VoiceCallback cb : new ArrayList<VoiceCallback>(callbacks)) {
             try { cb.onError(error); } catch (Throwable ignored) {}
         }
     }
@@ -653,12 +653,14 @@ public class VoiceManager {
             public void run() {
                 try {
                     int port = getEnginePort();
-                    String sessionId = getOrCreateSession(port);
-                    if (sessionId != null) {
-                        String payload = "{\"sessionId\":\"" + sessionId + "\",\"mode\":\"queue\",\"content\":[{\"type\":\"text\",\"text\":\"" + escape(promptText) + "\"}]}";
-                        rpc(port, "session.prompt", payload);
-                        Log.i(TAG, "Voice prompt submitted to DSH successfully: " + promptText);
+                    File logFile = new File(context.getFilesDir(), "dsh-web.log");
+                    org.json.JSONObject created = EngineRpc.call(logFile, port, "session/create", new org.json.JSONObject());
+                    String sessionId = created.getString("sessionId");
+                    org.json.JSONObject accepted = EngineRpc.call(logFile, port, "session/prompt", EngineRpc.prompt(sessionId, promptText));
+                    if (!accepted.optBoolean("accepted", false)) {
+                        throw new java.io.IOException("voice prompt was not accepted");
                     }
+                    Log.i(TAG, "Voice prompt submitted to DSH successfully: " + promptText);
                 } catch (Throwable t) {
                     Log.w(TAG, "submitVoiceCommand error", t);
                 }
@@ -675,47 +677,6 @@ public class VoiceManager {
             }
         } catch (Throwable ignored) {}
         return 3080;
-    }
-
-    private String getOrCreateSession(int port) {
-        String json = rpc(port, "session.create", "{}");
-        if (json == null) return null;
-        int i = json.indexOf("\"sessionId\":\"");
-        if (i >= 0) {
-            int q1 = i + "\"sessionId\":\"".length();
-            int q2 = json.indexOf('"', q1);
-            if (q2 > q1) return json.substring(q1, q2);
-        }
-        return null;
-    }
-
-    private String rpc(int port, String method, String payloadJson) {
-        try {
-            URL url = new URL("http://127.0.0.1:" + port + "/api/" + method);
-            HttpURLConnection c = (HttpURLConnection) url.openConnection();
-            c.setRequestMethod("POST");
-            c.setRequestProperty("Content-Type", "application/json");
-            c.setDoOutput(true);
-            c.setConnectTimeout(3000);
-            c.setReadTimeout(5000);
-            String rpcId = "voice-" + System.currentTimeMillis();
-            String body = "{\"type\":\"client-request\",\"rpcId\":\"" + rpcId + "\",\"method\":\"" + method
-                    + "\",\"payload\":" + (payloadJson == null || payloadJson.isEmpty() ? "{}" : payloadJson) + "}";
-            c.getOutputStream().write(body.getBytes("UTF-8"));
-            int code = c.getResponseCode();
-            if (code >= 200 && code < 300) {
-                InputStream in = c.getInputStream();
-                ByteArrayOutputStream out = new ByteArrayOutputStream();
-                byte[] b = new byte[4096];
-                int n;
-                while ((n = in.read(b)) > 0) out.write(b, 0, n);
-                in.close();
-                c.disconnect();
-                return new String(out.toByteArray(), "UTF-8");
-            }
-            c.disconnect();
-        } catch (Throwable ignored) {}
-        return null;
     }
 
     // ==================== 热词唤醒开关 (Hotword Wake-Up) ====================

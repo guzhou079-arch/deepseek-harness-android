@@ -211,6 +211,9 @@ public class MainActivity extends Activity {
     // 安全模式的做法：把 profile 的用户层整体旁置 + 恢复出厂文件，**不动用户数据**（会话/凭证/设置全保留）。
     private static final String KEY_SAFE_MODE = "safe_mode_active";
     private static final String KEY_BOOT_FAILS = "engine_boot_failures";
+    /** 旁置目录名只允许 enterSafeMode 生成的形状（exitSafeMode 出口再核一次 canonical 父目录）。 */
+    private static final java.util.regex.Pattern SAFE_STASH_NAME =
+            java.util.regex.Pattern.compile("web\\.userlayer-[0-9]{8}-[0-9]{6}");
     /** 连续启动失败多少次要提醒用户可用安全模式。 */
     private static final int BOOT_FAIL_HINT_AT = 2;
 
@@ -219,6 +222,7 @@ public class MainActivity extends Activity {
     public static volatile boolean overlayForeground = true;
 
     private WebView webView;
+    private volatile boolean trustedWebDocument = false;
     /** v1.13.11：页面实测背景色（0 = 还没取到，壳底色用 cBg() 兜底）。见 refreshPageBackground()。 */
     private volatile int pageBgColor = 0;
 
@@ -327,7 +331,7 @@ public class MainActivity extends Activity {
         WebSettings ws = webView.getSettings();
         ws.setJavaScriptEnabled(true);
         ws.setDomStorageEnabled(true);
-        ws.setAllowFileAccess(true);
+        ws.setAllowFileAccess(false);
         ws.setDatabaseEnabled(true);
         ws.setUseWideViewPort(true);
         ws.setLoadWithOverviewMode(true);
@@ -352,14 +356,11 @@ public class MainActivity extends Activity {
              * @return true = 已外发（WebView 不再加载）；false = 交回 WebView 原地加载。
              */
             private boolean openExternally(android.net.Uri u) {
-                if (u == null) return false;
+                if (u == null) return true;
                 String scheme = u.getScheme();
-                if (scheme == null) return false;
-                boolean httpish = "http".equals(scheme) || "https".equals(scheme);
-                String host = u.getHost();
-                boolean loopback = httpish && (host == null
-                        || "127.0.0.1".equals(host) || "localhost".equals(host) || "::1".equals(host));
-                if (loopback) return false;
+                if (com.deepseek.harness.vscreen.LocalHttpFence.isLoopbackUrl(u.toString(), enginePort)) return false;
+                if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)
+                        && !"mailto".equalsIgnoreCase(scheme) && !"tel".equalsIgnoreCase(scheme)) return true;
                 try {
                     Intent ext = new Intent(Intent.ACTION_VIEW, u);
                     ext.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -378,32 +379,73 @@ public class MainActivity extends Activity {
                     startActivity(chooser);
                     return true;
                 } catch (Throwable t) {
-                    // 没有能处理该地址的应用（或系统拒绝）→ 退回原地加载，避免白屏
-                    return false;
+                    conToast("无法打开外部链接");
+                    return true;
                 }
             }
 
             @Override
             public boolean shouldOverrideUrlLoading(WebView view,
                                                     android.webkit.WebResourceRequest request) {
-                return request != null && openExternally(request.getUrl());
+                if (request == null) return true;
+                if (!request.isForMainFrame()) {
+                    // 子框架导航用同一套「子资源」判据：blob:/data: 预览与远程 iframe 放行
+                    // （它们跨源，拿不到主文档的原生桥），只拦本地特权协议。
+                    return !resourceAllowed(request.getUrl().toString(), false);
+                }
+                return openExternally(request.getUrl());
             }
 
             @Override
             @SuppressWarnings("deprecation")
             public boolean shouldOverrideUrlLoading(WebView view, String url) {
-                if (url == null) return false;
+                if (url == null) return true;
                 try {
                     return openExternally(android.net.Uri.parse(url));
                 } catch (Throwable t) {
-                    return false;
+                    return true;
                 }
             }
             //#endregion
 
+            //#region dsh-android-patch v7 (2026-10-09 审计第三批)：资源放行收窄到「子资源」
+            // 背景：第二批把所有非本实例回环的资源一律 403，把 blob:/data: 也一起挡了 ——
+            // 而文档预览正是拿 URL.createObjectURL(...) 得到的 blob: URL 当 iframe src
+            // （dsh-client-ui-sidebar-documentpreview/lib/client.js:3979 HTML、:4680 图片/PDF、
+            //  :1695 关联 css/js），于是预览整块失效；远程图片也没理由被挡。
+            // 判据：**子资源本来拿不到主文档的原生桥**（跨源子框架受同源策略限制；sandbox 不带
+            // allow-same-origin 的框架是不透明源），真正的门禁是主框架导航 + 原生侧
+            // trustedWebDocument 复查。所以这里只拦「能碰本地文件/特权」的协议。
+            // 回滚：把 guardResource 换回「非回环即 403」，并删掉本 region。
+            private boolean resourceAllowed(String url, boolean mainFrame) {
+                // 判据放在 LocalHttpFence 里（纯字符串实现），这样 JVM 夹具能直接测。
+                return com.deepseek.harness.vscreen.LocalHttpFence.resourceAllowed(url, mainFrame, enginePort);
+            }
+
+            private android.webkit.WebResourceResponse guardResource(String url, boolean mainFrame) {
+                if (resourceAllowed(url, mainFrame)) return null;
+                return new android.webkit.WebResourceResponse("text/plain", "UTF-8", 403, "Forbidden",
+                        java.util.Collections.<String, String>emptyMap(), new java.io.ByteArrayInputStream(new byte[0]));
+            }
+            //#endregion
+
+            @Override
+            public android.webkit.WebResourceResponse shouldInterceptRequest(WebView view, android.webkit.WebResourceRequest request) {
+                if (request == null) return null;
+                return guardResource(request.getUrl().toString(), request.isForMainFrame());
+            }
+
+            @Override
+            @SuppressWarnings("deprecation")
+            public android.webkit.WebResourceResponse shouldInterceptRequest(WebView view, String url) {
+                return guardResource(url, false);
+            }
+
             @Override
             public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
                 super.onPageStarted(view, url, favicon);
+                trustedWebDocument = com.deepseek.harness.vscreen.LocalHttpFence.isLoopbackUrl(url, enginePort);
+                if (!trustedWebDocument) { view.stopLoading(); return; }
                 injectAbortSignalAny(view);
             }
 
@@ -422,6 +464,7 @@ public class MainActivity extends Activity {
 
             @Override
             public void onPageFinished(WebView view, String url) {
+                if (!trustedWebDocument || !com.deepseek.harness.vscreen.LocalHttpFence.isLoopbackUrl(url, enginePort)) return;
                 errorRetries = 0;
                 // v1.13.11：页面底色决定状态栏/导航栏颜色（前端主题可独立于系统设置），
                 // 且主题可能在页面挂载后才被前端插件应用 → 多试几次，取到即刷新。
@@ -460,14 +503,17 @@ public class MainActivity extends Activity {
             webView.addJavascriptInterface(new Object() {
                 /** 客户端插件 dsh-android-console 拉状态用（返回 JSON 字符串）。 */
                 @android.webkit.JavascriptInterface
-                public String ctlState() { return ctlStateJson(); }
+                public String ctlState() { return trustedWebDocument ? ctlStateJson() : "{\"error\":\"untrusted document\"}"; }
 
                 /** 客户端插件 dsh-android-console 发动作用；动作在主线程执行，这里立刻回。 */
                 @android.webkit.JavascriptInterface
-                public String ctlAct(String id, String arg) { return ctlAction(id, arg); }
+                public String ctlAct(String id, String arg) {
+                    return trustedWebDocument ? ctlAction(id, arg) : "{\"ok\":false,\"msg\":\"untrusted document\"}";
+                }
 
                 @android.webkit.JavascriptInterface
                 public void onBg(String css) {
+                    if (!trustedWebDocument) return;
                     final int c = parseCssColor(css);
                     if (c == 0) return;
                     ui.post(new Runnable() { @Override public void run() {
@@ -618,6 +664,9 @@ public class MainActivity extends Activity {
         } else {
             showPermissionScreen();
         }
+        ui.post(new Runnable() {
+            @Override public void run() { handleNotificationIntent(getIntent()); }
+        });
     }
 
     @Override
@@ -628,6 +677,7 @@ public class MainActivity extends Activity {
             conToast("正在通过桌面快捷方式进入安全模式…");
             conSafeModeNow();
         }
+        handleNotificationIntent(intent);
     }
 
     private void initDynamicShortcuts() {
@@ -1243,23 +1293,9 @@ public class MainActivity extends Activity {
     private int cGreen() { return getColor(R.color.status_green); }
     private int cRed() { return getColor(R.color.status_red); }
 
-    private long deleteRecursive(File f) {
-        if (f == null || !f.exists()) return 0;
-        long total = 0;
-        if (f.isDirectory()) {
-            File[] children = f.listFiles();
-            if (children != null) for (File c : children) total += deleteRecursive(c);
-        }
-        total += f.length();
-        if (!f.delete()) {
-            // 删除失败（通常是目录仍非空，因子项删除失败）。再递归扫一遍重试。
-            if (f.isDirectory()) {
-                File[] children = f.listFiles();
-                if (children != null) for (File c : children) total += deleteRecursive(c);
-            }
-            f.delete();
-        }
-        return total;
+    private void deleteRecursive(File f) {
+        try { SafeFiles.deleteTree(f); }
+        catch (IOException failed) { throw new IllegalStateException("Cannot safely delete target", failed); }
     }
 
     // ② ABI 检测：node 引擎仅 arm64，非 arm64 设备会启动失败——尽早提示用户
@@ -3363,14 +3399,13 @@ public class MainActivity extends Activity {
                     InputStream in = s.getInputStream();
                     // 1) 读请求行 + 请求头，解析路径和 Content-Length
                     int contentLength = 0;
-                    StringBuilder head = new StringBuilder();
-                    int c;
-                    while ((c = in.read()) != -1) {
-                        head.append((char) c);
-                        if (head.length() >= 4 && head.substring(head.length() - 4).equals("\r\n\r\n")) break;
-                        if (head.length() > 8192) break; // 防异常大头部
+                    String h = com.deepseek.harness.vscreen.LocalHttpFence.readHeader(in);
+                    int rejection = com.deepseek.harness.vscreen.LocalHttpFence.rejection(h, s.getLocalPort(), enginePort);
+                    if (rejection != 0) {
+                        com.deepseek.harness.vscreen.LocalHttpFence.reject(s.getOutputStream(), rejection);
+                        s.close();
+                        return;
                     }
-                    String h = head.toString();
                     // 请求行形如: POST /notify HTTP/1.1
                     String path = "/notify";
                     int sp1 = h.indexOf(' ');
@@ -3392,6 +3427,11 @@ public class MainActivity extends Activity {
                             contentLength = Integer.parseInt(h.substring(clIdx + 15, eol).trim());
                         } catch (Exception ignored) {}
                     }
+                    if (contentLength >= 65536) {
+                        com.deepseek.harness.vscreen.LocalHttpFence.reject(s.getOutputStream(), 413);
+                        s.close();
+                        return;
+                    }
                     // 2) 读取正文（JSON body）
                     StringBuilder body = new StringBuilder();
                     if (contentLength > 0 && contentLength < 65536) {
@@ -3401,6 +3441,11 @@ public class MainActivity extends Activity {
                             int n = in.read(buf, off, contentLength - off);
                             if (n < 0) break;
                             off += n;
+                        }
+                        if (off != contentLength) {
+                            com.deepseek.harness.vscreen.LocalHttpFence.reject(s.getOutputStream(), 400);
+                            s.close();
+                            return;
                         }
                         body.append(new String(buf, 0, off, "UTF-8"));
                     } else {
@@ -3432,8 +3477,10 @@ public class MainActivity extends Activity {
                         respBody = handleVoiceRequest(fullPath, body.toString());
                     } else if (path.startsWith("/tts")) {         // 语音播报 (TTS)
                         respBody = handleTtsRequest(fullPath, body.toString());
-                    } else {
+                    } else if (path.startsWith("/notify")) {   // 发送通知
                         respBody = handleNotifyRequest(body.toString());
+                    } else {
+                        respBody = "{\"ok\":false,\"error\":\"未知路径: " + path + "\"}";
                     }
                     BufferedWriter w = new BufferedWriter(new OutputStreamWriter(s.getOutputStream(), "UTF-8"));
                     w.write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: "
@@ -4074,8 +4121,12 @@ public class MainActivity extends Activity {
             title = queryField(raw, "title");
             text = queryField(raw, "text");
         }
+        // 如果 title 和 text 都为空，直接返回不发通知
+        if (title.isEmpty() && text.isEmpty()) {
+            return "{\"ok\":true,\"skipped\":true,\"reason\":\"title 和 text 均为空，已跳过通知\"}";
+        }
         if (title.isEmpty()) title = "DeepSeek Harness";
-        if (text.isEmpty()) text = "(空消息)";
+        if (text.isEmpty()) text = " ";  // 至少给一个空格，避免显示"(空消息)"
         boolean granted = checkSelfPermission("android.permission.POST_NOTIFICATIONS")
                 == PackageManager.PERMISSION_GRANTED;
         if (granted) {
@@ -4466,7 +4517,12 @@ public class MainActivity extends Activity {
                     int rc = p.waitFor();
                     Log.i(TAG, "boot selfcheck rc=" + rc);
                     if (rc != 0) {
-                        postNotification("DSH 自检发现问题（" + rc + " 项）", sb.toString().trim());
+                        Log.w(TAG, "boot selfcheck found " + rc + " issues:\n" + sb.toString().trim());
+                        // 只在严重问题时才通知（超过 5 项失败）
+                        if (rc > 5) {
+                            postNotification("DSH 自检发现严重问题（" + rc + " 项）", 
+                                "建议重启 App 或查看日志。详情：\n" + sb.toString().trim());
+                        }
                     }
                 } catch (Throwable t) {
                     Log.w(TAG, "boot selfcheck failed", t);
@@ -4477,18 +4533,30 @@ public class MainActivity extends Activity {
 
     /** 发一条 AI 通知（仅需 POST_NOTIFICATIONS，无需 Shizuku/root）。 */
     private void postNotification(String title, String text) {
+        if (text == null || text.trim().isEmpty()) return;
+        try {
+            NotificationArchive.save(getFilesDir(), title, text);
+        } catch (Exception e) {
+            Log.w(TAG, "notification archive failed", e);
+        }
         try {
             NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
             if (nm == null) return;
             if (Build.VERSION.SDK_INT >= 26) {
                 NotificationChannel ch = new NotificationChannel(NOTIFY_CHANNEL_ID, NOTIFY_CHANNEL_NAME,
-                        NotificationManager.IMPORTANCE_DEFAULT);
+                        NotificationManager.IMPORTANCE_HIGH);  // HIGH 才会弹横幅
                 ch.setDescription("AI 任务完成/需要你关注时推送");
+                ch.enableVibration(true);  // 启用震动
+                ch.setShowBadge(true);     // 显示角标
                 nm.createNotificationChannel(ch);
             }
             Intent i = new Intent(this, MainActivity.class);
             i.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
-            android.app.PendingIntent pi = android.app.PendingIntent.getActivity(this, 1, i,
+            // 冷启动/热启动统一查看完整通知，不触发模型。
+            i.putExtra("notification_title", title == null ? "通知" : title.substring(0, Math.min(title.length(), 1024)));
+            i.putExtra("notification_content", text.substring(0, Math.min(text.length(), 65536)));
+            android.app.PendingIntent pi = android.app.PendingIntent.getActivity(this, 
+                    (int)(System.currentTimeMillis() & 0x7fffffff), i,  // 使用唯一 requestCode
                     android.app.PendingIntent.FLAG_UPDATE_CURRENT | android.app.PendingIntent.FLAG_IMMUTABLE);
             Notification.Builder b;
             if (Build.VERSION.SDK_INT >= 26) {
@@ -4498,6 +4566,7 @@ public class MainActivity extends Activity {
             }
             Notification n = b.setContentTitle(title)
                     .setContentText(text)
+                    .setStyle(new Notification.BigTextStyle().bigText(text))
                     .setSmallIcon(R.drawable.ic_launcher)
                     .setContentIntent(pi)
                     .setAutoCancel(true)
@@ -4817,6 +4886,15 @@ public class MainActivity extends Activity {
         try {
             File parent = target.getParentFile();
             if (parent != null && parent.exists() && !parent.canWrite()) parent.setWritable(true, true);
+            try {
+                android.system.StructStat stat = Os.lstat(target.getAbsolutePath());
+                if ((stat.st_mode & android.system.OsConstants.S_IFMT) == android.system.OsConstants.S_IFLNK) {
+                    if (!target.delete()) throw new IOException("Cannot unlink payload target");
+                    return;
+                }
+            } catch (android.system.ErrnoException absent) {
+                if (absent.errno != android.system.OsConstants.ENOENT) throw absent;
+            }
             if (target.isDirectory()) { deleteRecursive(target); return; }
             if (target.exists()) {
                 if (target.canWrite()) return;
@@ -5595,60 +5673,26 @@ public class MainActivity extends Activity {
         }, "scheduled-exec").start();
     }
 
-    /** 调 DSH API 创建会话，返回 sessionId（失败返回 null）。 */
+    /** Create a session through the current authenticated RPC protocol. */
     private String createSession() {
-        String json = rpcCall("session.create", "{}");
-        if (json == null) return null;
-        int i = json.indexOf("\"sessionId\":\"");
-        if (i >= 0) {
-            int q1 = i + "\"sessionId\":\"".length();
-            int q2 = json.indexOf('"', q1);
-            if (q2 > q1) return json.substring(q1, q2);
-        }
-        return null;
-    }
-
-    /** 调 DSH API 发送消息（AI 开始执行任务）。 */
-    private boolean sendPrompt(String sessionId, String text) {
-        String payload = "{\"sessionId\":\"" + sessionId + "\",\"mode\":\"queue\",\"content\":[{\"type\":\"text\",\"text\":\"" + escapeJson(text) + "\"}]}";
-        String json = rpcCall("session.prompt", payload);
-        return json != null && json.contains("\"ok\":true");
-    }
-
-    /** DSH RPC 调用：标准协议 {"type":"client-request","rpcId":"...","method":"...","payload":{...}} */
-    private String rpcCall(String method, String payloadJson) {
         try {
-            URL url = new URL(homeUrl() + "/api/" + method);
-            HttpURLConnection c = (HttpURLConnection) url.openConnection();
-            c.setRequestMethod("POST");
-            c.setRequestProperty("Content-Type", "application/json");
-            c.setDoOutput(true);
-            c.setConnectTimeout(3000);
-            c.setReadTimeout(5000);
-            String rpcId = "sched-" + System.currentTimeMillis();
-            String body = "{\"type\":\"client-request\",\"rpcId\":\"" + rpcId + "\",\"method\":\"" + method
-                    + "\",\"payload\":" + (payloadJson == null || payloadJson.isEmpty() ? "{}" : payloadJson) + "}";
-            c.getOutputStream().write(body.getBytes("UTF-8"));
-            int code = c.getResponseCode();
-            if (code >= 200 && code < 300) {
-                InputStream in = c.getInputStream();
-                ByteArrayOutputStream out = new ByteArrayOutputStream();
-                byte[] b = new byte[4096];
-                int n;
-                while ((n = in.read(b)) > 0) out.write(b, 0, n);
-                in.close();
-                c.disconnect();
-                return new String(out.toByteArray(), "UTF-8");
-            }
-            c.disconnect();
-        } catch (Throwable t) {
-            Log.w(TAG, "rpc " + method + " error", t);
+            return EngineRpc.call(conLogFile(), enginePort, "session/create", new org.json.JSONObject())
+                    .getString("sessionId");
+        } catch (Exception e) {
+            Log.w(TAG, "scheduled session creation failed", e);
+            return null;
         }
-        return null;
     }
 
-    private String escapeJson(String s) {
-        return s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r");
+    /** Submit a scheduled task; accepted means queued, not completed. */
+    private boolean sendPrompt(String sessionId, String text) {
+        try {
+            return EngineRpc.call(conLogFile(), enginePort, "session/prompt", EngineRpc.prompt(sessionId, text))
+                    .optBoolean("accepted", false);
+        } catch (Exception e) {
+            Log.w(TAG, "scheduled prompt failed", e);
+            return false;
+        }
     }
 
     /** node 看门狗：node 进程死亡且服务不可用时自动重启引擎并刷新页面 */
@@ -5788,6 +5832,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        trustedWebDocument = false;
         if (webView != null) webView.destroy();
         super.onDestroy();
     }
@@ -6095,7 +6140,9 @@ public class MainActivity extends Activity {
     /** 桥入口：执行一个控制台动作。动作本身异步，立刻回 ok（失败会 Toast）。 */
     private String ctlAction(final String id, final String arg) {
         try {
-            ui.post(new Runnable() { @Override public void run() { ctlActionOnUi(id, arg); } });
+            ui.post(new Runnable() { @Override public void run() {
+                if (trustedWebDocument) ctlActionOnUi(id, arg);
+            } });
             return "{\"ok\":true}";
         } catch (Throwable t) {
             return "{\"ok\":false,\"msg\":" + org.json.JSONObject.quote(String.valueOf(t.getMessage())) + "}";
@@ -6122,6 +6169,7 @@ public class MainActivity extends Activity {
             if ("backup.export".equals(id)) { conBackupExport(); return; }
             if ("backup.import".equals(id)) { conBackupImport(); return; }
             if ("snapshot".equals(id)) { triggerSnapshotBackup(); return; }
+            if ("notification.history".equals(id)) { showNotificationHistory(); return; }
             if ("log.view".equals(id)) { conViewLog(); return; }
             if ("log.share".equals(id)) { conShareLog(); return; }
             if ("log.clear".equals(id)) { conClearLogNow(); return; }
@@ -8444,6 +8492,24 @@ public class MainActivity extends Activity {
                 return "没有找到旁置目录，已直接关闭安全模式";
             }
             File stash = new File(dir.getParentFile(), stashName);
+            // 2026-10-09 审计第三批：旁置目录名来自 prefs，必须只认 enterSafeMode 自己造的形状
+            // （web.userlayer-yyyyMMdd-HHmmss），并核对 canonical 父目录 —— 否则一个被改过的
+            // 首选项/备份就能让这里去读任意目录，再把内容覆盖回 profile。
+            if (!SAFE_STASH_NAME.matcher(stashName).matches()) {
+                setSafeModeFlag(false);
+                return "旁置目录名不像本机生成（" + stashName + "），已直接关闭安全模式";
+            }
+            try {
+                File stashParent = stash.getCanonicalFile().getParentFile();
+                File profileParent = dir.getCanonicalFile().getParentFile();
+                if (stashParent == null || profileParent == null || !stashParent.equals(profileParent)) {
+                    setSafeModeFlag(false);
+                    return "旁置目录不在 profile 同级，已直接关闭安全模式";
+                }
+            } catch (Throwable t) {
+                setSafeModeFlag(false);
+                return "无法核对旁置目录位置，已直接关闭安全模式";
+            }
             if (!stash.exists()) {
                 setSafeModeFlag(false);
                 return "旁置目录已不存在（" + stashName + "），已直接关闭安全模式";
@@ -8582,13 +8648,14 @@ public class MainActivity extends Activity {
         return 1;
     }
 
-    /** 符号链接判定：canonical 路径与「父目录 + 文件名」不一致即为链接。 */
-    private boolean isSymlink(File f) {
+    /** lstat does not follow self-referential or dangling symbolic links. */
+    private boolean isSymlink(File f) throws IOException {
         try {
-            File p = f.getParentFile();
-            if (p == null) return false;
-            return !f.getCanonicalPath().equals(new File(p.getCanonicalPath(), f.getName()).getPath());
-        } catch (Throwable t) { return false; }
+            android.system.StructStat stat = Os.lstat(f.getAbsolutePath());
+            return (stat.st_mode & android.system.OsConstants.S_IFMT) == android.system.OsConstants.S_IFLNK;
+        } catch (android.system.ErrnoException failed) {
+            throw new IOException("Cannot inspect file before backup", failed);
+        }
     }
 
     private void conBackupImport() {
@@ -8612,19 +8679,25 @@ public class MainActivity extends Activity {
     private void conImportNow(final Uri uri) {
         conToast("正在导入…");
         new Thread(new Runnable() { @Override public void run() {
+            File candidate = null;
             final String err; int files = 0;
             try {
+                candidate = stageBackup(uri);
+                BackupValidator.validate(new FileInputStream(candidate), new File(payloadDir(), "dshhome"));
                 killEngineNow();
                 long deadline = System.currentTimeMillis() + 8000;
                 while (System.currentTimeMillis() < deadline && portListening(enginePort)) {
                     try { Thread.sleep(200); } catch (InterruptedException ignored) {}
                 }
-                files = readBackupZip(uri);
+                files = readBackupZip(candidate);
                 err = null;
             } catch (Throwable t) {
                 Log.e(TAG, "backup import", t);
-                ui.post(new Runnable() { @Override public void run() { conToast("导入失败：" + t.getMessage()); } });
+                // readBackupZip 内部已把这次写到一半的文件还原/删除（见 BackupRestore.rollback）
+                ui.post(new Runnable() { @Override public void run() { conToast("导入失败，已回滚本次改动：" + t.getMessage()); } });
                 return;
+            } finally {
+                if (candidate != null) candidate.delete();
             }
             final int n = files;
             ui.post(new Runnable() { @Override public void run() {
@@ -8636,65 +8709,127 @@ public class MainActivity extends Activity {
         }}, "backup-import").start();
     }
 
-    /** 读 zip 并还原。返回还原的文件数。 */
-    private int readBackupZip(Uri uri) throws Exception {
+    private File stageBackup(Uri uri) throws Exception {
+        File file = File.createTempFile("backup-import-", ".zip", getCacheDir());
+        boolean complete = false;
+        try {
+            InputStream in = getContentResolver().openInputStream(uri);
+            if (in == null) throw new IOException("无法读取所选文件");
+            try {
+                FileOutputStream out = new FileOutputStream(file);
+                try {
+                    byte[] buffer = new byte[65536];
+                    long size = 0;
+                    int n;
+                    while ((n = in.read(buffer)) != -1) {
+                        size += n;
+                        if (size > 2L * 1024L * 1024L * 1024L) throw new IOException("备份文件过大");
+                        out.write(buffer, 0, n);
+                    }
+                } finally { out.close(); }
+            } finally { in.close(); }
+            complete = true;
+            return file;
+        } finally { if (!complete) file.delete(); }
+    }
+
+    /** Restore only a private, fully validated ZIP copy.
+     *  2026-10-09 审计第四批：不再“边读边覆盖、偏好立刻生效”。
+     *  现在文件全部写完（覆盖前先把原件挪进私有回滚目录）才应用偏好；
+     *  中途任何异常 → 还原被覆盖的文件、删掉新建的文件，偏好一个都不动。 */
+    private int readBackupZip(File candidate) throws Exception {
         File base = payloadDir();
+        File home = new File(base, "dshhome");
         byte[] buf = new byte[64 * 1024];
         int n = 0;
         boolean sawManifest = false;
-        InputStream raw = getContentResolver().openInputStream(uri);
-        if (raw == null) throw new IOException("无法读取所选文件");
-        ZipInputStream zis = new ZipInputStream(raw);
+        String prefsText = null;
+        BackupRestore restore = new BackupRestore(home, new File(getCacheDir(), "backup-rollback"));
         try {
-            ZipEntry e;
-            while ((e = zis.getNextEntry()) != null) {
-                String name = e.getName();
-                if (name.endsWith("/")) { zis.closeEntry(); continue; }
-                if ("manifest.json".equals(name)) { sawManifest = true; zis.closeEntry(); continue; }
-                if ("prefs.txt".equals(name)) {
-                    java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
-                    int r; while ((r = zis.read(buf)) > 0) bos.write(buf, 0, r);
-                    applyBackupPrefs(new String(bos.toByteArray(), "UTF-8"));
+            InputStream raw = new FileInputStream(candidate);
+            ZipInputStream zis = new ZipInputStream(raw);
+            try {
+                ZipEntry e;
+                while ((e = zis.getNextEntry()) != null) {
+                    String name = e.getName();
+                    if (name.endsWith("/")) { zis.closeEntry(); continue; }
+                    if ("manifest.json".equals(name)) { sawManifest = true; zis.closeEntry(); continue; }
+                    if ("prefs.txt".equals(name)) {
+                        java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+                        int r; while ((r = zis.read(buf)) > 0) bos.write(buf, 0, r);
+                        prefsText = new String(bos.toByteArray(), "UTF-8");   // 先攒着，别急着生效
+                        zis.closeEntry();
+                        continue;
+                    }
+                    if (name.startsWith("dshhome/")) {
+                        File out = restore.prepare(name.substring("dshhome/".length()));
+                        FileOutputStream fos = new FileOutputStream(out);
+                        try { int r; while ((r = zis.read(buf)) > 0) fos.write(buf, 0, r); }
+                        finally { fos.close(); }
+                        n++;
+                    }
                     zis.closeEntry();
-                    continue;
                 }
-                if (name.startsWith("dshhome/")) {
-                    File out = new File(base, name);
-                    File parent = out.getParentFile();
-                    if (parent != null && !parent.exists() && !parent.mkdirs()) throw new IOException("mkdir failed: " + parent);
-                    FileOutputStream fos = new FileOutputStream(out);
-                    try { int r; while ((r = zis.read(buf)) > 0) fos.write(buf, 0, r); }
-                    finally { fos.close(); }
-                    n++;
-                }
-                zis.closeEntry();
-            }
-        } finally { try { zis.close(); } catch (Throwable ignored) {} }
-        if (!sawManifest) throw new IOException("这不像本应用的备份包（缺少 manifest.json）");
+            } finally { try { zis.close(); } catch (Throwable ignored) {} }
+            if (!sawManifest) throw new IOException("这不像本应用的备份包（缺少 manifest.json）");
+            if (prefsText != null) applyBackupPrefs(prefsText);
+            if (!restore.commit()) Log.w(TAG, "backup rollback dir not fully removed");
+        } catch (Throwable failed) {
+            int undone = restore.rollback();
+            Log.e(TAG, "backup import rolled back " + undone + " entries", failed);
+            if (failed instanceof Exception) throw (Exception) failed;
+            throw new IOException(String.valueOf(failed));
+        }
         // 用户层已还原 → 不再处于安全模式
         setSafeModeFlag(false);
         return n;
     }
 
+    /** 备份里的 prefs 只允许改白名单内的键（BACKUP_PREF_S/I/B），且类型必须与键相符。 */
+    private static boolean backupPrefAllowed(String type, String key) {
+        String[] list;
+        if ("S".equals(type)) list = BACKUP_PREF_S;
+        else if ("I".equals(type)) list = BACKUP_PREF_I;
+        else if ("B".equals(type)) list = BACKUP_PREF_B;
+        else return false;
+        if (key == null || key.isEmpty()) return false;
+        for (String k : list) if (k.equals(key)) return true;
+        return false;
+    }
+
     private void applyBackupPrefs(String text) {
         SharedPreferences.Editor ed = prefs().edit();
         String[] lines = text.split("\n");
+        int applied = 0, skipped = 0;
         for (String line : lines) {
             if (line.isEmpty() || line.startsWith("#")) continue;
             String[] parts = line.split("\t", 3);
             if (parts.length != 3) continue;
             String type = parts[0], key = parts[1], value = parts[2];
+            // 2026-10-09 审计第三批：原来接受**任意** key —— 一份改过的备份就能写入
+            // safe_mode_active / safe_mode_stash 这类本不在导出清单里的键，等于把
+            // 「退出安全模式」那条路径的输入交给备份文件（配合旁置目录名可做路径越界）。
+            if (!backupPrefAllowed(type, key) || value.length() > 4096) { skipped++; continue; }
             try {
                 if ("S".equals(type)) ed.putString(key, value);
                 else if ("I".equals(type)) ed.putInt(key, Integer.parseInt(value.trim()));
                 else if ("B".equals(type)) ed.putBoolean(key, Boolean.parseBoolean(value.trim()));
             } catch (Throwable ignored) {}
+            applied++;
         }
         ed.apply();
+        Log.w(TAG, "backup prefs applied " + applied + ", skipped " + skipped);
     }
 
     /** 递归拷贝（rename 失败时的退路）。 */
     private void backupCopyRec(File src, File dst) throws IOException {
+        if (isSymlink(src)) {
+            File parent = dst.getParentFile();
+            if (parent != null && !parent.isDirectory() && !parent.mkdirs()) throw new IOException("mkdir failed: " + parent);
+            try { Os.symlink(Os.readlink(src.getAbsolutePath()), dst.getAbsolutePath()); }
+            catch (android.system.ErrnoException failed) { throw new IOException("Cannot copy symbolic link", failed); }
+            return;
+        }
         if (src.isDirectory()) {
             if (!dst.exists() && !dst.mkdirs()) throw new IOException("mkdir failed: " + dst);
             File[] kids = src.listFiles();
@@ -8711,15 +8846,9 @@ public class MainActivity extends Activity {
         } finally { in.close(); }
     }
 
-    /** 递归删除。 */
-    private void backupDeleteRec(File f) {
-        try {
-            if (f.isDirectory()) {
-                File[] kids = f.listFiles();
-                if (kids != null) for (File k : kids) backupDeleteRec(k);
-            }
-            f.delete();
-        } catch (Throwable ignored) {}
+    /** Delete safely without following final or nested directory symlinks. */
+    private void backupDeleteRec(File f) throws IOException {
+        SafeFiles.deleteTree(f);
     }
 
     /** 从 assets/payload.zip 把出厂的 profile 文件写回（安全模式的关键一步）。 */
@@ -8750,6 +8879,80 @@ public class MainActivity extends Activity {
             }
         } finally { zis.close(); }
         return n;
+    }
+
+    /** Display notifications without inventing a chat write endpoint. */
+    private void handleNotificationIntent(Intent intent) {
+        if (intent == null) return;
+        String title = intent.getStringExtra("notification_title");
+        String content = intent.getStringExtra("notification_content");
+        if (content == null) {
+            title = intent.getStringExtra("auto_session_title");
+            content = intent.getStringExtra("auto_session_content");
+        }
+        intent.removeExtra("notification_title");
+        intent.removeExtra("notification_content");
+        intent.removeExtra("auto_session_title");
+        intent.removeExtra("auto_session_content");
+        if (content == null || content.trim().isEmpty()) return;
+        showNotificationContent(title, content);
+    }
+
+    private void showNotificationContent(String title, String content) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(20), dp(20), dp(20), dp(16));
+        box.setBackground(cShape(cBg(), 0, 0, 16));
+        box.addView(cText(title == null ? "通知" : title, 18f, cText(), true));
+        ScrollView scroll = new ScrollView(this);
+        TextView body = cText(content, 14f, cText(), false);
+        body.setTextIsSelectable(true);
+        scroll.addView(body);
+        box.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                Math.min(dp(360), getResources().getDisplayMetrics().heightPixels / 2)));
+        Button close = cButton("关闭", false);
+        close.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { closeDialogOverlay(); }
+        });
+        box.addView(close, cTop(dp(12)));
+        showDialogOverlay(box);
+    }
+
+    private void showNotificationHistory() {
+        new Thread(new Runnable() {
+            @Override public void run() {
+                try {
+                    final org.json.JSONArray history = NotificationArchive.list(getFilesDir());
+                    ui.post(new Runnable() {
+                        @Override public void run() {
+                            ScrollView scroll = new ScrollView(MainActivity.this);
+                            LinearLayout list = new LinearLayout(MainActivity.this);
+                            list.setOrientation(LinearLayout.VERTICAL);
+                            for (int i = 0; i < history.length(); i++) {
+                                final org.json.JSONObject item = history.optJSONObject(i);
+                                if (item == null) continue;
+                                String label = new java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.US)
+                                        .format(new java.util.Date(item.optLong("time"))) + " · " + item.optString("title");
+                                Button row = cButton(label, false);
+                                row.setOnClickListener(new View.OnClickListener() {
+                                    @Override public void onClick(View v) {
+                                        showNotificationContent(item.optString("title"), item.optString("text"));
+                                    }
+                                });
+                                list.addView(row, cTop(dp(6)));
+                            }
+                            if (history.length() == 0) list.addView(cText("暂无通知", 14f, cSub(), false));
+                            scroll.addView(list);
+                            conDialogView("通知历史（最近 100 条）", scroll, null, null, "关闭");
+                        }
+                    });
+                } catch (final Exception e) {
+                    ui.post(new Runnable() {
+                        @Override public void run() { conToast("读取通知历史失败: " + e.getMessage()); }
+                    });
+                }
+            }
+        }, "notification-history").start();
     }
 
     @Override

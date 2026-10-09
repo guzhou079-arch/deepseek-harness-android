@@ -123,18 +123,12 @@ public final class ScheduleExecutor {
                 log(ctx, "创建会话失败（可能未配置 API Key）");
                 return;
             }
-            String promptResp = sendPromptRaw(ctx, sessionId, task);
-            boolean ok = promptResp != null && promptResp.contains("\"ok\":true");
-            String summary;
-            if (promptResp == null) {
-                summary = "任务发送失败（无响应）: " + task;
-            } else if (ok) {
-                summary = "任务已发送给 AI: " + task;
-            } else {
-                summary = "任务发送失败，响应: " + promptResp.replace("\n", " ").substring(0, Math.min(300, promptResp.length()));
-            }
+            org.json.JSONObject promptResp = EngineRpc.call(new File(ctx.getFilesDir(), "dsh-web.log"),
+                    enginePort(ctx), "session/prompt", EngineRpc.prompt(sessionId, task));
+            boolean ok = promptResp.optBoolean("accepted", false);
+            String summary = ok ? "任务已提交给 AI，执行结果请查看会话: " + task : "任务未被接收: " + task;
             log(ctx, summary);
-            notifyResult(ctx, ok, ok ? "✅ 定时任务已执行：\n" + task : summary);
+            notifyResult(ctx, ok, summary);
         } catch (Throwable t) {
             String msg = "执行异常: " + t.getMessage();
             log(ctx, msg);
@@ -163,7 +157,7 @@ public final class ScheduleExecutor {
             } else {
                 b = new android.app.Notification.Builder(ctx);
             }
-            String title = ok ? "✅ 定时任务执行成功" : "❌ 定时任务执行失败";
+            String title = ok ? "定时任务已提交" : "定时任务提交失败";
             String text = summary != null && summary.length() > 200 ? summary.substring(0, 200) : summary;
             android.app.Notification n = b.setContentTitle(title)
                     .setContentText(text)
@@ -304,67 +298,15 @@ public final class ScheduleExecutor {
         }
     }
 
-    /** 调 DSH API 创建会话。 */
+    /** Create through the authenticated engine RPC wire. */
     private static String createSession(Context ctx) {
-        String json = rpc(ctx, "session.create", "{}");
-        if (json == null) return null;
-        // 解析 result.value.sessionId 或 result.sessionId
-        int i = json.indexOf("\"sessionId\":\"");
-        if (i >= 0) {
-            int q1 = i + "\"sessionId\":\"".length();
-            int q2 = json.indexOf('"', q1);
-            if (q2 > q1) return json.substring(q1, q2);
-        }
-        return null;
-    }
-
-    /** 调 DSH API 发送消息。 */
-    private static boolean sendPrompt(Context ctx, String sessionId, String text) {
-        String payload = "{\"sessionId\":\"" + sessionId + "\",\"mode\":\"queue\",\"content\":[{\"type\":\"text\",\"text\":\"" + escapeJson(text) + "\"}]}";
-        String json = rpc(ctx, "session.prompt", payload);
-        return json != null && json.contains("\"ok\":true");
-    }
-
-    /** 调 DSH API 发送消息，返回完整响应（诊断用）。 */
-    private static String sendPromptRaw(Context ctx, String sessionId, String text) {
-        String payload = "{\"sessionId\":\"" + sessionId + "\",\"mode\":\"queue\",\"content\":[{\"type\":\"text\",\"text\":\"" + escapeJson(text) + "\"}]}";
-        return rpc(ctx, "session.prompt", payload);
-    }
-
-    /** DSH RPC 调用：标准协议 {"type":"client-request","rpcId":"...","method":"...","payload":{...}} */
-    private static String rpc(Context ctx, String method, String payloadJson) {
         try {
-            URL url = new URL("http://127.0.0.1:" + enginePort(ctx) + "/api/" + method);
-            HttpURLConnection c = (HttpURLConnection) url.openConnection();
-            c.setRequestMethod("POST");
-            c.setRequestProperty("Content-Type", "application/json");
-            c.setDoOutput(true);
-            c.setConnectTimeout(3000);
-            c.setReadTimeout(5000);
-            String rpcId = "sched-" + System.currentTimeMillis();
-            String body = "{\"type\":\"client-request\",\"rpcId\":\"" + rpcId + "\",\"method\":\"" + method
-                    + "\",\"payload\":" + (payloadJson == null || payloadJson.isEmpty() ? "{}" : payloadJson) + "}";
-            c.getOutputStream().write(body.getBytes("UTF-8"));
-            int code = c.getResponseCode();
-            if (code >= 200 && code < 300) {
-                InputStream in = c.getInputStream();
-                ByteArrayOutputStream out = new ByteArrayOutputStream();
-                byte[] b = new byte[4096];
-                int n;
-                while ((n = in.read(b)) > 0) out.write(b, 0, n);
-                in.close();
-                c.disconnect();
-                return new String(out.toByteArray(), "UTF-8");
-            }
-            c.disconnect();
-        } catch (Throwable t) {
-            Log.w(TAG, "rpc " + method + " error", t);
+            return EngineRpc.call(new File(ctx.getFilesDir(), "dsh-web.log"), enginePort(ctx),
+                    "session/create", new org.json.JSONObject()).getString("sessionId");
+        } catch (Exception e) {
+            Log.w(TAG, "scheduled session creation failed", e);
+            return null;
         }
-        return null;
-    }
-
-    private static String escapeJson(String s) {
-        return s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r");
     }
 
     /** 追加执行记录到外部目录（Lite 版用 DeepSeekHarnessLite，正式版用 DeepSeekHarness，便于排查）。 */

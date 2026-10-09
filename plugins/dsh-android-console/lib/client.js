@@ -1281,6 +1281,11 @@ window.__ModuleLoader__.load({
               ] }),
         }),
 
+        jsx(Row, {
+          title: '通知历史',
+          desc: '查看最近 100 条 AI 通知的完整内容',
+          right: jsx(Button, { variant: 'outline', size: 'sm', onClick: () => run('notification.history', ''), children: '查看' }),
+        }),
         jsx('div', { className: 'ctl-group', children: '救援' }),
         jsx(Row, {
           title: rescue.safeMode ? '安全模式：已开启' : '安全模式',

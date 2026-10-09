@@ -78,7 +78,7 @@ rm -rf "$SB/work/appbuild/classes" "$SB/work/appbuild/dex" \
 # 10 个 App 类 + vscreen/*.java（与 build.sh 的 javac 源列表一致）
 # 同时准备两份路径：APP_SRCS=Android 视角（给本脚本检查/生成 R），APP_SRCS_P=proot 视角
 APP_SRCS=""; APP_SRCS_P=""
-for c in MainActivity EngineService AlarmReceiver ScheduleExecutor OverlayService \
+for c in MainActivity EngineRpc NotificationArchive BackupValidator BackupRestore SafeFiles EngineService AlarmReceiver ScheduleExecutor OverlayService \
          UsageStatsHelper AccessibilityService VsreenBridgeService LogShareProvider NfcStore BuildEnvInstaller VoiceManager; do
   [ -f "$HARNESS/$c.java" ] || { echo "✗ 缺少源码 $HARNESS/$c.java" >&2; exit 1; }
   APP_SRCS="$APP_SRCS $HARNESS/$c.java"

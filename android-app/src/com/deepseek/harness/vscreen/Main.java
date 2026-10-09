@@ -51,7 +51,7 @@ public class Main {
      */
     // ⚠ 改过任何影响对外行为的核心代码（路由 / 参数 / 尺寸归一化等）都必须同时升这个值：
     // 只改代码不升指纹，App 就判不出"跑的是旧 core"，改动会静默失效。
-    static final String BUILD = "vs113-20260916";
+    static final String BUILD = "vs-audit-20261009-origin";
 
     /**
      * 心跳看门狗（v1.13.12）。App 进程内的桥服务每 ~750ms 就来拉一次 /vscreen/status，
@@ -671,17 +671,15 @@ public class Main {
 
     private static void handle(Socket sock) {
         try {
-            sLastRequestAt = System.currentTimeMillis();   // 心跳：任何请求都算 App 活着
             sock.setSoTimeout(15000);
-            BufferedReader in = new BufferedReader(new InputStreamReader(sock.getInputStream()));
-            String requestLine = in.readLine();
-            if (requestLine == null) {
+            String header = LocalHttpFence.readHeader(sock.getInputStream());
+            int rejection = LocalHttpFence.rejection(header, sPort, -1);
+            if (rejection != 0) {
+                LocalHttpFence.reject(sock.getOutputStream(), rejection);
                 return;
             }
-            String line;
-            while ((line = in.readLine()) != null && !line.isEmpty()) {
-                // 忽略请求头
-            }
+            sLastRequestAt = System.currentTimeMillis();
+            String requestLine = header.substring(0, header.indexOf("\r\n"));
 
             String path = "";
             String query = "";

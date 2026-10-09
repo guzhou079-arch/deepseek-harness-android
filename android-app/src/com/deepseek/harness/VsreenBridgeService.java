@@ -74,7 +74,7 @@ public class VsreenBridgeService extends Service {
      * 表现为“服务在跑但新路由/新参数静默失效”（如 create 的 width/height 被完全忽略）。
      * v1.13.12：core 加了心跳看门狗（App 死了 → 20 秒后自动销毁虚拟屏并退出）。
      */
-    private static final String EXPECTED_CORE_BUILD = "vs113-20260916";
+    private static final String EXPECTED_CORE_BUILD = "vs-audit-20261009-origin";
 
     /** 持有 Shizuku 拉起的进程引用：被 GC 回收会连带清理子进程。 */
     private static volatile IRemoteProcess sCoreProc;
@@ -1276,9 +1276,14 @@ public class VsreenBridgeService extends Service {
         OutputStream out = null;
         try {
             s.setSoTimeout(20000);
-            BufferedReader in = new BufferedReader(new InputStreamReader(s.getInputStream(), "UTF-8"));
-            String requestLine = in.readLine();
-            if (requestLine == null || requestLine.length() == 0) return;
+            String header = com.deepseek.harness.vscreen.LocalHttpFence.readHeader(s.getInputStream());
+            int ep = getPackageName().endsWith(".beta") ? 3082 : getPackageName().endsWith(".compat") ? 3084 : 3080;
+            int rejection = com.deepseek.harness.vscreen.LocalHttpFence.rejection(header, s.getLocalPort(), ep);
+            if (rejection != 0) {
+                com.deepseek.harness.vscreen.LocalHttpFence.reject(s.getOutputStream(), rejection);
+                return;
+            }
+            String requestLine = header.substring(0, header.indexOf("\r\n"));
             String path = "/vscreen/status";
             int sp = requestLine.indexOf(' ');
             if (sp > 0) {
@@ -1310,10 +1315,11 @@ public class VsreenBridgeService extends Service {
             out = s.getOutputStream();
             Socket up = null;
             try {
-                up = new Socket("127.0.0.1", CORE_PORT);
+                up = new Socket();
+                up.connect(new java.net.InetSocketAddress("127.0.0.1", CORE_PORT), 5000);
                 up.setSoTimeout(20000);
                 OutputStream uo = up.getOutputStream();
-                uo.write(("GET " + path + " HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n").getBytes("UTF-8"));
+                uo.write(("GET " + path + " HTTP/1.0\r\nHost: 127.0.0.1:" + CORE_PORT + "\r\n\r\n").getBytes("UTF-8"));
                 uo.flush();
                 InputStream is = up.getInputStream();
                 byte[] buf = new byte[32768];
