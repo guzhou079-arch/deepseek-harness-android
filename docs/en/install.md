@@ -47,7 +47,41 @@ sha256sum DeepSeekHarness-v1.36-dist.apk     # compare with the value in the rel
 - Uninstalling deletes app-private data; export packages, screenshots and build-environment parts under
   `/sdcard/DeepSeekHarness` are **not** deleted.
 
-## 6. If it will not install
+## 6. Choosing and configuring a model
+
+The app registers DeepSeek's official provider as `provider: deepseek-official`, composed with one of two
+authentication plugins — a **DeepSeek API key**, or a **DeepSeek account login**. You need one of them before you
+can chat.
+
+**Option A — API key (recommended)**
+
+1. Create a key at [platform.deepseek.com](https://platform.deepseek.com/).
+2. In the app, open the settings page and the model/account card, then paste the key.
+
+The key is stored as a credential reference (`apiKeyEnv: DEEPSEEK_API_KEY` for the `dsh-llm-deepseek` adapter) and
+resolved per request. Error messages name the reference, never the key itself.
+
+**Option B — account login**: sign in with your DeepSeek account in the same card.
+
+**Models** — these are the catalogue entries the adapter advertises:
+
+| Model | Input | Context window |
+| --- | --- | --- |
+| `deepseek-flash` | text + images | 1,000,000 tokens |
+| `deepseek-v4-pro` | text | 1,000,000 tokens |
+
+The model id is passed through to the wire, so a newer DeepSeek model can be used without re-registering anything.
+The default base URL is `https://api.deepseek.com/anthropic` and can be overridden with `baseURL` or
+`$DEEPSEEK_BASE_URL`. The default per-request output cap is 256,000 tokens.
+
+**Reasoning effort** — `off`, `low`, `high` and `max` are advertised. `low`, `high` and `max` enable thinking and
+are sent as `output_config.effort`; `off` sends `thinking.type: disabled`. Pick the level in the model selector.
+
+**If something goes wrong**, the adapter reports stable codes: `MISSING_CREDENTIAL` (no key configured),
+`INVALID_CREDENTIAL` / `AUTH` (wrong or revoked key), `RATE_LIMIT` / `QUOTA` (provider-side limits),
+`CONTEXT_WINDOW_EXCEEDED` (start a new session or let compaction run).
+
+## 7. If it will not install
 
 | Symptom | Cause / what to do |
 |---|---|
