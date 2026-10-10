@@ -18,7 +18,7 @@ It can even compile, package, sign and release itself, entirely on the phone, wi
 
 **Download**: see **Releases**. Each release lists the APK's SHA-256 so you can verify it before installing.
 
-**Docs** (English): [install & requirements](docs/en/install.md) · [permissions & privacy](docs/en/permissions.md) · [FAQ](docs/en/faq.md) · [upgrade & rescue](docs/en/upgrade-and-rescue.md) · [build environment](docs/en/build-on-device.md) · [attribution & license](docs/en/sources-and-licenses.md)
+**Docs** (English): [install & requirements](docs/en/install.md) · [permissions & privacy](docs/en/permissions.md) · [FAQ](docs/en/faq.md) · [upgrade & rescue](docs/en/upgrade-and-rescue.md) · [build environment](docs/en/build-on-device.md) · [attribution & license](docs/en/sources-and-licenses.md) · [changelog](CHANGELOG.en.md)
 
 > 中文文档（最新原文）：[安装与要求](docs/安装与要求.md) · [权限与隐私](docs/权限与隐私.md) · [常见问题](docs/常见问题.md) · [升级与救援](docs/升级与救援.md) · [自建环境与出包](docs/自建环境与出包.md)
 
