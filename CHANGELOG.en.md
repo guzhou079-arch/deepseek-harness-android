@@ -3,8 +3,32 @@
 > Chinese original (authoritative and most up to date): [CHANGELOG.md](CHANGELOG.md).
 > This English page mirrors it; if the two ever disagree, the Chinese one wins.
 
-> Current release: `1.36`. Every release installs **straight over the previous one** — same signing key,
+> Current release: `1.37`. Every release installs **straight over the previous one** — same signing key,
 > in-place upgrade, no uninstall (uninstalling wipes all app-private data).
+
+---
+
+## v1.37 — take a photo straight from the attachment picker + notification taps go to the session
+
+- **Take a photo from the attachment picker**: the "Add image" dialog now has a **Take photo** entry, and
+  the shot is attached right away — no detour through the gallery first.
+  - images only; the existing "choose from gallery / files" path is unchanged;
+  - if the camera will not open, no picture comes back, or storage permission is missing, you get a clear
+    message and can fall back to the gallery.
+- **Notification taps go straight to the session**: tapping a task-completion alert now lands you in the
+  session itself, instead of showing a summary card first and needing a second tap to get through.
+  - notifications with long bodies — release notes, post-boot self-check — keep their card.
+- **Fix: on some phones task-completion alerts had no banner and made no sound**:
+  - older versions had created the channel at default importance, and Android never lets an app raise a
+    channel's importance afterwards — so switching it to high in code simply had no effect;
+  - this release checks once on the first launch after the upgrade and, if it finds the old
+    low-importance channel, deletes and recreates it at high importance; it does this only once, so it
+    will not override the importance you pick yourself in system settings later.
+- **This is the first release you can get through the in-app one-tap upgrade**: if you are on v1.36, just
+  upgrade inside the app; for v1.35 and older, keep installing from the browser / mirrors as before.
+
+> Upgrading works as before: install straight over the previous version — same signing key, **no uninstall**
+> (uninstalling wipes all app-private data).
 
 ---
 

@@ -15,7 +15,7 @@ set -e
 F=/data/user/0/com.deepseek.harness/files
 R="${DSH_PROJECT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 SB=$R/selfbuild
-D=/storage/emulated/0/Download/Operit/dsh-toolchain
+D=/sdcard/DeepSeekHarness/projects/dsh-toolchain
 REL=dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai
 DIST=$SB/build-overlay/$REL/dsh-web-frontend/dist
 OVL=$SB/build-overlay

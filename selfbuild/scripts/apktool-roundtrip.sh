@@ -14,7 +14,7 @@ set -e
 F=/data/user/0/com.deepseek.harness/files
 R="${DSH_PROJECT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 SB="$R/selfbuild"
-D=/storage/emulated/0/Download/Operit/dsh-toolchain
+D=/sdcard/DeepSeekHarness/projects/dsh-toolchain
 NODE=$F/payload/runtime/bin/node
 APK="$1"
 [ -f "$APK" ] || { echo "用法: sh $0 <apk>"; exit 2; }

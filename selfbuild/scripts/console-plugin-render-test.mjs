@@ -19,7 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const SRC = process.argv[2]
-  || path.join(process.env.DSH_PROJECT || '/sdcard/Download/Operit/dsh_own_app',
+  || path.join(process.env.DSH_PROJECT || '/sdcard/DeepSeekHarness/projects/dsh-android',
     'plugins/dsh-android-console/lib/client.js');
 
 const code = fs.readFileSync(SRC, 'utf8');

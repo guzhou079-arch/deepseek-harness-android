@@ -6,12 +6,14 @@ import android.app.AppOpsManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
+import android.content.ContentValues;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
+import android.database.Cursor;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
@@ -21,6 +23,8 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.PowerManager;
 import android.provider.DocumentsContract;
+import android.provider.MediaStore;
+import android.provider.OpenableColumns;
 import android.provider.Settings;
 import android.system.ErrnoException;
 import android.system.Os;
@@ -201,6 +205,8 @@ public class MainActivity extends Activity {
     private volatile boolean pendingShizukuReq = false;
     private static final int REQ_WORKSPACE_TREE = 400;
     private static final int REQ_FILE_CHOOSER = 500;
+    /** v1.40：附件按钮「拍照」——相机 App 的返回（见 onShowFileChooser / onActivityResult）。 */
+    private static final int REQ_CAMERA_CAPTURE = 501;
     /** 导入备份（SAF 选 zip 文件）。 */
     private static final int REQ_BACKUP_FILE = 600;
 
@@ -261,6 +267,8 @@ public class MainActivity extends Activity {
     };
     // 网页 <input type="file"> 选完文件后的回调（见 onShowFileChooser）
     private ValueCallback<Uri[]> fileChooserCallback;
+    /** v1.40：拍照时相机的输出 URI（往 MediaStore 里刚插入的那一行）。 */
+    private Uri cameraOutputUri;
     private TextView statusView;
     private ProgressBar progressBar = null; // v1.32：启动页彻底移除横向进度条，保留引用为 null 兼顾控制台/老接口
     private View splashLogo;
@@ -572,16 +580,32 @@ public class MainActivity extends Activity {
                     fileChooserCallback.onReceiveValue(null);
                 }
                 fileChooserCallback = callback;
-                try {
-                    Intent intent = params.createIntent();
-                    intent.addCategory(Intent.CATEGORY_OPENABLE);
-                    startActivityForResult(intent, REQ_FILE_CHOOSER);
-                    return true;
-                } catch (Throwable t) {
-                    Log.w(TAG, "file chooser failed", t);
-                    fileChooserCallback = null;
-                    return false;
+                // v1.40（2026-10-12）：附件按钮加「拍照」入口。
+                // 前端是 <input type="file">：以前只能弹系统文件选择器（相册/文件），
+                // 想拍照必须先开相机 App 拍完、再回相册里挑 —— 用户明确要求能直接拍。
+                // 只在"要的是图片"时给这个入口（accept 为空 / */* / image/*）；
+                // 其它类型（比如导入插件的 zip）保持原样，只弹文件选择器。
+                if (attachWantsImage(params)) {
+                    try {
+                        new AlertDialog.Builder(MainActivity.this)
+                                .setTitle("添加图片")
+                                .setItems(new String[]{"拍照", "从相册/文件选择"},
+                                        new DialogInterface.OnClickListener() {
+                                            @Override public void onClick(DialogInterface d, int which) {
+                                                if (which == 0) launchCameraCapture();
+                                                else launchFilePicker(params);
+                                            }
+                                        })
+                                .setOnCancelListener(new DialogInterface.OnCancelListener() {
+                                    @Override public void onCancel(DialogInterface d) { cancelFileChooser(); }
+                                })
+                                .show();
+                        return true;
+                    } catch (Throwable t) {
+                        Log.w(TAG, "attach dialog failed, fallback to file picker", t);
+                    }
                 }
+                return launchFilePicker(params);
             }
         });
 
@@ -2353,6 +2377,113 @@ public class MainActivity extends Activity {
         }
     }
 
+    // ======================= v1.40：附件「拍照」 (2026-10-12) =======================
+    // 为什么要改：官方前端用 <input type="file"> 走 onShowFileChooser，本机以前只会弹
+    // 系统文件选择器（相册/文件）。用户每次都得先开相机 App 拍照、再回相册里挑 —— 明确要求
+    // 「在添加按钮里加一个拍照」。
+    //
+    // 实现取"最不侵入"的一条路：
+    //   · 只改 MainActivity.java，不新增 ContentProvider、**不动 AndroidManifest**（骨架复用式
+    //     出包改不了清单，加了 provider 就得走 aapt2 重链接）；R.java 不变。
+    //   · 相机输出走 MediaStore 自己 insert 出来的一行，配合
+    //     FLAG_GRANT_WRITE_URI_PERMISSION 授权给相机 App 写入（MediaStore 支持逐 URI 授权）。
+    //     好处：照片同时出现在系统相册里（和用户现在的习惯一致），且是 JPEG。
+    //   · 拿到 URI 后**查一次 SIZE**：相机忽略 EXTRA_OUTPUT 时不会把 0 字节图片塞给前端。
+    //
+    // 回滚：删掉 REQ_CAMERA_CAPTURE / cameraOutputUri / 下面 6 个方法，
+    //       并把 onShowFileChooser 恢复成"直接 params.createIntent() 起 REQ_FILE_CHOOSER"。
+
+    /** 这个 input[type=file] 要的是不是图片（accept 为空、任意类型、image 开头都算）。 */
+    private boolean attachWantsImage(WebChromeClient.FileChooserParams params) {
+        try {
+            String[] types = params.getAcceptTypes();
+            if (types == null || types.length == 0) return true; // 没写 accept：附件按钮就是这种
+            for (int i = 0; i < types.length; i++) {
+                String s = types[i] == null ? "" : types[i].trim().toLowerCase(Locale.US);
+                if (s.isEmpty() || s.equals("*/*") || s.contains("image")) return true;
+                // 有的前端把 accept 写成扩展名列表（".jpg,.png"），这类也当图片
+                if (s.contains(".jpg") || s.contains(".jpeg") || s.contains(".png")
+                        || s.contains(".heic") || s.contains(".webp") || s.contains(".gif")
+                        || s.contains(".bmp")) return true;
+            }
+        } catch (Throwable ignored) {}
+        return false;
+    }
+
+    /** 原「附件」行为：系统文件选择器（相册/文件）。 */
+    private boolean launchFilePicker(WebChromeClient.FileChooserParams params) {
+        try {
+            Intent intent = params.createIntent();
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            startActivityForResult(intent, REQ_FILE_CHOOSER);
+            return true;
+        } catch (Throwable t) {
+            Log.w(TAG, "file chooser failed", t);
+            cancelFileChooser();
+            return false;
+        }
+    }
+
+    /** 拍照：往 MediaStore 插一行 → 交给相机 App 写 → 回来后把那个 URI 当附件交回前端。 */
+    private void launchCameraCapture() {
+        try {
+            ContentValues v = new ContentValues();
+            v.put(MediaStore.Images.Media.DISPLAY_NAME,
+                    "DSH_" + new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date()) + ".jpg");
+            v.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
+            if (Build.VERSION.SDK_INT >= 29) {
+                v.put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/DSH");
+            }
+            cameraOutputUri = getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, v);
+            if (cameraOutputUri == null) {
+                toastMsg("无法创建照片文件（存储权限是否已给？）");
+                cancelFileChooser();
+                return;
+            }
+            Intent i = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+            i.putExtra(MediaStore.EXTRA_OUTPUT, cameraOutputUri);
+            i.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivityForResult(i, REQ_CAMERA_CAPTURE);
+        } catch (Throwable t) {
+            Log.w(TAG, "camera capture failed", t);
+            toastMsg("打不开相机：" + t.getClass().getSimpleName());
+            cancelFileChooser();
+        }
+    }
+
+    /** 附件流程中途取消：把 null 交回 WebView，并清掉刚插入的空照片条目。 */
+    private void cancelFileChooser() {
+        try {
+            if (fileChooserCallback != null) fileChooserCallback.onReceiveValue(null);
+        } catch (Throwable ignored) {}
+        fileChooserCallback = null;
+        if (cameraOutputUri != null) {
+            try { getContentResolver().delete(cameraOutputUri, null, null); } catch (Throwable ignored) {}
+            cameraOutputUri = null;
+        }
+    }
+
+    /** 照片大小（字节）；查不到返回 -1。用来判"相机到底写没写进去"。 */
+    private long mediaSize(Uri uri) {
+        Cursor c = null;
+        try {
+            c = getContentResolver().query(uri, new String[]{OpenableColumns.SIZE}, null, null, null);
+            if (c != null && c.moveToFirst()) {
+                int idx = c.getColumnIndex(OpenableColumns.SIZE);
+                if (idx >= 0 && !c.isNull(idx)) return c.getLong(idx);
+            }
+        } catch (Throwable ignored) {
+        } finally {
+            if (c != null) { try { c.close(); } catch (Throwable ignored) {} }
+        }
+        return -1;
+    }
+
+    private void toastMsg(final String msg) {
+        try { Toast.makeText(MainActivity.this, msg, Toast.LENGTH_SHORT).show(); } catch (Throwable ignored) {}
+    }
+    // ===================== v1.40 附件「拍照」结束 =====================
+
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         if (requestCode == REQ_FILE_CHOOSER) {
@@ -2369,6 +2500,29 @@ public class MainActivity extends Activity {
                 }
                 fileChooserCallback.onReceiveValue(picked);
                 fileChooserCallback = null;
+            }
+            return;
+        }
+        if (requestCode == REQ_CAMERA_CAPTURE) {  // v1.40：拍照回来
+            if (fileChooserCallback != null) {
+                Uri out = null;
+                Uri file = cameraOutputUri;
+                if (resultCode == RESULT_OK) {
+                    if (file == null && data != null) file = data.getData();
+                    // 相机忽略 EXTRA_OUTPUT 时条目会是 0 字节 —— 那种别当附件交出去
+                    if (file != null && (file != cameraOutputUri || mediaSize(file) > 0)) out = file;
+                }
+                if (out == null) {
+                    if (file != null) {
+                        try { getContentResolver().delete(file, null, null); } catch (Throwable ignored) {}
+                    }
+                    if (resultCode == RESULT_OK) {
+                        toastMsg("拍照没有返回图片，请重试或改用「从相册/文件选择」");
+                    }
+                }
+                fileChooserCallback.onReceiveValue(out == null ? null : new Uri[]{out});
+                fileChooserCallback = null;
+                cameraOutputUri = null;
             }
             return;
         }
@@ -4131,10 +4285,12 @@ public class MainActivity extends Activity {
         }
         if (title.isEmpty()) title = "DeepSeek Harness";
         if (text.isEmpty()) text = " ";  // 至少给一个空格，避免显示"(空消息)"
+        // open:"app" ⇒ 点击通知只把 App 拉到前台看会话，不弹「通知卡片」。
+        boolean showCard = !"app".equals(jsonField(raw, "open"));
         boolean granted = checkSelfPermission("android.permission.POST_NOTIFICATIONS")
                 == PackageManager.PERMISSION_GRANTED;
         if (granted) {
-            postNotification(title, text);
+            postNotification(title, text, showCard);
             return "{\"ok\":true}";
         }
         return "{\"ok\":false,\"error\":\"通知权限未授予，无法发送通知\"}";
@@ -4535,8 +4691,20 @@ public class MainActivity extends Activity {
         }, "boot-selfcheck").start();
     }
 
-    /** 发一条 AI 通知（仅需 POST_NOTIFICATIONS，无需 Shizuku/root）。 */
+    /** 发一条 AI 通知（仅需 POST_NOTIFICATIONS，无需 Shizuku/root）。默认点击后弹「通知卡片」。 */
     private void postNotification(String title, String text) {
+        postNotification(title, text, true);
+    }
+
+    /**
+     * 发一条 AI 通知。
+     *
+     * @param showCard true = 点击通知弹「通知卡片」显示完整正文（长文本通知用这个）；
+     *                 false = 点击只把 App 拉到前台，直接看会话（AI 完成提醒走这个 ——
+     *                         用户原话「我从横幅进来不就是为了看主页面你的内容吗」，
+     *                         既然正文就在会话里，再弹一张只有文字+关闭按钮的卡片纯属多一步）。
+     */
+    private void postNotification(String title, String text, boolean showCard) {
         if (text == null || text.trim().isEmpty()) return;
         try {
             NotificationArchive.save(getFilesDir(), title, text);
@@ -4547,6 +4715,12 @@ public class MainActivity extends Activity {
             NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
             if (nm == null) return;
             if (Build.VERSION.SDK_INT >= 26) {
+                // ⚠ 通道重要性【创建后不可改】：老装机上用 IMPORTANCE_DEFAULT 建过 dsh_ai_notify，
+                //   升级后这里再传 IMPORTANCE_HIGH 会被系统【静默忽略】——
+                //   于是"改了代码却永远不弹横幅"，v1.46/v1.37 那次修复就是这么白做的（真机实测：
+                //   通道 mOriginalImp 一直是 3，有效重要性靠用户在系统设置里手动打开横幅才变成 4）。
+                //   唯一解法 = 删掉旧通道重建，且只做一次（免得和用户手动选择的重要性打架）。
+                migrateNotifyChannelIfStale(nm);
                 NotificationChannel ch = new NotificationChannel(NOTIFY_CHANNEL_ID, NOTIFY_CHANNEL_NAME,
                         NotificationManager.IMPORTANCE_HIGH);  // HIGH 才会弹横幅
                 ch.setDescription("AI 任务完成/需要你关注时推送");
@@ -4556,9 +4730,11 @@ public class MainActivity extends Activity {
             }
             Intent i = new Intent(this, MainActivity.class);
             i.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
-            // 冷启动/热启动统一查看完整通知，不触发模型。
-            i.putExtra("notification_title", title == null ? "通知" : title.substring(0, Math.min(title.length(), 1024)));
-            i.putExtra("notification_content", text.substring(0, Math.min(text.length(), 65536)));
+            if (showCard) {
+                // 冷启动/热启动统一查看完整通知，不触发模型。
+                i.putExtra("notification_title", title == null ? "通知" : title.substring(0, Math.min(title.length(), 1024)));
+                i.putExtra("notification_content", text.substring(0, Math.min(text.length(), 65536)));
+            }
             android.app.PendingIntent pi = android.app.PendingIntent.getActivity(this, 
                     (int)(System.currentTimeMillis() & 0x7fffffff), i,  // 使用唯一 requestCode
                     android.app.PendingIntent.FLAG_UPDATE_CURRENT | android.app.PendingIntent.FLAG_IMMUTABLE);
@@ -4580,6 +4756,30 @@ public class MainActivity extends Activity {
             Log.i(TAG, "AI notification sent: " + title);
         } catch (Throwable t) {
             Log.w(TAG, "post notification failed", t);
+        }
+    }
+
+    /**
+     * 一次性把"卡在低重要性"的通知通道删掉重建。
+     *
+     * 背景：Android 8+ 的 NotificationChannel 一旦创建，**重要性就不可被 App 修改**
+     * （只有用户能在系统设置里改）。老版本用 IMPORTANCE_DEFAULT 建过 dsh_ai_notify，
+     * 之后无论代码怎么改成 IMPORTANCE_HIGH 都不会弹横幅 —— 只能 delete + 重新 create。
+     *
+     * 只做一次（dsh_prefs 打标记），避免覆盖用户后来在系统设置里自己做的重要性选择。
+     */
+    private void migrateNotifyChannelIfStale(NotificationManager nm) {
+        try {
+            android.content.SharedPreferences sp = getSharedPreferences("dsh_prefs", MODE_PRIVATE);
+            if (sp.getBoolean("notif_channel_high_migrated", false)) return;
+            NotificationChannel old = nm.getNotificationChannel(NOTIFY_CHANNEL_ID);
+            if (old != null && old.getImportance() < NotificationManager.IMPORTANCE_HIGH) {
+                nm.deleteNotificationChannel(NOTIFY_CHANNEL_ID);
+                Log.i(TAG, "stale notify channel deleted, old importance=" + old.getImportance());
+            }
+            sp.edit().putBoolean("notif_channel_high_migrated", true).apply();
+        } catch (Throwable t) {
+            Log.w(TAG, "notify channel migration failed", t);
         }
     }
 
