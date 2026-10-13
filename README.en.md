@@ -1,9 +1,10 @@
 # DeepSeek Harness · Android port (enhanced)
 
-**DeepSeek Harness**, packaged as a ready-to-install **Android APK**.
+**DeepSeek Harness**, packaged as a ready-to-install **Android APK** — one that **builds itself**:
+edit the code on the phone, then `javac → dex → package → sign → release`, with no computer in the loop.
 
-**No Termux, no root, no setup** — the terminal, file access and command execution all run inside the app.
-It can even compile, package, sign and release itself, entirely on the phone, without a computer.
+**No Termux, no root, no setup** — the terminal, file access and command execution all run inside the app,
+and 21 skills come bundled.
 
 [中文](README.md) | **English**
 

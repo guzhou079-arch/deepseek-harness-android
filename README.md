@@ -18,11 +18,13 @@
 
 把 **DeepSeek Harness**（DeepSeek 的 AI Agent）打包成**装个 APK 就能用**的安卓版。
 
-**不用 Termux、不用 root、不用配环境** —— 终端、文件访问、命令执行全部在 App 内运行。
+**它最不一样的地方：能在手机上给自己出包** —— 改完代码直接在手机里 `javac → dex → 打包 → 签名 → 发版`，
+不需要电脑；**也不用 Termux、不用 root、不用配环境**，终端、文件访问、命令执行全部在 App 内运行，
+21 款技能随包开箱即用。
 
-> **English** — DeepSeek Harness packaged as a ready-to-install Android APK. No Termux, no root, no setup:
-> the terminal, file access and command execution all run inside the app. It can even compile, package,
-> sign and release itself — entirely on the phone, without a computer.
+> **English** — DeepSeek Harness packaged as a ready-to-install Android APK, no Termux / no root / no setup:
+> the terminal, file access and command execution all run inside the app, with 21 skills bundled.
+> **What sets it apart: it builds, packages, signs and releases itself on the phone — no computer needed.**
 
 | 能干什么 | 说明 |
 |---|---|
