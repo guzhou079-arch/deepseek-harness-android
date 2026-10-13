@@ -5,7 +5,7 @@
 **No Termux, no root, no setup** — the terminal, file access and command execution all run inside the app.
 It can even compile, package, sign and release itself, entirely on the phone, without a computer.
 
-**中文** | [English](README.en.md)
+[中文](README.md) | **English**
 
 | What you get | Detail |
 |---|---|
@@ -21,6 +21,10 @@ It can even compile, package, sign and release itself, entirely on the phone, wi
 **Docs** (English): [install & requirements](docs/en/install.md) · [permissions & privacy](docs/en/permissions.md) · [FAQ](docs/en/faq.md) · [upgrade & rescue](docs/en/upgrade-and-rescue.md) · [build environment](docs/en/build-on-device.md) · [attribution & license](docs/en/sources-and-licenses.md) · [changelog](CHANGELOG.en.md)
 
 > 中文文档（最新原文）：[安装与要求](docs/安装与要求.md) · [权限与隐私](docs/权限与隐私.md) · [常见问题](docs/常见问题.md) · [升级与救援](docs/升级与救援.md) · [自建环境与出包](docs/自建环境与出包.md)
+
+**Related**: [Discussions](https://github.com/guzhou079-arch/deepseek-harness-android/discussions) — install / upgrade / usage questions ·
+companion plugin [dsh-plugin-android-vscreen](https://github.com/guzhou079-arch/dsh-plugin-android-vscreen)
+(drive apps on a **virtual display** — screen reading, taps, swipes — while your own screen stays yours)
 
 > ## ⚠️ Read before upgrading — only update from this repository's Releases
 >
@@ -56,4 +60,4 @@ third-party assets or trademarks.
 
 ---
 
-⭐ If this saved you time, a **star** is the best feedback — issues and feature requests are welcome (https://github.com/guzhou079-arch/deepseek-harness-android/issues).
+⭐ If this saved you time, a **star** is the best feedback. **Install / usage / upgrade questions** → [Discussions](https://github.com/guzhou079-arch/deepseek-harness-android/discussions); **bugs and feature requests** → [Issues](https://github.com/guzhou079-arch/deepseek-harness-android/issues).

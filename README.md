@@ -34,7 +34,8 @@
 | 🧩 **随包技能 21 款** | 开箱即用，不用自己装插件：架构图 `dsh-diagram` · 演示稿 `dsh-slides` · 短视频分镜 `dsh-storyboard` · 记忆中枢 `dsh-memory-sync` · Office 批处理 `dsh-doc-tidy` · Word/公文出版 `dsh-doc-publisher` · Excel 多表对齐 `dsh-excel-copilot` · 会议纪要 `dsh-meeting-copilot` · 邮件公函 `dsh-mail-craft` · 本地 RAG 检索 `dsh-doc-search` · 时光机备份 `dsh-backup` · 手机自动化 `dsh-mobile` · 跨厂商会审 `dsh-review` · 智力分档 `dsh-tier` · 网页抓取 `dsh-web-crawler` · 代码工程 `dsh-code-craft` · 数据洞察 `dsh-data-craft` · 深度调研 `dsh-deep-research` · 敏捷排期 `dsh-scrum-master` · 生活中枢 `dsh-life` · 语音交互 `dsh-voice` |
 
 > ⭐ **如果它帮你省了时间，给个 Star 是最好的反馈** —— 也让我知道继续维护值不值得。
-> 用着有问题、或者有想要的功能，欢迎开 [Issue](https://github.com/guzhou079-arch/deepseek-harness-android/issues)。
+> **装不上 / 怎么用 / 升级出问题** → 到 [提问与交流（Discussions）](https://github.com/guzhou079-arch/deepseek-harness-android/discussions) 发帖；
+> **Bug 与功能建议** → 开 [Issue](https://github.com/guzhou079-arch/deepseek-harness-android/issues)。
 
 ### 下载安装（三步）
 
@@ -49,6 +50,10 @@
 每个 Release 的说明里带该 APK 的 **SHA-256**，装前可以核对。
 
 **文档**：[安装与系统要求](docs/安装与要求.md) · [权限与隐私](docs/权限与隐私.md) · [常见问题](docs/常见问题.md) · [升级与救援](docs/升级与救援.md) · [自建环境与出包](docs/自建环境与出包.md)
+
+**相关**：[提问与交流（Discussions）](https://github.com/guzhou079-arch/deepseek-harness-android/discussions) ·
+配套插件 [dsh-plugin-android-vscreen](https://github.com/guzhou079-arch/dsh-plugin-android-vscreen)
+（让 AI 在**虚拟显示器**上操作手机：读屏、点击、滑动，你自己的主屏照常用，互不打扰）
 
 > ## ⚠️ 更新前必读 —— 只从本仓库 Releases 更新
 >
