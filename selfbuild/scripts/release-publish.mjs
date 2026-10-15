@@ -26,7 +26,12 @@ async function main() {
   async function request(url, init = {}, allow404 = false) {
     const response = await fetch(url, { ...init, headers: { ...headers, ...init.headers }, signal: AbortSignal.timeout(init.method === 'POST' && url.includes('uploads.github.com') ? 600000 : 15000) });
     if (allow404 && response.status === 404) return null;
-    insist(response.ok, 'GitHub request HTTP ' + response.status); return response.json();
+    if (!response.ok) {
+      // 带上远端原文：光看状态码猜不出 400 是"哪里不合规矩"
+      let detail = ''; try { detail = (await response.text()).replace(/\s+/g, ' ').slice(0, 300); } catch { /* 读不到就算了 */ }
+      insist(false, `GitHub ${init.method || 'GET'} ${url.split('?')[0]} → HTTP ${response.status}${detail ? ' · ' + detail : ''}`);
+    }
+    return response.json();
   }
   const remote = await request(`${API}/git/ref/heads/main`); insist(remote.object?.sha === commit, 'Source HEAD has not reached remote main; push source before tag');
   const currentBaseline = await request(`${API}/releases/tags/v1.37`);
@@ -53,7 +58,8 @@ async function main() {
   release = await request(release ? `${API}/releases/${release.id}` : `${API}/releases`, { method: release ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, body: data });
   let asset = (release.assets || []).find(a => a.name === name);
   if (asset) insist(asset.size === artifact.apkSize && asset.digest === 'sha256:' + artifact.apkSha256, 'Existing asset differs; replacement needs a separate explicit decision');
-  else asset = await request(`https://uploads.github.com/repos/${REPO}/releases/${release.id}/assets?name=${encodeURIComponent(name)}`, { method: 'POST', headers: { 'Content-Type': 'application/vnd.android.package-archive' }, body: fs.createReadStream(artifact.apk), duplex: 'half' });
+  // GitHub 的资产上传接口不接受 chunked（Node fetch 传流默认就是 chunked）→ 必须显式给长度，否则 400
+  else asset = await request(`https://uploads.github.com/repos/${REPO}/releases/${release.id}/assets?name=${encodeURIComponent(name)}`, { method: 'POST', headers: { 'Content-Type': 'application/vnd.android.package-archive', 'Content-Length': String(artifact.apkSize) }, body: fs.createReadStream(artifact.apk), duplex: 'half' });
   const fresh = await request(`${API}/releases/tags/${tag}`), uploaded = fresh.assets.find(a => a.id === asset.id);
   insist(uploaded && uploaded.state === 'uploaded' && uploaded.size === artifact.apkSize && uploaded.digest === 'sha256:' + artifact.apkSha256, 'Uploaded asset SHA-256 verification failed');
   const finalRef = await request(`${API}/git/ref/tags/${tag}`); let finalObject = finalRef.object;
