@@ -1,9 +1,12 @@
 /** Android console data routes. Native actions remain in the WebView bridge. */
 import { createRequire } from 'node:module';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 
 const require = createRequire(import.meta.url);
+const packagedLife = process.env.DSH_HOME && join(process.env.DSH_HOME, 'skills/dsh-life/scripts/life.js');
 const ROUTES = [
-  ['/life', '/sdcard/DeepSeekHarness/tools/life.js', 'createHandler'],
+  ['/life', packagedLife && existsSync(packagedLife) ? packagedLife : '/sdcard/DeepSeekHarness/tools/life.js', 'createHandler'],
   ['/office', '/sdcard/DeepSeekHarness/tools/office.js', 'createOfficeHandler'],
   ['/voice-hub', '/sdcard/DeepSeekHarness/tools/voice.js', 'createVoiceHubHandler'],
   ['/lan-mesh', '/sdcard/DeepSeekHarness/tools/lan-mesh.js', 'createLanMeshHandler'],

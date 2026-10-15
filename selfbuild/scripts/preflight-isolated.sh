@@ -21,6 +21,11 @@ R="${DSH_PROJECT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 SB="$R/selfbuild"
 NODE=$F/payload/runtime/bin/node
 CURL=$F/payload/runtime/bin/curl
+# 2026-10-15：自己导出库路径 + 自证在跑。以前靠调用方 export，
+# 忘了就 `CANNOT LINK … libcares.so not found`（看着像引擎/包坏了，其实是门禁没起来）；
+# 更早的版本里 `$NODE -e` 还被 2>/dev/null 吞掉，会静默空转（同类坑见 check-console-plugin-isolated.sh）。
+export LD_LIBRARY_PATH="$F/payload/runtime/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+"$NODE" -e 'process.exit(0)' 2>/dev/null || { echo "✗ node 起不来（缺 LD_LIBRARY_PATH？）"; exit 2; }
 LIVE=$F/payload/dshroot
 ISO=$F/tmp/preflight
 PORT=3097

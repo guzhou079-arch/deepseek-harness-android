@@ -67,6 +67,16 @@ const primitives = {
   Toast: passthrough('Toast'),
   IconChevronLeftOutlineRegular: passthrough('IconChevronLeft'),
   IconChevronRightOutlineRegular: passthrough('IconChevronRight'),
+  // 与真件逐字一致的实现（primitives/lib/index.js 的 fileSizeText）
+  fileSizeText(bytes) {
+    if (bytes < 1024) return bytes + 'B';
+    const kb = bytes / 1024;
+    if (kb < 1024) return (kb < 10 ? kb.toFixed(1) : Math.round(kb)) + 'KB';
+    const mb = kb / 1024;
+    if (mb < 1024) return (mb < 10 ? mb.toFixed(1) : Math.round(mb)) + 'MB';
+    const gb = mb / 1024;
+    return (gb < 10 ? gb.toFixed(1) : Math.round(gb)) + 'GB';
+  },
 };
 
 // --------------------------------------------------------------- 假 window/壳
@@ -102,11 +112,19 @@ const sampleState = {
     daemonRunning: true,
     todayExpense: 61.0,
     todayIncome: 0.0,
+    monthExpense: 641.47,
+    monthIncome: 1698.45,
+    monthTxCount: 73,
     summary: '🟢 守护中 · 今日支出 ¥61.00 · 📦 待取快递 1 件',
     packages: [{ id: 1, pickup_code: '88-3-4012', station: '5栋大堂丰巢柜', carrier: '顺丰', created_at: Date.now() }],
     codes: [{ id: 1, code: '719305', source: '中国移动', created_at: Date.now() }],
     transactions: [{ id: 1, type: 'expense', amount: 28.5, merchant: '美团外卖', category: '餐饮', account: '微信支付', created_at: Date.now() }],
     tasks: [{ id: 'morning_brief', name: '晨间早报', cron_expr: 'daily:08:30', enabled: true, next_run_at: Date.now() + 3600000 }],
+    balances: [
+      { account: '农业银行(0770)', amount: 1069.97, merchant: '川链动万商科技', at: Date.now() },
+      { account: '招商银行(1234)', amount: 8888.88, merchant: '瑞幸', at: Date.now() - 60000 },
+    ],
+    latestBalance: { account: '农业银行(0770)', amount: 1069.97, at: Date.now() },
   },
 };
 
@@ -145,14 +163,24 @@ const mod = win.__reg.factory(requireStub);
 if (typeof mod.apply !== 'function') throw new Error('插件没有导出 apply');
 
 let Section = null;
+let Overlay = null;
+let ComposerDock = null;
 const ctx = {
+  inject: (_dependencies, fn) => fn(ctx),
   slots: {
     inject: (name, fn) => { fn(); },
-    register: (options, component) => { Section = component; return () => {}; },
+    register: (options, component) => {
+      if (options.name === 'settings.section') Section = component;
+      if (options.name === 'shell.overlay') Overlay = component;
+      if (options.name === 'conversation.composer.dock') ComposerDock = component;
+      return () => {};
+    },
   },
 };
 mod.apply(ctx);
 if (Section === null) throw new Error('没有注册任何 settings.section');
+if (Overlay === null) throw new Error('没有注册 shell.overlay（分享到货提示就看不到）');
+if (ComposerDock === null) throw new Error('没有注册 conversation.composer.dock（分享卡片就没了）');
 
 // ------------------------------------------------------------------ 渲染驱动
 // 组件实例按**位置路径**记忆（这样 setState 之后重渲染能取回同一份 hooks）。
@@ -195,13 +223,14 @@ function expand(node, path) {
   return { __el: true, type: node.type, props: props, key: node.key };
 }
 
-/** 渲染到状态稳定（最多 N 轮，防死循环）。 */
-function settle(props) {
+/** 渲染到状态稳定（最多 N 轮，防死循环）。默认渲染设置页；传 Component 可渲染别的槽位组件。 */
+function settle(props, Component) {
+  const Root = Component || Section;
   let tree = null;
   for (let i = 0; i < 12; i++) {
     pending = false;
-    const el = (() => { cursor = 0; inRender = true; try { return Section(props || { close() {} }); } finally { inRender = false; } })();
-    tree = expand(el, 'root');
+    const el = (() => { cursor = 0; inRender = true; try { return Root(props || { close() {} }); } finally { inRender = false; } })();
+    tree = expand(el, 'root.' + (Component ? String(Component.name) : 'Section'));
     if (!pending) return tree;
   }
   throw new Error('渲染没有稳定下来（可能 setState 死循环）');
@@ -217,6 +246,12 @@ function walk(node, fn) {
     walk(node.props && node.props.footer, fn);
     walk(node.props && node.props.text, fn);
     walk(node.props && node.props.description, fn);
+    // Toast 的动作是 [{prefix, label, onClick}]，真件把它们渲染成可点文字；
+    // 这里包成元素递出去，好让 texts()/findByText()/点击断言都看得见。
+    const actions = node.props && node.props.actions;
+    if (Array.isArray(actions)) {
+      for (const action of actions) fn({ __el: true, type: 'ToastAction', props: Object.assign({}, action, { children: action && action.label }) });
+    }
   }
 }
 
@@ -295,6 +330,15 @@ step('主页渲染（引擎运行中）', () => {
   for (const want of ['DEEPSEEK HARNESS', '已解压', '引擎运行中', '安全模式', '导出全部数据',
     '授予权限', '插件', '自建环境', '日志', '时光机全站备份', '界面主题', '检查更新']) {
     if (t.indexOf(want) < 0) throw new Error('主页缺文案：' + want);
+  }
+});
+
+step('模型分工入口可点击，子页显示角色和官方暂停状态', () => {
+  const tree = freshMain();
+  clickByText(tree, '模型分工');
+  const text = texts(settle({ close() {} }));
+  for (const want of ['当前使用', '按任务选择', '代码实现', '分析与审查', '架构与规划', '已暂停', '应用配置']) {
+    if (!text.includes(want)) throw new Error('模型页缺文案：' + want);
   }
 });
 
@@ -386,9 +430,33 @@ step('子页：智能生活助理', () => {
   clickByText(tree, '智能生活助理');
   tree = settle({ close() {} });
   const t = texts(tree);
-  for (const want of ['智能生活助理', '待取快递包裹', '88-3-4012', '今日记账与消费流水', '美团外卖', '最近验证码', '719305', '定时自动化任务']) {
+  for (const want of ['智能生活助理', '待取快递包裹', '88-3-4012', '今日记账与消费流水', '美团外卖', '最近验证码', '719305']) {
     if (t.indexOf(want) < 0) throw new Error('生活助理页缺文案：' + want);
   }
+  if (!t.includes('定时自动化任务') && !t.includes('定时任务')) throw new Error('生活助理页缺定时任务');
+  // 记账卡要显示余额（从动账通知正文里读出来的账户余额）
+  for (const want of ['账户余额：', '农业银行(0770) ¥1069.97', '招商银行(1234) ¥8888.88']) {
+    if (t.indexOf(want) < 0) throw new Error('记账卡缺余额：' + want);
+  }
+  // 记账卡还要显示「月结余」（结余 = 本月收入 − 本月支出，跟着 /life/api/status 的 month* 字段走）
+  // 注意：文本节点会被 trim，标签后面那个空格不保证留下，所以别在断言里带尾空格。
+  for (const want of ['本月结余', '¥1056.98', '支出 ¥641.47', '收入 ¥1698.45', '73 笔']) {
+    if (t.indexOf(want) < 0) throw new Error('记账卡缺月结余：' + want);
+  }
+  clickByText(tree, '立即执行');
+  if (acts[acts.length - 1][0] !== 'life.task.run' || acts[acts.length - 1][1] !== 'morning_brief') {
+    throw new Error('点「立即执行」没有发出 life.task.run:morning_brief，实际 ' + JSON.stringify(acts[acts.length - 1]));
+  }
+  // 删除键：先二次确认，再发 life.task.delete（带 source/id）
+  clickByText(tree, '删除');
+  const conf = settle({ close() {} });
+  if (texts(conf).indexOf('确定') < 0) throw new Error('删除定时任务没有二次确认');
+  clickByText(conf, '确定');
+  const delAct = acts[acts.length - 1];
+  if (delAct[0] !== 'life.task.delete') throw new Error('删除没有发出 life.task.delete，实际 ' + delAct[0]);
+  let delArg = null;
+  try { delArg = JSON.parse(delAct[1]); } catch (e) { throw new Error('删除参数不是 JSON: ' + delAct[1]); }
+  if (delArg.id !== 'morning_brief' || delArg.source !== 'life') throw new Error('删除参数不对: ' + delAct[1]);
   clickByText(tree, '已取');
   if (acts[acts.length - 1][0] !== 'life.pkg.pick' || acts[acts.length - 1][1] !== '1') {
     throw new Error('点击已取没有发出 life.pkg.pick:1');
@@ -514,6 +582,53 @@ step('引擎未启动时的主页（启动引擎 / 解压文件 为主按钮）'
     const back = JSON.parse(saved);
     sampleState.engine = back.engine;
     sampleState.extract = back.extract;
+    instances.clear();
+  }
+});
+
+// ------------------------------------------------ 分享到货横幅（shell.overlay）
+// 背景：分享卡片只挂在聊天输入框里；用户停在设置页/控制台时**看不到任何东西**，
+// 两次真实分享就这样烂在 cache 里（2026-10-15）。这里验：帧级浮层真的注册了、
+// 有桥有分享时能渲染出横幅、文案里带文件名/大小/落盘目录，且「忽略」会回执删除。
+step('分享到货横幅：有分享时挂到帧级浮层并说清落点', () => {
+  const shareState = {
+    ok: true, count: 2,
+    batch: { id: 'old-batch', files: [{ index: 0, name: '旧文件.pdf', bytes: 100 }] },
+    latest: {
+      id: 'new-batch', createdAt: Date.now(), text: '',
+      files: [{ index: 0, name: '评星的项目方案.pptx', bytes: 441946 }],
+      errors: [], archive: '/sdcard/DeepSeekHarness/shares/2026-10-15',
+    },
+  };
+  const acked = [];
+  win.__DSH_INPUT_TOKEN = 'test-token';
+  win.dshinput = {
+    shareState: () => JSON.stringify(shareState),
+    shareAck: (token, id) => { acked.push([token, id]); return '{"ok":true}'; },
+  };
+  try {
+    // 纯文案函数（与组件走同一份代码）
+    const text = mod.shareNoticeText(shareState);
+    if (text.indexOf('评星的项目方案.pptx') < 0) throw new Error('文案没带文件名：' + text);
+    if (text.indexOf('432KB') < 0) throw new Error('文案没带大小：' + text);   // 441946B → ≥10KB 取整为 432KB（与真件 fileSizeText 一致）
+    if (text.indexOf('/sdcard/DeepSeekHarness/shares/2026-10-15') < 0) throw new Error('文案没带落盘目录：' + text);
+    if (text.indexOf('另有 1 条待处理') < 0) throw new Error('文案没报还有几条：' + text);
+    // 真渲染一次：横幅必须出现，且「忽略」回执删的是**这一条**
+    instances.clear();
+    const tree = settle({}, Overlay);
+    if (countType(tree, 'Toast') !== 1) throw new Error('没有渲染出 Toast 横幅');
+    const rendered = texts(tree);
+    if (rendered.indexOf('评星的项目方案.pptx') < 0) throw new Error('横幅文案缺文件名');
+    const ignore = findByText(tree, '忽略');
+    if (!ignore || typeof ignore.props.onClick !== 'function') throw new Error('横幅上没有「忽略」动作');
+    ignore.props.onClick({ stopPropagation() {} });
+    if (acked.length !== 1 || acked[0][1] !== 'new-batch') throw new Error('「忽略」没有删除最新那条：' + JSON.stringify(acked));
+    // 没有桥（桌面浏览器）时必须安静降级，不许抛
+    win.__DSH_INPUT_TOKEN = undefined; delete win.dshinput;
+    instances.clear();
+    if (settle({}, Overlay) !== null) throw new Error('没有桥时应该什么都不渲染');
+  } finally {
+    delete win.__DSH_INPUT_TOKEN; delete win.dshinput;
     instances.clear();
   }
 });

@@ -1,0 +1,30 @@
+{
+  "name": "dsh-plugin-turn-notify",
+  "version": "0.1.0",
+  "description": "Post an Android heads-up notification when the agent finishes a turn. · 一轮回答跑完时，往手机弹一条横幅通知（人不在 App 里时才打扰）。",
+  "type": "module",
+  "main": "lib/index-v3.js",
+  "exports": {
+    ".": "./lib/index-v3.js",
+    "./cordis.patch.yml": "./cordis.patch.yml"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "android",
+    "notification",
+    "turn"
+  ],
+  "license": "MIT",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

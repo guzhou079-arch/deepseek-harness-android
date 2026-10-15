@@ -39,10 +39,29 @@ const BAD = [
   // 它住在 dshhome 根下 —— 别指望"它不在 overlay 里"这种运气。
   [/(^|\/)review\.json(\..*)?$/i, '本机会审配置'],
   [/(^|\/)skills-local\//i, '本机私有技能'],
+  // 2026-10-15：dshhome 下**只允许**「可分发的种子」——与 scan-dist-privacy.py 的白名单
+  // （skills / cordis.patch.yml / profiles）保持一致。骨架解出来的那份 settings.yaml 是
+  // 开发机自己的状态（ui-conversation / ui-onboarding），发给新用户会让对方**跳过首次引导**，
+  // 而且它属于「用户文件」（App 只在缺失时写入），本来就不该随包。
+  [/(^|\/)dshhome\/settings\.yaml$/i, '个人设置（非可分发种子）'],
+  // 2026-10-15：第三方 changelog 是纯死重量（30 份 ≈ 830KB），
+  // 更是隐私扫描**假阳性**的来源：上游 changelog 里 40 位 commit SHA 会命中
+  // 11 位手机号正则，dependabot 的 @users.noreply.github.com 会命中邮箱正则。
+  // 要留下的只有我们自己的那两份应用内更新日志（见下面 KEEP）。
+  [/(^|\/)node_modules\/.*CHANGELOG\.md$/i, '第三方 changelog'],
 ];
 
+// 例外白名单：这两份 CHANGELOG 是**我们自己的**应用内更新日志，必须随包分发，
+// 而且用户界面里能直接打开 /CHANGELOG.md（见 MainActivity 的 FORCE_OVERWRITE_PREFIXES）。
+// 它们都住在 node_modules 下 → 会被上面那条第三方 changelog 规则命中，所以先放行。
+const KEEP = new Set([
+  'dshroot/CHANGELOG.md',
+  'dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/CHANGELOG.md',
+]);
+const matchBad = (name) => (KEEP.has(name) ? null : BAD.find(([re]) => re.test(name)) || null);
+
 const es = readZip(zip);
-const hits = es.filter((e) => BAD.some(([re]) => re.test(e.name)));
+const hits = es.filter((e) => matchBad(e.name));
 
 if (!hits.length) { console.log('  ✓ payload 干净（没有个人内容条目）'); process.exit(0); }
 
@@ -52,13 +71,13 @@ if (checkOnly) {
   process.exit(1);
 }
 
-const keep = es.filter((e) => !BAD.some(([re]) => re.test(e.name)));
+const keep = es.filter((e) => !matchBad(e.name));
 const tmp = zip + '.strip-tmp';
 writeZip(keep, tmp);
 fs.renameSync(tmp, zip);
 
 console.log(`  ✓ 已从发行 payload 剔除 ${hits.length} 个条目（${es.length} → ${keep.length}）：`);
 for (const e of hits) {
-  const why = (BAD.find(([re]) => re.test(e.name)) || [])[1] || '';
+  const why = (matchBad(e.name) || [])[1] || '';
   console.log(`     - ${e.name}   [${why}]`);
 }

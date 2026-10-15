@@ -1,0 +1,101 @@
+# DSH Android 补丁完整性清单 —— 每条: <payload 相对路径>|<md5>|<关键字节串>
+# 语义: md5 必须一致；关键字必须至少命中 1 次（md5 用于判漂移，关键字用于判「补丁语义」是否还在）
+# 换内核/故意改补丁后: sh patch-check.sh --regen
+#
+# ① 特权通道：android_* 结构化工具必须走 App 内嵌桥（v1.14.2 的修复，v1.20 丢过一次）
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-android/lib/index.js|b5485483c7cb28bd3f382b40192c8bbb|appShellCmd
+# ⚠️ 2026-10-15 更新 md5：该插件在 overlay 里故意加了「定时任务查看/取消走 3081 桥」
+#    与 schedule 回传 taskId/triggerAt（+80 行，df53d58a→0ec8ea14）。不是随机漂移：
+#    同一批未发布功能，Java 侧有 ScheduleBridge/ScheduleAlarms/ScheduledTaskStore。
+#    注意别用 `patch-check.sh --regen` 修这条 —— 它按**装机运行副本**重算，
+#    而副本还是旧版，会把这次漂移洗白。
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-shizuku/lib/index.js|0ec8ea144c7471a937fbb35d6d75d566|appShellCmd
+# ② 无障碍：三个 render 不能吞真实结果（v1.14）+ 通知读取 3 工具（v1.23）
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-accessibility/lib/index.js|c8c98040f97f169a53d5877867bd3038|renderA11yStatus
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-accessibility/lib/index.js|c8c98040f97f169a53d5877867bd3038|android_notifications_wait
+# ③ NFC 读卡（v1.16）
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-nfc/lib/index.js|a6738637e781b28980aa389b69ae811c|nfcPost
+# ④ 虚拟屏（移植自 Operit）
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-vscreen/lib/index.js|9469e7f4fd4ebb628c4a573f07054aeb|android_vscreen_create
+# ⑤ 交付文件「打开」的引擎侧 android 分支（v1.15）
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-native-command/lib/index.js|02919aacf8e4fce787532686a00409f6|androidBridgeOpen
+# ⑥ 移动端 UI 改造
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-layout/lib/client.js|a61395c7e5c5236e1f44d8eebfd463b2|sidebarCollapsed
+# ui-cordis：2026-09-30 查实 —— 旧期望值 499056c4… 是「cordis 插件按钮」补丁(header.utilities)
+# 在老内核时代的 md5；该标记在 0.2.0 bundle 里确实已不存在（实测命中 0 次），补丁随之作废。
+# 当前 md5 = APK payload 里的上游原版（实测与 payload 逐字节一致）。
+# 结论：漂移源于清单过期，文件本身健康。只做漂移检测。
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-cordis/lib/client.js|499056c4a724adb85ea47b4a664faffc|-
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/mobile.css|3f7c22944d1ec95fb20252c35abf6c03|role="tooltip"
+# ⑦ v1.24：静态资源门禁（非 index 资产也要过围栏+cookie 鉴权，堵住用户背景图等无鉴权可读面）
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-host-frontend-static/lib/index.js|562f5de090f0923bbbb9d5925b75d272|guardAsset
+# ⑧ v1.28：两条客户端路由加鉴权 —— **那一版已作废并隔离**（改 inject 把引擎装到起不来，
+#    详见 PATCH-NOTES-v1.28-postmortem.md；文件在 selfbuild/work/quarantine-v128/）
+# ⑨ v1.30：同样两条路由，换成**懒取 connection**的安全变体，已过隔离预检
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-modules/lib/index.js|0294e09f6bd035099eb3b4fd06a43de9|__verdict.rejection
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-hmr/lib/index.js|8c4b260c5bf8894beabc54e8cbe73ce2|__verdict.rejection
+# ⑩ v1.31：update-check 状态路由加懒门禁
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-update-check/lib/index.js|1ee407849236643b41ab354e3ff8b02e|__verdict.rejection
+# ⑪ v1.31：背景图资产进 payload（重装/重解压不再丢）
+#    ⚠ dsh-bg-user.png 只存在于**本机自建包**；发行包里它被 strip-dist-payload.js 主动剔除（隐私）。
+#      而 make-dist-apk.sh **不调用** selfbuild verify ⇒ 无影响。但若有人对 dist 包手跑 verify，
+#      这条会报「文件不存在」——那是预期，不是污染。
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/dsh-bg.svg|83e42b419ed900dcdcba7f1e6b9e1650|svg
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/dsh-bg-user.png|c4b5a66b33ea99892a76f2c485beed1d|-|local
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-open-in-app/lib/client.js|765201c682a1bfb7d8346025df2a4b10|dsh-user-bg
+# ⑫ v1.32：局域网绑定需要 DSH_ALLOW_LAN=1（默认仍拒绝 0.0.0.0）
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-app/lib/startup.js|d70e2a712c87c5efa13d151b2f9ce5c2|DSH_ALLOW_LAN
+# ⑬ v1.35 起：应用更新日志（随包分发 + 界面可打开 /CHANGELOG.md）
+#    ⛔ 这两条**不钉 md5**，只验「文件在 + 还是更新日志」：正文每发一版都会加章节，
+#       钉死 md5 = 每次发版都必然过期。实测它已连续过期 4 次（724934d7 → 08238f81 →
+#       e6eb41e7 → 88ea18c3），而 verify 里的 `|| true` 又把它吞了 → 四版没人发现。
+#       内容对不对由发版前人工过目保证，不由 md5 保证（md5 在此只制造假警报）。
+#    ⚠ 顺带一条：只换 dex 的包（不动 payload）里这份日志来自骨架版本，本来就比 overlay 旧。
+dshroot/CHANGELOG.md|-|更新日志
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/CHANGELOG.md|-|更新日志
+# ⑭ v1.36：账户 UI —— 放开上游「桌面独占」门禁（apply 首行 dshDesktop 检查）
+#    刻意不注入全局 dshDesktop，以免挤掉 settings-models 的 API Key 引导。
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-settings-account/lib/client.js|816b017f03dd80cc9e57e0dd0098cd8c|dsh-android-patch v3
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/node-addon-require-builtin/lib/index.js|23c1201e436009f11de735dae37cd763|Android 适配
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/node-addon-system/lib/flock.js|b9c771f5aaa32c498c0b8a950ee23f1b|noopBinding
+# ⑮ v1.37（rc.2 修复·问题3）：bash-local 的 sandboxMode 覆盖必须进 overlay。
+#    为什么以前不需要：rc.1 时代这个 getter 是**基础包 payload 自带**的，不在我们 overlay 里；
+#    rc.2 内核层一覆盖就把它顶没了 → dsh-permission-presets 构造抛 "no sandboxMode"
+#    → permission 不激活 → 所有会话 prompt 被拒（session/agent-busy）。这也是 rc.2 上机失败的直接原因。
+#    补丁脚本：selfbuild/scripts/patch-bash-local-sandbox.js（幂等、带真解析+语义校验）
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-bash-local/lib/index.js|6f9dab7fe2d3d1eb018655bf272956cf|get sandboxMode
+
+# ⑯ v1.38（2026-09-30）：登录成功后把 App 自动拉回前台。
+#    平台的「打开应用」按钮用本机未注册的 scheme，点了没反应（实测）；
+#    改为引擎直接调 App 特权桥执行 am start（shell uid 2000）。
+#    补丁脚本：selfbuild/scripts/patch-bring-to-front.js
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-deepseek-account-platform/lib/index.js|04c0e29955451e7c0156387b0eb58b35|dsh-android-patch v4 (bring-to-front)
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/index.html|6c56d1780cbe05adaede87508435cab5|/mobile.css
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/mobile.js|ad907fd1fc84e4da84501e45c7eb2f50|dsh-update-banner
+# ④ Android 运行环境适配（2026-10-03 rc.2 事故后补录：这 6 个文件的补丁原先只手工塞在 payload 里，
+#    换内核时随上游改动一起被覆盖 → 每轮 EACCES。纳入清单后，装机前的 verify 就能拦住）
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/index.js|8f7d81e9c9fd0800e42d3d7cbaca2606|open(currentPath, "wx")
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-fs-local/lib/index.js|9612532ae447891802d15fb144862fc6|isHardlinkUnsupported
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-attachment-local/lib/index.js|786c67c021c111485c80d4ed9eaa6363|sharp-shim
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-llm-deepseek/lib/index.js|63b86285e7b42fe34507da4c68f28e7b|isAttachmentError
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-ptc-runtime-node/lib/index.js|00fd24b60a35eae0408cdcf50176b1de|LD_LIBRARY_PATH
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-fs-search/lib/index.js|a4e290d7e60914351f0173c9ed0941eb|ripgrep is unavailable
+
+# ② 分享进来的可见性与落盘副本（2026-10-15 事故：两份副本里服务的是"瘦"的那份，
+#    且"到货卡片"只挂在会话页 → 用户分享进来的文件收下了却没人看见。
+#    这两条把「带 shell.overlay 到货横幅的那一份」钉死，两份副本都必须一致）
+dshhome/profiles/web/node_modules/dsh-android-console/lib/client.js|b50c3cf4c294941da285a28ba1a45632|android-share-notice
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-android-console/lib/client.js|b50c3cf4c294941da285a28ba1a45632|android-share-notice
+# ⚠️ 2026-10-15 之前这条清单**没覆盖**这两个文件，于是"源码改了、包里带的还是旧的"
+#    能一路通过 verify。装 1.39 之前，patch-check 对这两条会报漂移（装机副本还是旧的）——那是**正确**的。
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-plugin-auto-summary-policy/lib/index.js|d0beb2db51a199d1d7b4a45b5cc74936|0.1.2-effective-policy
+# ②b 同一批插件的 **profile 落点**（引擎真正加载的那一层）也要随包一致 —— v1.38-fix（2026-10-15）补。
+#     解析优先级实验（check-session-create-isolated.sh 的 PLANT_USERLAYER_* 对照）证明：
+#     base profile 盖住用户层 ⇒ 只要这一层随包更新，老副本永远挡不住源码改动。
+#     两侧都由 build-overlay 同一份源复制而来；清单钉住 profile 侧，防止以后只更新一边。
+dshhome/profiles/web/node_modules/dsh-plugin-auto-summary-policy/lib/index.js|d0beb2db51a199d1d7b4a45b5cc74936|0.1.2-effective-policy
+dshhome/profiles/web/node_modules/dsh-plugin-session-rewind/lib/index.js|d70735de575f2015d7a6b047747b9dbe|rewindSession
+dshhome/profiles/web/node_modules/dsh-plugin-turn-notify/lib/index-v3.js|3e40e4c4311269e5eac5a2258a0a1d40|turn-notify
+# ③ App 每次冷启动都会用包里的 dshhome/cordis.patch.yml 覆盖用户家目录（最后生效的一层）——
+#    同 id 条目会替换前一层并**静默丢掉它的 config**，1.38 的"新建会话失败"就是这么来的
+dshhome/cordis.patch.yml|be946ec047455069d32e8b05cb33aa55|modelPolicies

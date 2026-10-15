@@ -29,6 +29,7 @@ window.__ModuleLoader__.load({
     const Modal = primitives.Modal;
     const Toast = primitives.Toast;
     const SegmentedControl = primitives.SegmentedControl;
+    const fileSizeText = primitives.fileSizeText;
 
     // ---------------------------------------------------------------- 样式
     // 与 ui-settings-general 的行规格对齐：标准单行 Flex、标题+说明在左、控件紧凑在右
@@ -542,6 +543,278 @@ window.__ModuleLoader__.load({
       };
     }
 
+    // Model routing uses the same live directory as the composer model selector.
+    const MODEL_ROLES = [
+      { id: 'cheap', label: '日常与重复任务', provider: 'dp', model: 'deepseek-v4.1-flash', use: '取数、转格式、常规问答、写测试', cost: '参考倍率 0.15' },
+      { id: 'code', label: '代码实现', provider: 'dp', model: 'kimi-k2.7-code', use: '实现功能、批量修改、补注释', cost: '参考倍率 0.15' },
+      { id: 'fast', label: '快速处理', provider: 'dp', model: 'gemini-3.8-flash', use: '摘要、翻译、分类、初筛', cost: '参考倍率 0.15' },
+      { id: 'claude', label: '分析与审查', provider: 'claude', model: 'claude-opus-5-5', use: '需求分析、代码审查、多轮推敲', cost: '参考倍率 0.75' },
+      { id: 'plan', label: '架构与规划', provider: 'gpt', model: 'gpt-5.6-sol', use: '架构设计、技术选型、方案比较', cost: '参考倍率 0.27' },
+      { id: 'ds', label: 'DeepSeek 官方 · 暂停使用', provider: 'deepseek-official', model: 'deepseek-flash', use: '你近期不续费官方 API，暂不从此页切入', paused: true },
+    ];
+    const routeName = value => value ? value.provider + '/' + value.model : '尚未读取';
+    const routeMatch = (a, b) => !!a && !!b && a.provider === b.provider && a.model === b.model;
+    const routeModel = (groups, value) => groups.find(g => g.id === value?.provider)?.models.find(m => m.id === value?.model);
+
+    class ModelRouteController {
+      constructor(services) {
+        this.services = services;
+        this.listeners = new Set();
+        this.state = { sessionId: null, title: '', directory: null, previous: null, busy: false, error: '', message: '' };
+        this.generation = 0;
+        this.stopDirectory = () => {};
+        this.stopSessions = () => {};
+        this.previous = new Map();
+      }
+      emit(patch) { this.state = { ...this.state, ...patch }; for (const fn of this.listeners) fn(); }
+      subscribe(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
+      start() {
+        if (!this.services?.sessions || !this.services?.modelDirectories) { this.emit({ error: '模型服务尚未就绪，请刷新页面后再进入。' }); return; }
+        this.state = { ...this.state, sessionId: null };
+        this.stopSessions = this.services.sessions.list.subscribe(() => this.bind());
+        this.bind();
+      }
+      bind() {
+        const rows = Object.values(this.services.sessions.list.getSnapshot().byId);
+        const main = rows.filter(r => (r.retainedBy?.mainView ?? this.services.sessions.retainInfo(r.id).getSnapshot().retainedBy.mainView ?? 0) > 0 && this.services.sessions.subagentAddress(r.id) === undefined);
+        const row = main.length === 1 ? main[0] : null;
+        if (row && row.id === this.state.sessionId) { if (row) this.emit({ title: row.title || '当前会话' }); return; }
+        ++this.generation;
+        this.stopDirectory();
+        this.directory = null;
+        if (!row) {
+          this.emit({ sessionId: null, directory: null, previous: null, busy: false, title: '', error: main.length > 1 ? '有多个会话在主视图，请先打开一个会话。' : '' });
+          return;
+        }
+        try {
+          this.directory = this.services.modelDirectories.directoryFor(row.id);
+          const directory = this.directory, generation = this.generation;
+          const sync = () => { if (generation === this.generation) this.emit({ directory: directory.store.getSnapshot() }); };
+          this.stopDirectory = this.directory.store.subscribe(sync);
+          let previous = this.previous.get(row.id) || null;
+          try { previous = previous || JSON.parse(window.localStorage.getItem('dsh.model-route.previous.' + row.id) || 'null'); } catch (_) {}
+          this.emit({ sessionId: row.id, title: row.title || '当前会话', directory: this.directory.store.getSnapshot(), previous, busy: false, error: '', message: '' });
+          this.refresh();
+        } catch (e) { this.emit({ sessionId: row.id, directory: null, previous: null, busy: false, error: String(e.message || e) }); }
+      }
+      async refresh() {
+        const directory = this.directory, generation = this.generation;
+        if (!directory) return;
+        try { await directory.load(); if (generation === this.generation) this.emit({ directory: directory.store.getSnapshot(), error: '' }); }
+        catch (e) { if (generation === this.generation) this.emit({ error: String(e.message || e) }); }
+      }
+      async select(target) {
+        if (this.state.busy || !this.directory) return;
+        const row = this.services.sessions.list.getSnapshot().byId[this.state.sessionId];
+        if (!row || (this.services.sessions.retainInfo(row.id).getSnapshot().retainedBy.mainView ?? 0) === 0) {
+          this.emit({ error: '目标会话已离开主视图，请重新打开后再切换。' }); return;
+        }
+        const directory = this.directory, before = directory.store.getSnapshot().current;
+        const model = routeModel(directory.store.getSnapshot().groups, target);
+        if (target.provider === 'deepseek-official') { this.emit({ error: 'DeepSeek 官方已暂停使用。' }); return; }
+        if (!model) { this.emit({ error: '目标模型不在当前目录中，请刷新后再试。' }); return; }
+        if (target.reasoningEffort !== undefined && !model.reasoning?.efforts.some(e => e.id === target.reasoningEffort)) {
+          this.emit({ error: '该模型未提供此思考档位，请重新选择。' }); return;
+        }
+        if (routeMatch(before, target) && before.reasoningEffort === target.reasoningEffort) {
+          this.emit({ error: '', message: '当前已使用此配置。' }); return;
+        }
+        const generation = this.generation, sessionId = this.state.sessionId;
+        this.emit({ busy: true, error: '', message: '' });
+        try {
+          const result = await directory.select(target);
+          if (!result?.ok) throw new Error(result?.error?.message || '模型切换未成功');
+          if (before) {
+            this.previous.set(sessionId, before);
+            try { window.localStorage.setItem('dsh.model-route.previous.' + sessionId, JSON.stringify(before)); } catch (_) {}
+          }
+          if (generation !== this.generation) return;
+          this.emit({ directory: directory.store.getSnapshot(), previous: before, message: '已切换为 ' + routeName(target) + '，后续请求使用新配置。' });
+        } catch (e) { if (generation === this.generation) this.emit({ error: String(e.message || e) }); }
+        finally { if (generation === this.generation) this.emit({ busy: false }); }
+      }
+      dispose() { ++this.generation; this.stopSessions(); this.stopDirectory(); this.listeners.clear(); }
+    }
+
+    function ModelRoutingPage({ services, onBack }) {
+      const [controller] = react.useState(() => new ModelRouteController(services));
+      const [state, setState] = react.useState(controller.state);
+      const [chosen, setChosen] = react.useState(null);
+      const [effort, setEffort] = react.useState('');
+      const [pending, setPending] = react.useState(null);
+      react.useEffect(() => {
+        const stop = controller.subscribe(() => setState(controller.state));
+        controller.start();
+        return () => { stop(); controller.dispose(); };
+      }, [controller]);
+      const currentKey = state.sessionId + ':' + routeName(state.directory?.current) + ':' + (state.directory?.current?.reasoningEffort || '');
+      react.useEffect(() => { setChosen(null); setPending(null); setEffort(''); }, [currentKey]);
+      const directory = state.directory || {}, current = directory.current;
+      const groups = directory.groups || [];
+      const target = chosen || current;
+      const model = routeModel(groups, target);
+      const levels = model?.reasoning?.efforts || [];
+      const currentRole = MODEL_ROLES.find(r => routeMatch(r, current));
+      const unavailable = !state.sessionId || !current || directory.status === 'loading' || directory.status === 'error' || directory.status === 'selecting' || state.busy;
+      const targetEffort = effort || (routeMatch(target, current) ? current?.reasoningEffort : undefined) || model?.reasoning?.defaultEffort;
+      const request = target ? { provider: target.provider, model: target.model, ...(targetEffort ? { reasoningEffort: targetEffort } : {}) } : null;
+      const pick = value => { setChosen(value); setEffort(''); setPending(null); };
+      const confirm = value => setPending({ sessionId: state.sessionId, target: value });
+      return jsxs('div', { className: 'ctl-root', children: [
+        jsx(Back, { title: '模型分工', onBack }),
+        jsx(Note, { children: '按任务手动选模型。当前页面只操作正在打开的会话，切换时也会更新引擎默认模型。' }),
+        jsxs('div', { className: 'ctl-life-card', style: { margin: '12px 0' }, children: [
+          jsx('div', { className: 'ctl-brand', children: '当前使用' }),
+          jsx('div', { className: 'ctl-title', children: routeName(current) }),
+          jsx('div', { className: 'ctl-desc', children: (currentRole?.label || '自定义模型') + ' · 思考深度 ' + (current?.reasoningEffort || routeModel(groups, current)?.reasoning?.defaultEffort || '模型默认') }),
+          jsx('div', { className: 'ctl-desc', children: state.sessionId ? state.title + ' · ' + state.sessionId.slice(0, 12) : '先打开一个会话，再进入模型分工' }),
+          jsx(Button, { variant: 'outline', size: 'sm', disabled: state.busy, onClick: () => controller.refresh(), children: '刷新状态' }),
+        ] }),
+        (state.error || directory.error) ? jsx('div', { role: 'alert', className: 'ctl-desc ctl-warn', children: state.error || String(directory.error?.message || directory.error) }) : null,
+        state.message ? jsx('div', { role: 'status', className: 'ctl-note', children: state.message }) : null,
+        jsx('div', { className: 'ctl-group', children: '按任务选择' }),
+        jsx('div', { className: 'ctl-life-grid', children: MODEL_ROLES.map(role => {
+          const available = !!routeModel(groups, role), selected = routeMatch(role, target);
+          return jsxs('div', { className: 'ctl-life-card', style: selected ? { borderColor: 'var(--dsw-alias-state-business-primary)' } : {}, children: [
+            jsxs('div', { className: 'ctl-life-card-head', children: [jsx('div', { className: 'ctl-life-card-title', children: role.label }), jsx('span', { className: 'ctl-tag', children: role.paused ? '已暂停' : routeMatch(role, current) ? '使用中' : role.cost })] }),
+            jsx('div', { className: 'ctl-desc', children: routeName(role) }),
+            jsx('div', { className: 'ctl-desc', children: role.use }),
+            jsx(Button, { variant: 'outline', size: 'sm', disabled: unavailable || role.paused || !available, onClick: () => pick({ provider: role.provider, model: role.model }), children: role.paused ? '暂不使用' : !available ? '目录中不可用' : selected ? '已选定' : '选择此角色' }),
+          ] }, role.id);
+        }) }),
+        jsx('div', { className: 'ctl-group', children: '本次配置' }),
+        jsx(Row, { title: '目标模型', desc: routeName(target) }),
+        levels.length ? jsxs('label', { className: 'ctl-note', children: ['思考深度', jsx('select', { className: 'ctl-voice-input', value: effort, disabled: unavailable, onChange: e => setEffort(e.target.value), children: [jsx('option', { value: '', children: routeMatch(target, current) ? '保持当前档位 / 模型默认' : '模型默认' }), ...levels.map(level => jsx('option', { value: level.id, children: level.name + ' (' + level.id + ')' }, level.id))] })] }) : jsx(Note, { children: '此模型未声明思考档位，使用模型默认值。' }),
+        jsxs('div', { className: 'ctl-bar', children: [
+          jsx(Button, { variant: 'primary', size: 'sm', disabled: unavailable || !model || target?.provider === 'deepseek-official', onClick: () => confirm(request), children: state.busy ? '正在切换…' : '应用配置' }),
+          jsx(Button, { variant: 'outline', size: 'sm', disabled: unavailable || !state.previous || state.previous.provider === 'deepseek-official' || !routeModel(groups, state.previous), onClick: () => confirm(state.previous), children: '回到上一次配置' }),
+          chosen ? jsx(Button, { variant: 'ghost', size: 'sm', onClick: () => pick(null), children: '保持当前模型' }) : null,
+        ] }),
+        jsx(Note, { children: '参考倍率来自既有角色配置，可能变化，也不是每条消息的实际价格。模型目录可用不代表账户有余额；此页不发起付费试聊。' }),
+        jsx(Note, { children: '日常与重复任务中的 DeepSeek 走 dp 中继，不使用 DeepSeek 官方余额。切换模型会把当前对话上下文交给对应服务。' }),
+        pending ? jsx(Confirm, { pending: { title: '应用模型配置', text: state.title + '：' + routeName(current) + ' → ' + routeName(pending.target) + '，思考深度 ' + (pending.target.reasoningEffort || '模型默认') }, onCancel: () => setPending(null), onOk: () => {
+          const operation = pending; setPending(null);
+          if (operation.sessionId === controller.state.sessionId) controller.select(operation.target);
+        } }) : null,
+      ] });
+    }
+
+    const WEEK_CN = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+
+    /** 10月15日 周四（今天）—— 全部账目页的日期分组标题。 */
+    function fmtDay(ts) {
+      const d = new Date(ts);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const that = new Date(d.getTime());
+      that.setHours(0, 0, 0, 0);
+      const diff = Math.round((today.getTime() - that.getTime()) / 86400000);
+      return (d.getFullYear() !== today.getFullYear() ? d.getFullYear() + '年' : '') + (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + WEEK_CN[d.getDay()] + (diff === 0 ? '（今天）' : diff === 1 ? '（昨天）' : '');
+    }
+
+    /**
+     * 全部账目页：按天分组、每页 60 笔、可「加载更多」。
+     * 入口在「💰 今日记账与消费流水」卡片底部 —— 那张卡片只列**今天**（用户 2026-10-15 要求），
+     * 更早的账都在这里翻。
+     */
+    function LedgerPage({ onBack }) {
+      const PAGE = 60;
+      const [rows, setRows] = react.useState([]);
+      const [meta, setMeta] = react.useState({ total: 0, expense: 0, income: 0 });
+      const [err, setErr] = react.useState('');
+      const [loading, setLoading] = react.useState(true);
+      const active = react.useRef(false);
+      const request = react.useRef(null);
+
+      const load = react.useCallback(async (offset) => {
+        // Ref 同步加锁：按钮禁用要等重渲染，挡不住同一帧的连续点击。
+        if (request.current || !active.current) return;
+        const controller = new AbortController();
+        request.current = controller;
+        setLoading(true);
+        setErr('');
+        try {
+          const res = await fetch('/life/api/tx?limit=' + PAGE + '&offset=' + offset, { signal: controller.signal });
+          const data = await res.json();
+          if (!res.ok || !data || !data.ok || !Array.isArray(data.txs)) {
+            throw new Error((data && data.error) || '读取失败（HTTP ' + res.status + '）');
+          }
+          if (controller.signal.aborted || !active.current) return;
+          setRows((prev) => (offset > 0 ? prev.concat(data.txs) : data.txs));
+          setMeta({ total: data.total || 0, expense: data.expense || 0, income: data.income || 0 });
+        } catch (e) {
+          if (!controller.signal.aborted && active.current) setErr(String((e && e.message) || e));
+        } finally {
+          if (request.current === controller) {
+            request.current = null;
+            if (active.current) setLoading(false);
+          }
+        }
+      }, []);
+
+      react.useEffect(() => {
+        active.current = true;
+        load(0);
+        return () => {
+          active.current = false;
+          if (request.current) request.current.abort();
+          request.current = null;
+        };
+      }, [load]);
+
+      const groups = [];
+      const index = {};
+      for (const tx of rows) {
+        const key = fmtDay(tx.created_at);
+        if (!(key in index)) {
+          index[key] = groups.length;
+          groups.push({ key, at: tx.created_at, txs: [], expense: 0, income: 0 });
+        }
+        const g = groups[index[key]];
+        g.txs.push(tx);
+        if (tx.type === 'income') g.income += Number(tx.amount || 0);
+        else g.expense += Number(tx.amount || 0);
+      }
+
+      const rowOf = (tx) => jsxs('div', { key: tx.id, className: 'ctl-item-row', children: [
+        jsxs('div', { className: 'ctl-main', children: [
+          jsxs('div', { style: { display: 'flex', alignItems: 'center', gap: '6px' }, children: [
+            jsx('span', { style: { fontSize: '13.5px', fontWeight: 500, color: 'var(--dsw-alias-label-primary)' }, children: tx.merchant || '消费' }),
+            tx.category ? jsx('span', { className: 'ctl-tag', children: tx.category }) : null,
+          ] }),
+          jsx('div', { className: 'ctl-desc', children: (tx.account || '自动记账') + ' · ' + new Date(tx.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }) }),
+        ] }),
+        jsx('span', { className: tx.type === 'income' ? 'ctl-amt-pos' : 'ctl-amt-neg', children: (tx.type === 'income' ? '+ ¥' : '- ¥') + Number(tx.amount || 0).toFixed(2) }),
+      ] });
+
+      return jsxs('div', { className: 'ctl-root', children: [
+        jsx(Back, { title: '全部账目', onBack }),
+        jsx(Note, { children: loading && rows.length === 0 ? '正在读取全部账目…' : err && rows.length === 0 ? '暂时无法读取账目，请重试。' : '自动记账 + 手工补录的全部流水，按天倒序。共 ' + meta.total + ' 笔：支出 ¥' + Number(meta.expense).toFixed(2) + '，收入 ¥' + Number(meta.income).toFixed(2) + '。' }),
+        jsx('div', { className: 'ctl-sep' }),
+        err ? jsx('div', { className: 'ctl-warn', children: '读取失败：' + err }) : null,
+        (!loading && !err && rows.length === 0) ? jsx('div', { className: 'ctl-note', children: '这里还没有账目。' }) : null,
+        groups.map((g) => jsxs('div', { key: g.key, className: 'ctl-life-card', children: [
+          jsxs('div', { className: 'ctl-life-card-head', children: [
+            jsx('span', { className: 'ctl-life-card-title', children: fmtDay(g.at) }),
+            jsxs('div', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' }, children: [
+              '已加载合计 · 支出 ', jsx('span', { className: 'ctl-amt-neg', children: '¥' + g.expense.toFixed(2) }),
+              ' 收入 ', jsx('span', { className: 'ctl-amt-pos', children: '¥' + g.income.toFixed(2) }),
+            ] }),
+          ] }),
+          g.txs.map(rowOf),
+        ] })),
+        err || rows.length < meta.total
+          ? jsx('div', { style: { display: 'flex', justifyContent: 'center', padding: '10px 0 6px' }, children: jsx(Button, {
+              variant: 'outline',
+              size: 'sm',
+              disabled: loading,
+              onClick: () => load(rows.length),
+              children: loading ? '加载中…' : err ? '重试读取' : '加载更多（还有 ' + (meta.total - rows.length) + ' 笔）',
+            }) })
+          : null,
+      ] });
+    }
+
     function ConsoleSection(ownerProps) {
       ensureCss();
       const close = ownerProps && typeof ownerProps.close === 'function' ? ownerProps.close : () => {};
@@ -584,10 +857,15 @@ window.__ModuleLoader__.load({
         setPending({ title: title, text: text, run: () => run(id, arg, done) });
       }, [run]);
 
+      if (page === 'models') return jsx(ModelRoutingPage, { services: ownerProps.modelServices, onBack: () => setPage('main') });
+
+      if (page === 'ledger') return jsx(LedgerPage, { onBack: () => setPage('life') });
+
       if (!state) {
         return jsx('div', { className: 'ctl-empty', children: [
           jsx('div', { className: 'ctl-title', children: '控制台只在安卓应用内可用' }),
           jsx('div', { className: 'ctl-desc', children: '这一页通过手机壳的桥（dshshell）执行解压 / 起引擎 / 授权等动作；桌面浏览器里没有这条通道。' }),
+          jsx(Button, { variant: 'outline', size: 'sm', onClick: () => setPage('models'), children: '进入模型分工' }),
         ] });
       }
 
@@ -897,7 +1175,9 @@ window.__ModuleLoader__.load({
         const pkgs = lf.packages || [];
         const codes = lf.codes || [];
         const txs = lf.transactions || [];
-        const tasks = lf.tasks || [];
+        const schedules = state.schedules || {};
+        const tasks = schedules.items || (lf.tasks || []).map(t => Object.assign({ source: 'life' }, t));
+        const history = schedules.history || [];
         const isRunning = !!lf.daemonRunning;
 
         return jsxs('div', { className: 'ctl-root', children: [
@@ -984,6 +1264,22 @@ window.__ModuleLoader__.load({
                   jsx('span', { className: 'ctl-amt-pos', children: '¥' + (lf.todayIncome || 0).toFixed(2) }),
                 ] }),
               ] }),
+              (lf.balances && lf.balances.length)
+                ? jsx('div', { className: 'ctl-desc', style: { padding: '2px 12px 6px' }, children: '账户余额：' + lf.balances.map((b) => (b.account || '账户') + ' ¥' + Number(b.amount || 0).toFixed(2)).join('｜') + (lf.balances[0] && lf.balances[0].at ? '（' + new Date(lf.balances[0].at).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) + '）' : '') })
+                : null,
+              (typeof lf.monthIncome === 'number' && typeof lf.monthExpense === 'number')
+                ? jsxs('div', { className: 'ctl-desc', style: { padding: '0 12px 6px' }, children: [
+                    jsx('span', { children: '本月结余 ' }),
+                    jsx('span', {
+                      className: (lf.monthIncome - lf.monthExpense) >= 0 ? 'ctl-amt-pos' : 'ctl-amt-neg',
+                      children: '¥' + (lf.monthIncome - lf.monthExpense).toFixed(2),
+                    }),
+                    jsx('span', {
+                      children: ' · 支出 ¥' + lf.monthExpense.toFixed(2) + ' / 收入 ¥' + lf.monthIncome.toFixed(2)
+                        + (lf.monthTxCount ? '（' + lf.monthTxCount + ' 笔）' : ''),
+                    }),
+                  ] })
+                : null,
               txs.length === 0
                 ? jsx('div', { className: 'ctl-note', children: '今日暂无新记账记录。收到微信/支付宝/银行支付通知时将自动记账。' })
                 : txs.map((tx) => jsxs('div', { key: tx.id, className: 'ctl-item-row', children: [
@@ -996,6 +1292,15 @@ window.__ModuleLoader__.load({
                     ] }),
                     jsx('span', { className: tx.type === 'income' ? 'ctl-amt-pos' : 'ctl-amt-neg', children: (tx.type === 'income' ? '+ ¥' : '- ¥') + Number(tx.amount || 0).toFixed(2) }),
                   ] })),
+              (lf.txToday > txs.length)
+                ? jsx('div', { className: 'ctl-desc', style: { padding: '0 12px' }, children: '今日还有 ' + (lf.txToday - txs.length) + ' 笔未显示（进「全部账目」看）' })
+                : null,
+              jsx('div', { style: { display: 'flex', justifyContent: 'flex-end', padding: '2px 12px 0' }, children: jsx(Button, {
+                variant: 'ghost',
+                size: 'sm',
+                onClick: () => setPage('ledger'),
+                children: '全部账目（共 ' + (lf.txTotal || 0) + ' 笔）›',
+              }) }),
             ] }),
 
             // 3. 验证码
@@ -1020,28 +1325,37 @@ window.__ModuleLoader__.load({
                   ] })),
             ] }),
 
-            // 4. 定时自动化任务
+            // 4. 两套调度器的任务及原生执行历史
             jsxs('div', { className: 'ctl-life-card', children: [
-              jsx('div', { className: 'ctl-life-card-head', children: [
-                jsx('span', { className: 'ctl-life-card-title', children: '⏰ 定时自动化任务 (' + tasks.length + '项)' }),
+              jsx('div', { className: 'ctl-life-card-title', children: '⏰ 定时任务 (' + tasks.length + '项)' }),
+              schedules.lifeError ? jsx(Note, { children: '生活助理任务读取失败: ' + schedules.lifeError }) : null,
+              tasks.length === 0 ? jsx(Note, { children: '暂无等待触发的任务。' }) : tasks.map(t => jsxs('div', {
+                key: t.source + ':' + t.id, className: 'ctl-item-row', children: [
+                  jsxs('div', { className: 'ctl-main', children: [
+                    jsx('span', { style: { fontSize: '13.5px', fontWeight: 500 }, children: t.name }),
+                    jsx('div', { className: 'ctl-desc', children: (t.source === 'app' ? 'App 闹钟' : '生活助理') + ' · ' +
+                      (t.cron_expr || (t.repeat === 'daily' ? '每天' : t.repeat === 'interval' ? '每 ' + t.intervalMin + ' 分钟' : '一次性')) +
+                      ' · ' + (t.enabled ? (t.last_status || '等待触发') : '已暂停') +
+                      (t.next_run_at ? ' · 下次: ' + new Date(t.next_run_at).toLocaleString('zh-CN') : '') }),
+                    jsx('div', { className: 'ctl-desc', children: t.id }),
+                  ] }),
+                  t.source === 'life' ? jsx(Button, { variant: 'outline', size: 'sm',
+                    onClick: () => run('life.task.run', String(t.id), '正在执行生活助理任务…'), children: '立即执行' }) : null,
+                  jsx(Button, { variant: 'ghost', size: 'sm', disabled: !t.enabled,
+                    onClick: () => run('schedule.cancel', JSON.stringify({source: t.source, id: t.id}), '取消请求已提交'), children: '取消' }),
+                  jsx(Button, { variant: 'ghost', size: 'sm',
+                    onClick: () => ask('删除定时任务', t.source === 'app'
+                      ? '确定删除 App 闹钟任务「' + t.name + '」？会从任务列表里移除。注意：已经注册进系统的闹钟在老版本 App 上撤不掉，可能仍触发最后一次。'
+                      : '确定永久删除生活助理任务「' + t.name + '」？删除后不会再触发，也无法从界面恢复。',
+                      'life.task.delete', JSON.stringify({ source: t.source, id: String(t.id) }), '已删除任务: ' + t.name), children: '删除' }),
+                ]
+              })),
+              jsxs('details', { children: [
+                jsx('summary', { children: '最近执行记录 (' + history.length + ')' }),
+                jsx('pre', { style: { whiteSpace: 'pre-wrap', fontSize: '11px', maxHeight: '200px', overflow: 'auto' },
+                  children: history.length ? history.join('\n') : '暂无 App 闹钟执行记录。' }),
               ] }),
-              tasks.length === 0
-                ? jsx('div', { className: 'ctl-note', children: '暂无定时任务。' })
-                : tasks.map((t) => jsxs('div', { key: t.id, className: 'ctl-item-row', children: [
-                    jsxs('div', { className: 'ctl-main', children: [
-                      jsxs('div', { style: { display: 'flex', alignItems: 'center', gap: '6px' }, children: [
-                        jsx('span', { style: { fontSize: '13.5px', fontWeight: 500, color: 'var(--dsw-alias-label-primary)' }, children: t.name }),
-                        jsx('span', { className: 'ctl-tag', children: t.cron_expr }),
-                      ] }),
-                      jsx('div', { className: 'ctl-desc', children: (t.enabled ? '🟢 启用中' : '⚪ 已暂停') + (t.next_run_at ? ' · 下次: ' + new Date(t.next_run_at).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) : '') }),
-                    ] }),
-                    jsx(Button, {
-                      variant: 'ghost',
-                      size: 'sm',
-                      onClick: () => run('life.task.run', t.id, '已触发执行任务: ' + t.name),
-                      children: '立即执行',
-                    }),
-                  ] })),
+              jsx(Note, { children: '取消 = 暂停（阻止后续触发，已开始的会继续）；删除 = 从列表永久移除。App 闹钟任务的登记行会被清掉，但老版本 App 里已注册进系统的闹钟撤不掉，可能仍触发最后一次。' }),
             ] }),
           ] }),
 
@@ -1311,6 +1625,12 @@ window.__ModuleLoader__.load({
 
         jsx('div', { className: 'ctl-group', children: '设置' }),
         jsx(Row, {
+          title: '模型分工',
+          desc: '查看当前模型 · 按任务切换 · 调整思考深度',
+          right: jsx(Button, { variant: 'outline', size: 'sm', onClick: () => setPage('models'), children: '进入' }),
+          onClick: () => setPage('models'),
+        }),
+        jsx(Row, {
           title: '智能生活助理',
           desc: (state.life && state.life.summary) || '验证码 · 待取快递 · 自动记账 · 定时任务',
           right: jsxs(Fragment, { children: [
@@ -1429,21 +1749,219 @@ window.__ModuleLoader__.load({
       ] });
     }
 
-    const inject = ['slots'];
+    // The composer owns draft revisions and attachments; no DOM mutation or submit action is used.
+    function nativeInput() { return typeof window.__DSH_INPUT_TOKEN === 'string' ? window.dshinput || null : null; }
+    function nativeJson(method, ...args) {
+      const bridge = nativeInput();
+      if (!bridge || typeof bridge[method] !== 'function') throw new Error('需要在更新后的安卓 App 内使用');
+      const result = JSON.parse(bridge[method](window.__DSH_INPUT_TOKEN, ...args));
+      if (!result.ok) throw new Error(result.error || '操作失败');
+      return result;
+    }
+    async function sharedFiles(batch, call = nativeJson) {
+      const output = []; let total = 0;
+      for (const item of batch.files || []) {
+        if (!Number.isSafeInteger(item.bytes) || item.bytes < 0 || item.bytes > 16 * 1024 * 1024) throw new Error('无效附件大小');
+        total += item.bytes;
+        if (total > 32 * 1024 * 1024) throw new Error('分享附件总量超过 32MB');
+        const parts = []; let offset = 0;
+        do {
+          const part = call('shareChunk', batch.id, item.index, offset);
+          const bytes = atob(part.data); const chunk = new Uint8Array(bytes.length);
+          if (bytes.length > 65536 || offset + bytes.length > item.bytes || (!part.eof && !bytes.length)) throw new Error('附件分块不完整');
+          for (let i = 0; i < bytes.length; i++) chunk[i] = bytes.charCodeAt(i);
+          parts.push(chunk); offset += chunk.length;
+          if (part.eof) { if (offset !== item.bytes) throw new Error('附件长度不匹配'); break; }
+          await new Promise(resolve => setTimeout(resolve, 0));
+        } while (offset < item.bytes);
+        output.push(new File(parts, item.name, { type: item.mime }));
+      }
+      return output;
+    }
+    function insertTranscript(inputActions, text, span) {
+      return !!text && inputActions.insertText(text, span);
+    }
+    async function putShareInDraft(batch, sessionId, inputActions, conversation, call = nativeJson, current = () => true) {
+      const files = await sharedFiles(batch, call);
+      if (!current()) throw new Error("聊天已切换，分享仍保留在收件箱");
+      const drafts = files.length ? conversation.createDrafts(sessionId, files) : [];
+      if (drafts.length && !inputActions.addAttachments(drafts.map(file => file.id))) {
+        conversation.releaseDraftAttachments(drafts); throw new Error('草稿暂时不可编辑，请稍后重试');
+      }
+      // Attachment insertion changes draftRev, so capture the text span after adding them.
+      if (batch.text && !insertTranscript(inputActions, batch.text, inputActions.captureInsertion())) {
+        if (drafts.length) { inputActions.pruneAttachments(drafts.map(file => file.id)); conversation.releaseDraftAttachments(drafts); }
+        throw new Error('草稿已改变，请重新选择加入草稿');
+      }
+      return true;
+    }
+    function AndroidDraftInput({ sessionId, inputActions, draftConversation }) {
+      const [voice, setVoice] = react.useState(null);
+      const [share, setShare] = react.useState(null);
+      const [transcript, setTranscript] = react.useState('');
+      const [message, setMessage] = react.useState('');
+      const [importing, setImporting] = react.useState(false);
+      const active = react.useRef(null), alive = react.useRef(true), epoch = react.useRef(0), received = react.useRef(new Set());
+      react.useEffect(() => {
+        alive.current = true;
+        const poll = () => {
+          if (!nativeInput()) return;
+          try { setShare(nativeJson('shareState')); } catch (e) { setMessage(e.message); }
+          const current = active.current;
+          if (!current) return;
+          try {
+            const result = nativeJson('voiceState');
+            if (result.id !== current.id) return;
+            setVoice(result);
+            if (['final', 'empty', 'error', 'cancelled'].includes(result.state)) {
+              active.current = null;
+              if (result.state === 'final') {
+                if (insertTranscript(inputActions, result.text, current.span)) { setTranscript(''); setMessage('听写已加入草稿'); }
+                else { setTranscript(result.text); setMessage('草稿已改变，转写已保留，可手动加入'); }
+              } else setMessage(result.error || (result.state === 'empty' ? '未识别到内容' : '听写已取消'));
+            }
+          } catch (e) { setMessage(e.message); active.current = null; }
+        };
+        poll(); const timer = setInterval(poll, 400);
+        return () => {
+          alive.current = false; epoch.current++; clearInterval(timer);
+          if (active.current) try { nativeJson('voiceAct', 'cancel', active.current.id); } catch {}
+          active.current = null;
+        };
+      }, [sessionId, inputActions]);
+      if (!nativeInput() || !inputActions || !sessionId) return null;
+      const busy = active.current !== null;
+      const batch = share?.batch;
+      const callVoice = action => {
+        try {
+          if (action === 'start') {
+            const id = 'voice-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
+            active.current = { id, span: inputActions.captureInsertion() };
+            setMessage(''); setTranscript(''); setVoice({ state: 'starting' }); nativeJson('voiceAct', action, id);
+          } else if (active.current) nativeJson('voiceAct', action, active.current.id);
+        } catch (e) { setMessage(e.message); active.current = null; }
+      };
+      const receive = async () => {
+        const targetEpoch = epoch.current; const current = () => alive.current && epoch.current === targetEpoch;
+        setImporting(true); setMessage('');
+        try {
+          if (!received.current.has(batch.id)) {
+            await putShareInDraft(batch, sessionId, inputActions, draftConversation, nativeJson, current);
+            received.current.add(batch.id);
+          }
+          if (!current()) return;
+          nativeJson('shareAck', batch.id);
+          if (current()) { setShare(nativeJson('shareState')); setMessage('分享已加入草稿，请检查后发送'); }
+        } catch (e) { if (alive.current) setMessage(e.message); }
+        finally { if (alive.current) setImporting(false); }
+      };
+      const discard = () => {
+        try { nativeJson('shareAck', batch.id); setShare(nativeJson('shareState')); }
+        catch (e) { setMessage(e.message); }
+      };
+      return jsxs('div', { className: 'ctl-input-native', style: { display: 'flex', flexDirection: 'column', gap: 6, width: '100%', fontSize: 12 }, children: [
+        jsxs('div', { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }, children: [
+          jsx(Button, { size: 'sm', variant: busy ? 'primary' : 'secondary', disabled: importing, onClick: () => callVoice(busy ? 'stop' : 'start'), children: busy ? '结束收音' : '🎤 听写' }),
+          busy ? jsx(Button, { size: 'sm', variant: 'ghost', onClick: () => callVoice('cancel'), children: '取消' }) : null,
+          busy ? jsx('span', { role: 'status', children: voice?.text || ({ permission: '等待麦克风权限', recognizing: '正在识别…', recording: '正在收音…' }[voice?.state] || '请说话…') }) : null,
+          message ? jsx('span', { role: 'status', children: message }) : null,
+        ] }),
+        transcript ? jsxs('div', { children: [jsx('span', { children: transcript }), ' ', jsx(Button, { size: 'sm', onClick: () => {
+          if (insertTranscript(inputActions, transcript, inputActions.captureInsertion())) { setTranscript(''); setMessage('转写已加入草稿'); }
+        }, children: '加入草稿' })] }) : null,
+        batch ? jsxs('div', { style: { padding: 8, border: '1px solid var(--border, #8885)', borderRadius: 8 }, children: [
+          jsx('strong', { children: '收到分享' + (share.count > 1 ? ' · 待处理 ' + share.count + ' 条' : '') }),
+          jsx('div', { style: { whiteSpace: 'pre-wrap', maxHeight: 100, overflow: 'auto' }, children: batch.text?.slice(0, 600) || '' }),
+          jsx('div', { children: (batch.files || []).map(file => file.name + (Number.isSafeInteger(file.bytes) ? '（' + fileSizeText(file.bytes) + '）' : '')).join('、') }),
+          batch.archive ? jsx('div', { style: { opacity: .7 }, children: '副本：' + batch.archive }) : null,
+          (batch.errors || []).length ? jsx('div', { children: batch.errors.join('；') }) : null,
+          jsxs('div', { style: { display: 'flex', gap: 8, marginTop: 6 }, children: [
+            jsx(Button, { size: 'sm', disabled: importing || busy, onClick: receive, children: importing ? '正在接收…' : received.current.has(batch.id) ? '清理收件箱' : '加入草稿' }),
+            jsx(Button, { size: 'sm', variant: 'ghost', disabled: importing, onClick: discard, children: '忽略' }),
+          ] }),
+        ] }) : null,
+      ] });
+    }
+
+    /** 到货横幅的文案（纯函数，方便隔离测试）：说清"是什么 / 多大 / 副本在哪"。 */
+    function shareNoticeText(share) {
+      const batch = share?.latest;
+      if (!batch) return '';
+      const files = (batch.files || []).map(file => file.name + (Number.isSafeInteger(file.bytes) ? '（' + fileSizeText(file.bytes) + '）' : ''));
+      const head = batch.text ? batch.text.trim().slice(0, 60) : files.join('、');
+      const rest = share.count > 1 ? '（另有 ' + (share.count - 1) + ' 条待处理）' : '';
+      const where = batch.archive ? '，副本已存到 ' + batch.archive : '，请在聊天框点「加入草稿」';
+      return '收到分享：' + head + where + rest;
+    }
+
+    // 分享到货提示：分享卡片只挂在聊天输入框里（conversation.composer.dock），用户若停在
+    // 设置/控制台页就**完全看不到**，内容会烂在 cache 里（2026-10-15 用户分享的 pptx 与 PDF
+    // 就这样躺了 20 分钟）。这里挂到帧级浮层 shell.overlay —— 任何页面都在，
+    // 用 primitives 的 Toast（顶部横幅，自带淡出），文案里说清副本落在哪个目录。
+    // 只报"最新一条"（latest）；聊天框里的卡片仍按顺序处理"最旧一条"，两边各取一头。
+    function ShareNotice() {
+      // 初值就同步取一次：挂载即可见，不留"最多 2.5 秒空白"；也方便隔离测试注入假桥。
+      const [share, setShare] = react.useState(() => {
+        try { return nativeInput() ? nativeJson('shareState') : null; } catch (e) { return null; }
+      });
+      const [shown, setShown] = react.useState('');
+      const [hidden, setHidden] = react.useState('');
+      react.useEffect(() => {
+        if (!nativeInput()) return;
+        let alive = true;
+        const poll = () => { if (!alive || !nativeInput()) return; try { setShare(nativeJson('shareState')); } catch (e) { /* 桌面浏览器没有这条桥 */ } };
+        poll(); const timer = setInterval(poll, 2500);
+        return () => { alive = false; clearInterval(timer); };
+      }, []);
+      const batch = share?.latest;
+      if (!batch || batch.id === shown || batch.id === hidden) return null;
+      return jsx(Toast, {
+        tone: 'success', holdMs: 9000, text: shareNoticeText(share),
+        actions: [{ label: '忽略', onClick: () => {
+          try { nativeJson('shareAck', batch.id); setHidden(batch.id); setShare(nativeJson('shareState')); } catch (e) {}
+        } }],
+        onDone: () => setShown(batch.id),
+      });
+    }
+
+    const inject = ['slots', 'sessions', 'modelDirectories'];
 
     function apply(ctx) {
+      ctx.slots.inject('conversation.composer.dock', () => ctx.inject(['uiConversation'], scope => scope.slots.register({
+        name: 'conversation.composer.dock', key: 'android-draft-input', order: 20,
+        inject: () => ({ draftConversation: scope.uiConversation }),
+      }, AndroidDraftInput)));
       ctx.slots.inject('settings.section', () => ctx.slots.register({
         name: 'settings.section',
         id: 'android-console',
         order: 20,
         label: () => '控制台',
       }, function ConsoleSectionGuarded(props) {
+        props = { ...props, modelServices: { sessions: ctx.sessions, modelDirectories: ctx.modelDirectories } };
         return Boundary === null
           ? jsx(ConsoleSection, props)
           : jsx(Boundary, { children: jsx(ConsoleSection, props) });
       }));
+      // 帧级浮层：分享到货提示（不依赖会话，任何页面都能看到）
+      ctx.slots.inject('shell.overlay', () => ctx.slots.register({
+        name: 'shell.overlay',
+        id: 'android-share-notice',
+        order: 30,
+        label: () => '分享到货提示',
+      }, ShareNotice));
     }
 
+    exports.sharedFiles = sharedFiles;
+    exports.insertTranscript = insertTranscript;
+    exports.putShareInDraft = putShareInDraft;
+    exports.ShareNotice = ShareNotice;
+    exports.shareNoticeText = shareNoticeText;
+    exports.ModelRouteController = ModelRouteController;
+    exports.ModelRoutingPage = ModelRoutingPage;
+    // 导出「全部账目」页与日期格式化：离线用假 react 渲染一遍做冒烟测试（见 test-ledger-render.cjs）。
+    exports.LedgerPage = LedgerPage;
+    exports.fmtDay = fmtDay;
+    exports.MODEL_ROLES = MODEL_ROLES;
     exports.apply = apply;
     exports.inject = inject;
     return module.exports;

@@ -1,0 +1,16 @@
+# ============================================================================
+# dsh-plugin-session-rewind —— DSH bundle patch
+#
+# 把本插件插进 profile 的配置树。
+#
+# 本地开发（本机）：
+#   ln -sfn <本目录> <DSH_HOME>/profiles/web/node_modules/dsh-plugin-session-rewind
+#   然后在本 profile 的 cordis.patch.yml 里加上下面这段 insert
+#
+# ⚠️ 新增条目必须写在 insert: 下面；直接写 `- id:` 是【改已有条目】，
+#    不存在的 id 会被静默忽略（这个坑踩过）。
+# ============================================================================
+
+- insert:
+    - id: session-rewind
+      name: dsh-plugin-session-rewind

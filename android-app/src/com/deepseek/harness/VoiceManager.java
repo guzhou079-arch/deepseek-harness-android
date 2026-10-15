@@ -45,6 +45,9 @@ public class VoiceManager {
     private SpeechRecognizer speechRecognizer;
     private boolean isListening = false;
     private boolean isStandbyListening = false; // 是否处于低功耗热词待命监听状态
+    private long recognitionGeneration = 0;
+    private SpeechRecognizer dictationRecognizer;
+    private VoiceCallback dictationOwner;
     private String currentState = "idle"; // idle, standby, listening, recording, recognizing, processing, speaking, error
     private String lastResult = "";
     private String partialResult = "";
@@ -319,6 +322,89 @@ public class VoiceManager {
         return SpeechRecognizer.isRecognitionAvailable(context);
     }
 
+    /** Draft dictation has its own result owner and never calls submitVoiceCommand. */
+    public void startDictation(final VoiceCallback owner) {
+        if (owner == null) throw new IllegalArgumentException("missing dictation owner");
+        mainHandler.post(new Runnable() { public void run() {
+            if (dictationOwner != null || (isListening && !isStandbyListening)) {
+                owner.onError("另一个语音操作正在进行，请先结束"); return;
+            }
+            try {
+                if (!isRecognitionAvailable()) throw new IllegalStateException("系统未找到可用的语音识别服务");
+                safeDestroyRecognizer();
+                dictationOwner = owner;
+                dictationRecognizer = SpeechRecognizer.createSpeechRecognizer(context);
+                dictationRecognizer.setRecognitionListener(new DictationListener(owner));
+                Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+                intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+                intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.CHINESE.toString());
+                intent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
+                intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
+                isListening = true; isStandbyListening = false; partialResult = "";
+                dictationRecognizer.startListening(intent);
+                owner.onStateChange("listening", "请说话"); notifyStateChange("listening", "听写中...");
+                mainHandler.postDelayed(new Runnable() { public void run() {
+                    if (dictationOwner == owner) endDictation(owner, null, "听写超时，请重试", false);
+                }}, 60000);
+            } catch (Throwable e) {
+                if (dictationOwner == owner) endDictation(owner, null, e.getMessage() == null ? "无法启动听写" : e.getMessage(), false);
+                else owner.onError(e.getMessage() == null ? "无法启动听写" : e.getMessage());
+            }
+        }});
+    }
+    public void stopDictation(final VoiceCallback owner) {
+        mainHandler.post(new Runnable() { public void run() {
+            if (dictationOwner != owner) return;
+            try {
+                owner.onStateChange("recognizing", "正在识别文字");
+                dictationRecognizer.stopListening();
+                mainHandler.postDelayed(new Runnable() { public void run() {
+                    if (dictationOwner == owner) endDictation(owner, null, "语音识别未返回，请重试", false);
+                }}, 15000);
+            } catch (Throwable e) { endDictation(owner, null, "无法结束收音", false); }
+        }});
+    }
+    public void cancelDictation(final VoiceCallback owner) {
+        mainHandler.post(new Runnable() { public void run() { endDictation(owner, null, null, true); }});
+    }
+    private void endDictation(VoiceCallback owner, String text, String error, boolean cancelled) {
+        if (dictationOwner != owner) return;
+        dictationOwner = null; isListening = false; isStandbyListening = false;
+        SpeechRecognizer recognizer = dictationRecognizer; dictationRecognizer = null;
+        if (recognizer != null) try { recognizer.cancel(); recognizer.destroy(); } catch (Throwable ignored) {}
+        notifyStateChange(error == null ? "idle" : "error", cancelled ? "听写已取消" : "听写结束");
+        if (cancelled) owner.onStateChange("cancelled", "已取消");
+        else if (error != null) { lastError = error; owner.onError(error); }
+        else {
+            lastResult = text == null ? "" : text; partialResult = lastResult; lastResultTime = System.currentTimeMillis();
+            owner.onResult(lastResult, true);
+        }
+        if (hotwordEnabled) scheduleHotwordRestart(300);
+    }
+    private final class DictationListener implements RecognitionListener {
+        private final VoiceCallback owner;
+        DictationListener(VoiceCallback owner) { this.owner = owner; }
+        private void state(String state, String message) {
+            if (dictationOwner == owner) { owner.onStateChange(state, message); notifyStateChange(state, message); }
+        }
+        public void onReadyForSpeech(Bundle b) { state("listening", "请说话"); }
+        public void onBeginningOfSpeech() { state("recording", "正在收音"); }
+        public void onRmsChanged(float rms) { if (dictationOwner == owner) lastRms = rms; }
+        public void onBufferReceived(byte[] bytes) {}
+        public void onEndOfSpeech() { state("recognizing", "识别中"); }
+        public void onError(int error) { endDictation(owner, null, getErrorText(error), false); }
+        public void onResults(Bundle b) {
+            ArrayList<String> matches = b.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+            endDictation(owner, matches == null || matches.isEmpty() ? "" : matches.get(0), null, false);
+        }
+        public void onPartialResults(Bundle b) {
+            if (dictationOwner != owner) return;
+            ArrayList<String> matches = b.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+            if (matches != null && !matches.isEmpty()) { partialResult = matches.get(0); owner.onResult(partialResult, false); }
+        }
+        public void onEvent(int type, Bundle b) {}
+    }
+
     public void startListening() {
         startListening(false);
     }
@@ -331,6 +417,10 @@ public class VoiceManager {
         mainHandler.post(new Runnable() {
             @Override
             public void run() {
+                if (dictationOwner != null) {
+                    if (!standby) notifyError("听写正在进行，请先结束");
+                    return;
+                }
                 try {
                     if (isSpeaking()) {
                         stopSpeaking();
@@ -381,6 +471,7 @@ public class VoiceManager {
         mainHandler.post(new Runnable() {
             @Override
             public void run() {
+                if (dictationOwner != null) { stopDictation(dictationOwner); return; }
                 try {
                     if (speechRecognizer != null && isListening) {
                         speechRecognizer.stopListening();
@@ -398,6 +489,7 @@ public class VoiceManager {
             @Override
             public void run() {
                 try {
+                    if (dictationOwner != null) { endDictation(dictationOwner, null, null, true); return; }
                     safeStopRecognizer();
                     isListening = false;
                     isStandbyListening = false;
@@ -413,6 +505,7 @@ public class VoiceManager {
     }
 
     private void safeStopRecognizer() {
+        recognitionGeneration++;
         try {
             if (speechRecognizer != null) {
                 speechRecognizer.cancel();
@@ -423,6 +516,7 @@ public class VoiceManager {
     }
 
     private void safeDestroyRecognizer() {
+        recognitionGeneration++;
         try {
             if (speechRecognizer != null) {
                 speechRecognizer.cancel();
@@ -483,6 +577,8 @@ public class VoiceManager {
 
     private class InnerRecognitionListener implements RecognitionListener {
         private final boolean standbyMode;
+        private final long generation = recognitionGeneration;
+        private boolean stale() { return generation != recognitionGeneration || dictationOwner != null; }
 
         public InnerRecognitionListener(boolean standbyMode) {
             this.standbyMode = standbyMode;
@@ -490,6 +586,7 @@ public class VoiceManager {
 
         @Override
         public void onReadyForSpeech(Bundle params) {
+            if (stale()) return;
             if (!standbyMode) {
                 notifyStateChange("listening", "请说话...");
             }
@@ -497,6 +594,7 @@ public class VoiceManager {
 
         @Override
         public void onBeginningOfSpeech() {
+            if (stale()) return;
             if (!standbyMode) {
                 notifyStateChange("recording", "正在收音...");
             }
@@ -504,6 +602,7 @@ public class VoiceManager {
 
         @Override
         public void onRmsChanged(float rmsdB) {
+            if (stale()) return;
             lastRms = rmsdB;
         }
 
@@ -512,6 +611,7 @@ public class VoiceManager {
 
         @Override
         public void onEndOfSpeech() {
+            if (stale()) return;
             if (!standbyMode) {
                 notifyStateChange("recognizing", "识别中...");
             }
@@ -519,6 +619,7 @@ public class VoiceManager {
 
         @Override
         public void onError(int error) {
+            if (stale()) return;
             isListening = false;
             isStandbyListening = false;
             lastError = getErrorText(error);
@@ -548,6 +649,7 @@ public class VoiceManager {
 
         @Override
         public void onResults(Bundle results) {
+            if (stale()) return;
             isListening = false;
             isStandbyListening = false;
             consecutiveErrors = 0;
@@ -596,6 +698,7 @@ public class VoiceManager {
 
         @Override
         public void onPartialResults(Bundle partialResults) {
+            if (stale()) return;
             ArrayList<String> matches = partialResults.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
             if (matches != null && !matches.isEmpty()) {
                 String partial = matches.get(0);

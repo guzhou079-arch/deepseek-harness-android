@@ -1,0 +1,15 @@
+# ============================================================================
+# dsh-plugin-turn-notify —— DSH bundle patch
+#
+# 安装（本机）：
+#   cp -r <本目录> <DSH_HOME>/profiles/web/node_modules/dsh-plugin-turn-notify
+#   再把下面这段 insert 追加到 <DSH_HOME>/profiles/web/cordis.patch.yml
+#
+# ⚠️ 新增条目必须写在 insert: 下面；直接写 `- id:` 是【改已有条目】，
+#    不存在的 id 会被静默忽略（这个坑踩过）。
+# ⚠️ 改完 patch 需要【重启引擎】才生效（patchReload 不是热加载）。
+# ============================================================================
+
+- insert:
+    - id: turn-notify
+      name: dsh-plugin-turn-notify

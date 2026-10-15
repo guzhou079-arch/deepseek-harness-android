@@ -1,0 +1,8 @@
+{
+  "name": "dsh-plugin-auto-summary-policy",
+  "version": "0.1.1",
+  "private": true,
+  "type": "module",
+  "main": "lib/index.js",
+  "description": "Apply an earlier native compaction policy to live and future Agent presets."
+}

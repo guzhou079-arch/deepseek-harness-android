@@ -38,7 +38,8 @@ PY=/data/user/0/com.deepseek.harness/files/payload/bin/python3
 TC=/data/user/0/com.deepseek.harness/files/toolchain
 KEYS=/data/user/0/com.deepseek.harness/files/keys
 PAYLOAD_DIR=/data/user/0/com.deepseek.harness/files/payload
-BASE=${DSH_BASE:-$WORK/base-v1.20.apk}
+BASE=${DSH_BASE:-$WORK/base-current-175.apk}
+export LD_LIBRARY_PATH="/data/user/0/com.deepseek.harness/files/payload/runtime/lib:${LD_LIBRARY_PATH:-}"
 PAY_OLD=$WORK/payload-old.zip
 PAY_NEW=$WORK/payload-new.zip
 
@@ -110,8 +111,15 @@ pack)
 mark)
   # 问题②的修复：App 只有「内核版本变化或 .complete 缺失」才全量解压；
   # 不写对这两个标记，新内核装上去只会走快速同步 → 树被撕成两半。
+  #
+  # 2026-10-12：改用 selfbuild.js 的 apk-marks（走 ziptool 原样搬运，只换这两个条目的字节）。
+  # 旧实现 `set-apk-markers.py` 用 Python zipfile **整体重写 APK**：
+  #   ① 骨架 resources.arsc 的 CRC 与中央目录不符（线上包也如此）→ Python 强校验 CRC 直接抛异常
+  #      → 标记一个都没写、退出 1；
+  #   ② 整体重写会丢 zipalign 对齐。
+  # 而调用处又被 `| tail` 吃掉退出码 ⇒ **长期静默失败**（2026-10-10 查实）。这里显式 `|| exit 1`。
   [ -f "$UNSIGNED" ] || { echo "✗ 先跑 pack"; exit 1; }
-  "$PY" "$SB/scripts/set-apk-markers.py" "$UNSIGNED" "$WORK/unsigned-marked.apk"
+  DSH_WORK="$WORK" "$NODE" "$SB/lib/selfbuild.js" apk-marks "$UNSIGNED" "$WORK/unsigned-marked.apk" || exit 1
   mv "$WORK/unsigned-marked.apk" "$UNSIGNED"
   ;;
 version)
@@ -126,10 +134,15 @@ version)
   [ -f "$UNSIGNED" ] || { echo "✗ 先跑 pack"; exit 1; }
   VN="$1"; VC="$2"
   [ -n "$VN" ] || { echo "✗ 用法: sh selfbuild.sh version <版本号> [versionCode]"; exit 1; }
+  #      ⚠️ --share-target 不能省：它除了写 launchMode=singleTop，还会补上
+  #         SEND / SEND_MULTIPLE 两条分享过滤器（见 lib/android-manifest.js 的
+  #         patchManifest + hasShareTarget 回读）。发行流程 make-dist-apk.sh 一直带着它，
+  #         而这条装机流程此前漏了 → 自建包里"分享到 DSH"是死的，本地闸门全绿也发现不了
+  #         （2026-10-15 查实）。verify 里现在有 check-install-manifest.js 兜底。
   if [ -n "$VC" ]; then
-    "$NODE" "$SB/scripts/set-apk-version.js" "$UNSIGNED" "$WORK/unsigned-v.apk" --name "$VN" --code "$VC"
+    "$NODE" "$SB/scripts/set-apk-version.js" "$UNSIGNED" "$WORK/unsigned-v.apk" --name "$VN" --code "$VC" --share-target com.deepseek.harness.MainActivity
   else
-    "$NODE" "$SB/scripts/set-apk-version.js" "$UNSIGNED" "$WORK/unsigned-v.apk" --name "$VN"
+    "$NODE" "$SB/scripts/set-apk-version.js" "$UNSIGNED" "$WORK/unsigned-v.apk" --name "$VN" --share-target com.deepseek.harness.MainActivity
   fi
   mv "$WORK/unsigned-v.apk" "$UNSIGNED"
   ;;
@@ -149,21 +162,30 @@ sign)
   ;;
 verify)
   APK=$(cat "$WORK/last-apk.txt" 2>/dev/null || true)
-  [ -f "$APK" ] || APK=$UNSIGNED
-  [ -f "$APK" ] || { echo "✗ 没有可校验的 APK"; exit 1; }
-  echo "— 签名指纹 —"
-  "$NODE" "$SB/lib/apkcert.js" "$APK"
-  echo "— 包内 payload 补丁一致性（清单对比） —"
+  [ -f "$APK" ] || { echo '✗ 需要明确的已签名 last-apk.txt 产物'; exit 1; }
+  echo '— 必须通过真实签名验证 —'
+  sh "$RUN" java -cp /tc/apksigner.jar com.android.apksigner.ApkSignerTool verify --verbose --print-certs "$APK"
+  echo '— 包内 payload 必须通过清单 —'
   "$NODE" "$SB/lib/selfbuild.js" payload-extract "$APK" "$WORK/payload-check.zip" >/dev/null
-  "$NODE" "$SB/lib/selfbuild.js" check "$WORK/payload-check.zip" "$SB/checks.manifest" || true
+  set +e
+  "$NODE" "$SB/lib/selfbuild.js" check "$WORK/payload-check.zip" "$SB/checks.manifest"
+  CHK=$?
+  set -e
+  [ "$(realpath "$WORK/payload-check.zip")" = "$(realpath "$WORK")/payload-check.zip" ] || exit 1
   rm -f "$WORK/payload-check.zip"
-  echo "— classes.dex 完整性（必须是 App 侧真身，不是空壳） —"
-  "$NODE" "$SB/lib/selfbuild.js" dex-extract "$APK" "$WORK/check-classes.dex"
-  D=$WORK/check-classes.dex
-  for k in MainActivity AccessibilityService VsreenBridgeService ScheduleExecutor NfcStore; do
-    if rg -a -q "$k" "$D"; then echo "  ✅ dex 含 $k"; else echo "  ❌ dex 缺 $k"; fi
-  done
-  echo "  dex 字节数: $(stat -c%s "$D")"
+  [ "$CHK" -eq 0 ] || exit 1
+  echo '— 二进制 manifest 回读 —'
+  "$NODE" "$SB/scripts/set-apk-version.js" "$APK" --dump
+  # 光 dump 不算闸门：分享过滤器/singleTop/降级 versionCode 都要显式判定（2026-10-15 补）
+  MCHK=""
+  if [ -f "$BASE" ]; then MCHK="--base $BASE"; fi
+  "$NODE" "$SB/scripts/check-install-manifest.js" "$APK" $MCHK
+  if [ -f "$WORK/appbuild/out/compile-receipt.json" ]; then
+    "$NODE" "$SB/scripts/release-receipts.mjs" compile-check --receipt "$WORK/appbuild/out/compile-receipt.json"
+    "$NODE" "$SB/lib/selfbuild.js" dex-extract "$APK" "$WORK/check-classes.dex"
+    cmp "$WORK/check-classes.dex" "$WORK/appbuild/out/classes.dex" || { echo '✗ APK dex 与内容哈希编译产物不同'; exit 1; }
+  else echo '✗ 无编译输入收据，无法证明源码与 dex 关联'; exit 1
+  fi
   ;;
 check)
   sh "$SB/patch-check.sh"
@@ -174,6 +196,9 @@ install)
   sh "$SB/install-apk.sh" "$APK"
   ;;
 all)
+  # 这条路**不传 --dex**：Java 改过时包里还是骨架的旧 dex，verify 的 cmp 必然失败。
+  # 故意不改它的语义（免得悄悄把未发布的 Java 带进包），只把坑喊出来。
+  echo '⚠️  all 不带 --dex；Java 改过就必须走 pack --dex 序列（见 notes/java-selfbuild-runbook.md）'
   sh "$SB/selfbuild.sh" payload
   sh "$SB/selfbuild.sh" patch
   sh "$SB/selfbuild.sh" pack

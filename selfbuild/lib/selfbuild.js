@@ -11,6 +11,7 @@
  *   payload-extract <apk> <out.zip>
  *   payload-patch   <in.zip> <out.zip> <overlayDir>       # overlay 目录按 payload 相对路径覆盖
  *   apk-pack        <base.apk> <payload.zip> <out.apk> [--dex <classes.dex>] [--asset <本地文件>:<APK内条目>]
+ *   apk-marks       <in.apk> <out.apk> [--kernel V] [--revision T]   # 写 dshroot 标记（原样搬运，不动对齐）
  *   check           <dir|zip> <manifest>                  # path|md5|keyword 行式校验
  *   inspect         <apk>
  */
@@ -21,8 +22,15 @@ const crypto = require('crypto');
 const { readZip, writeZip } = require('./ziptool.js');
 
 const ASSET = 'assets/payload.zip';
+const KERNEL_PKG = 'dshroot/lib/node_modules/@deepseek-ai/dsh/package.json';
+const MARK_KERNEL = 'assets/dshroot_kernel_version.txt';
+const MARK_REVISION = 'assets/dshroot_revision.txt';
 
 const md5 = (b) => crypto.createHash('md5').update(b).digest('hex');
+const pad2 = (n) => String(n).padStart(2, '0');
+/** 本地时间 yyyyMMddHHmmss（与旧 set-apk-markers.py 的 strftime 格式一致）。 */
+const stamp = (d) => `${d.getFullYear()}${pad2(d.getMonth() + 1)}${pad2(d.getDate())}`
+  + `${pad2(d.getHours())}${pad2(d.getMinutes())}${pad2(d.getSeconds())}`;
 const die = (m) => { console.error('✗ ' + m); process.exit(1); };
 const log = (m) => console.log(m);
 
@@ -131,6 +139,48 @@ else if (cmd === 'apk-pack') {
   log(`✓ 写出未签名 APK ${out}（${fs.statSync(out).size} 字节，条目 ${es.length}）`);
 }
 
+else if (cmd === 'apk-marks') {
+  // 写 App 侧的两个 dshroot 标记（内核版本 + revision），走 ziptool 的「原样搬运」写包。
+  //
+  // 为什么不再用 Python zipfile 整体重写（旧 set-apk-markers.py，2026-10-10 查实长期静默失败）：
+  //   ① 骨架 APK 的 resources.arsc 的 CRC 与中央目录不符（线上包也如此，Android 安装不校验），
+  //      而 Python zipfile 读条目时**强校验 CRC** → BadZipFile → 标记一个都没写、退出 1；
+  //   ② 整体重写会解压/重压全部条目，**丢掉 zipalign 对齐**。
+  // 本实现只替换这两个条目的字节，其余条目 raw 原样搬运；写完**回读**再报成功。
+  const [apk, out] = args;
+  const ki = args.indexOf('--kernel');
+  const ri = args.indexOf('--revision');
+  let kernel = ki >= 0 ? args[ki + 1] : null;
+  const revision = ri >= 0 ? args[ri + 1] : stamp(new Date());
+  const es = readZip(apk);
+  if (!kernel) {
+    const p = es.find((e) => e.name === ASSET);
+    if (!p) die('APK 里没有 ' + ASSET + '，无法读出内核版本（可用 --kernel 指定）');
+    // ziptool 只吃路径 → 内层 payload 落一次临时文件（用完即删）
+    const tmp = path.join(process.env.DSH_WORK || path.dirname(out), '.marks-inner-payload.zip');
+    fs.writeFileSync(tmp, data(p));
+    const pkg = readZip(tmp).find((e) => e.name === KERNEL_PKG);
+    if (!pkg) { fs.unlinkSync(tmp); die('payload 里没有 ' + KERNEL_PKG); }
+    kernel = JSON.parse(data(pkg).toString('utf8')).version;
+    fs.unlinkSync(tmp);
+  }
+  if (!kernel) die('读不出内核版本，请用 --kernel 指定');
+  let written = 0;
+  const es2 = es.map((e) => {
+    if (e.name === MARK_KERNEL) { written++; return { name: e.name, data: Buffer.from(kernel + '\n') }; }
+    if (e.name === MARK_REVISION) { written++; return { name: e.name, data: Buffer.from(revision + '\n') }; }
+    return e;
+  });
+  if (written !== 2) die(`期望替换 2 项标记，实际 ${written} —— 包结构可能不对`);
+  writeZip(es2, out);
+  // 回读校验（按字节，别信"脚本没报错"）
+  const back = readZip(out);
+  const gk = data(back.find((e) => e.name === MARK_KERNEL)).toString('utf8').trim();
+  const gr = data(back.find((e) => e.name === MARK_REVISION)).toString('utf8').trim();
+  if (gk !== kernel || gr !== revision) die(`回读不一致：kernel=${gk} revision=${gr}`);
+  log(`✓ 标记已写入并回读验证：kernel=${gk}  revision=${gr}`);
+}
+
 else if (cmd === 'dex-extract') {
   const [apk, out] = args;
   const e = readZip(apk).find((x) => x.name === 'classes.dex');
@@ -157,7 +207,9 @@ else if (cmd === 'check') {
   for (const raw of lines) {
     const line = raw.trim();
     if (!line || line.startsWith('#')) continue;
-    const [rel, wantMd5, keyword] = line.split('|').map((s) => (s || '').trim());
+    const [rel, wantMd5, keyword, policy = 'all'] = line.split('|').map((s) => (s || '').trim());
+    if (!['all', 'local'].includes(policy)) die('未知清单策略: ' + policy);
+    if (args.includes('--dist') && policy === 'local') { skip++; continue; }
     let buf = null;
     if (isZip) {
       const hit = map.get(rel) || map.get(rel.replace(/^dshroot\//, 'dshroot/'));

@@ -191,8 +191,28 @@ public class MainActivity extends Activity {
         "pet/pet.json",
         // v1.33：网页设置页「控制台」插件 —— 解压/引擎/救援/权限/插件/自建环境/时光机/主题/更新
         "dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-android-console/",
+        // v1.72：控制台插件**真正被加载的那一份**在 profile 里 —— 引擎按 profile 目录解析插入名，
+        // 落点是 payload/dshhome/profiles/web/node_modules/dsh-android-console/。
+        // 此前只覆盖 dshroot 那份（引擎根本不加载它）→ 10-07 手工放进 profile 的旧副本一直挡着，
+        // 源码改动永远上不了界面；而线上手工加的「全部账目」页又只存在于运行副本里（两边分叉）。
+        // 加这条 + 出包带上 profile 落点后：装机/每次冷启动都以源码为准，两份不会再分叉。
+        //
+        // v1.38-fix（2026-10-15）：不再逐个包列，改成**整个 profile 落点**。
+        // 为什么：引擎解析插件裸名时 profile 级 node_modules 优先，所以"源码改了却不生效"
+        // 十有八九是这一层没随包更新（v1.38 装机后新建会话全失败就是这么来的：
+        // profiles/web/node_modules/dsh-plugin-auto-summary-policy 里那份旧实现盖住了 dshroot 的新实现）。
+        // 用二选一实验定过解析优先级（selfbuild/scripts/check-session-create-isolated.sh 的
+        // PLANT_USERLAYER_BROKEN / PLANT_USERLAYER_FIXED 对照）：**base profile 盖住用户层**
+        // （用户层副本只在 base 缺失时才生效）⇒ 只要把正本放进 base 且每次冷启动覆盖，
+        // 老用户层里的旧副本再也挡不住，不必再写冷启动迁移。
+        // 前缀只覆盖**包内确实存在**的同名文件，用户自己装的插件/自己改过的其他文件不受影响。
+        // 回滚：删掉本条（回到只有 dshroot 落点被覆盖的状态，profile 层又会开始分叉）。
+        "dshhome/profiles/web/node_modules/",
         // v1.34：模型与思考分档弹窗 —— 修复移动端 touch/onBlur 闪退与点击冲突
-        "dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-model-selection/lib/client.js"
+        "dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-model-selection/lib/client.js",
+        "dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-plugin-session-rewind/",
+        "dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-plugin-turn-notify/",
+        "dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-plugin-auto-summary-policy/"
     };
     // 外部 dshroot 解压完成标记（App 在 dshroot 补齐后写入；清空/重置时随目录删除）。
     // 用于识别「解压中途被打断」：即使 REVISION 一致也强制补齐缺失文件。
@@ -200,6 +220,7 @@ public class MainActivity extends Activity {
     private static final String PREFS = "dsh_setup";
     private static final int REQ_STORAGE = 200;
     private static final int REQ_NOTIFICATION = 201;
+    private DraftInputBridge draftInput;
     private static final int REQ_SHIZUKU = 300;
     /** v1.13：已发出 Shizuku 授权请求、等待结果（用于超时傅底判断）。 */
     private volatile boolean pendingShizukuReq = false;
@@ -453,6 +474,7 @@ public class MainActivity extends Activity {
             public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
                 super.onPageStarted(view, url, favicon);
                 trustedWebDocument = com.deepseek.harness.vscreen.LocalHttpFence.isLoopbackUrl(url, enginePort);
+                if (draftInput != null) draftInput.navigation();
                 if (!trustedWebDocument) { view.stopLoading(); return; }
                 injectAbortSignalAny(view);
             }
@@ -474,6 +496,7 @@ public class MainActivity extends Activity {
             public void onPageFinished(WebView view, String url) {
                 if (!trustedWebDocument || !com.deepseek.harness.vscreen.LocalHttpFence.isLoopbackUrl(url, enginePort)) return;
                 errorRetries = 0;
+                if (draftInput != null) view.evaluateJavascript(draftInput.bootstrap(), null);
                 // v1.13.11：页面底色决定状态栏/导航栏颜色（前端主题可独立于系统设置），
                 // 且主题可能在页面挂载后才被前端插件应用 → 多试几次，取到即刷新。
                 final int[] delays = {0, 700, 2000, 5000};
@@ -533,6 +556,10 @@ public class MainActivity extends Activity {
                     }});
                 }
             }, "dshshell");
+            draftInput = new DraftInputBridge(this, new DraftInputBridge.Guard() {
+                public boolean allowed() { return trustedWebDocument; }
+            });
+            webView.addJavascriptInterface(draftInput, "dshinput");
         } catch (Throwable ignored) {}
 
         // 附件/文件选择：官方前端用 <input type="file"> 选文件，Android WebView 必须实现
@@ -689,7 +716,10 @@ public class MainActivity extends Activity {
             showPermissionScreen();
         }
         ui.post(new Runnable() {
-            @Override public void run() { handleNotificationIntent(getIntent()); }
+            @Override public void run() {
+                handleNotificationIntent(getIntent());
+                if (draftInput != null) draftInput.accept(getIntent());
+            }
         });
     }
 
@@ -702,6 +732,7 @@ public class MainActivity extends Activity {
             conSafeModeNow();
         }
         handleNotificationIntent(intent);
+        if (draftInput != null) draftInput.accept(intent);
     }
 
     private void initDynamicShortcuts() {
@@ -3034,6 +3065,7 @@ public class MainActivity extends Activity {
     @Override
     public void onRequestPermissionsResult(int code, String[] perms, int[] results) {
         super.onRequestPermissionsResult(code, perms, results);
+        if (code == DraftInputBridge.REQ_MIC && draftInput != null) draftInput.permissionResult(results);
         // 存储权限授予后重新提取 vscreen jar 到外部目录（首次启动时授权在提取之后才完成）
         if (code == REQ_STORAGE && pendingVscreenExtract) {
             pendingVscreenExtract = false;
@@ -3144,6 +3176,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        if (draftInput != null) draftInput.resume();
         if (webView != null) webView.onResume();
         rootOk = null; // 从设置页/Shizuku 返回时重新探测 root
         refreshAllStatuses();
@@ -3620,7 +3653,7 @@ public class MainActivity extends Activity {
                     } else if (path.startsWith("/clipboard")) {
                         respBody = handleClipboardRequest(body.toString());
                     } else if (path.startsWith("/schedule")) {
-                        respBody = handleScheduleRequest(body.toString());
+                        respBody = handleScheduleRequest(fullPath, body.toString());
                     } else if (path.startsWith("/usage")) {
                         respBody = handleUsageRequest(fullPath, body.toString());
                     } else if (path.startsWith("/overlay")) {
@@ -4401,20 +4434,29 @@ public class MainActivity extends Activity {
     /** 处理 /schedule：AI 设置定时提醒 → AlarmManager 注册系统闹钟。
      *  到点系统唤醒 AlarmReceiver（即使 App 被杀也能触发）→ 推送通知提醒。
      *  若 App 仍在后台（保活生效），点通知可回 App 继续执行。 */
-    private String handleScheduleRequest(String raw) {
+    private String handleScheduleRequest(String fullPath, String raw) {
         try {
-            String text = jsonField(raw, "text");
+            String path = fullPath.split("\\?", 2)[0];
+            if ("/schedule/list".equals(path)) return ScheduleBridge.list(this).toString();
+            org.json.JSONObject input = new org.json.JSONObject();
+            if (raw.trim().startsWith("{")) input = new org.json.JSONObject(raw);
+            if ("/schedule/cancel".equals(path)) {
+                return ScheduleBridge.cancel(this, input.optString("source", "app"),
+                        input.optString("taskId", input.optString("id", ""))).toString();
+            }
+            if (!"/schedule".equals(path)) return "{\"ok\":false,\"error\":\"未知定时任务路径\"}";
+            String text = input.optString("text", "");
             if (text.isEmpty()) text = queryField(raw, "text");
-            String when = jsonField(raw, "when");
+            String when = input.optString("when", "");
             if (when.isEmpty()) when = queryField(raw, "when");
             // 重复模式（Kun 式调度）：once 一次性（默认）| daily 每天 | interval 每隔 N 分钟
-            String repeat = jsonField(raw, "repeat");
+            String repeat = input.optString("repeat", "");
             if (repeat.isEmpty()) repeat = queryField(raw, "repeat");
             if (repeat.isEmpty()) repeat = "once";
             int intervalMin = 0;
-            String im = jsonField(raw, "intervalMin");
+            String im = input.optString("intervalMin", "");
             if (im.isEmpty()) im = queryField(raw, "intervalMin");
-            if (!im.isEmpty()) { try { intervalMin = Math.max(1, Integer.parseInt(im.trim())); } catch (Exception ignored) {} }
+            if (!im.isEmpty()) intervalMin = Integer.parseInt(im.trim());
             if (!repeat.equals("once") && !repeat.equals("daily") && !repeat.equals("interval")) {
                 return "{\"ok\":false,\"error\":\"repeat 仅支持 once/daily/interval\"}";
             }
@@ -4429,9 +4471,14 @@ public class MainActivity extends Activity {
             }
 
             long triggerAt;
+            String lifeTaskId = input.optString("lifeTaskId", "");
+            int dailyHour = -1, dailyMinute = 0, dailySecond = 0;
             // 支持两种格式：纯数字 = 相对秒数；否则按 ISO 时间解析
             if (isNumeric(when)) {
-                triggerAt = System.currentTimeMillis() + Long.parseLong(when) * 1000L;
+                long seconds = Long.parseLong(when);
+                if (seconds <= 0 || seconds > (Long.MAX_VALUE - System.currentTimeMillis()) / 1000L)
+                    throw new IllegalArgumentException("相对秒数必须是有效正整数");
+                triggerAt = System.currentTimeMillis() + seconds * 1000L;
             } else {
                 // 兼容 "2026-08-21 08:00:00" / "2026-08-21T08:00:00" / "08:00"（今天）
                 String w = when.trim().replace("T", " ").replace("Z", "");
@@ -4439,21 +4486,40 @@ public class MainActivity extends Activity {
                 long at;
                 if (w.length() <= 5) {
                     fmt = new java.text.SimpleDateFormat("HH:mm", Locale.US);
+                    fmt.setLenient(false);
                     java.util.Date d = fmt.parse(w);
+                    dailyHour = d.getHours(); dailyMinute = d.getMinutes();
                     java.util.Calendar cal = java.util.Calendar.getInstance();
                     cal.set(java.util.Calendar.HOUR_OF_DAY, d.getHours());
                     cal.set(java.util.Calendar.MINUTE, d.getMinutes());
                     cal.set(java.util.Calendar.SECOND, 0);
+                    cal.set(java.util.Calendar.MILLISECOND, 0);
                     at = cal.getTimeInMillis();
-                    if (at <= System.currentTimeMillis()) at += 24 * 3600 * 1000L; // 已过 → 明天
+                    if (at <= System.currentTimeMillis()) {
+                        cal.add(java.util.Calendar.DAY_OF_MONTH, 1);
+                        cal.set(java.util.Calendar.HOUR_OF_DAY, dailyHour);
+                        cal.set(java.util.Calendar.MINUTE, dailyMinute);
+                        at = cal.getTimeInMillis();
+                    }
                 } else if (w.length() <= 16) {
                     fmt = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US);
+                    fmt.setLenient(false);
                     at = fmt.parse(w).getTime();
+                    dailyHour = Integer.parseInt(w.substring(11, 13));
+                    dailyMinute = Integer.parseInt(w.substring(14, 16));
                 } else {
                     fmt = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US);
+                    fmt.setLenient(false);
                     at = fmt.parse(w).getTime();
+                    dailyHour = Integer.parseInt(w.substring(11, 13));
+                    dailyMinute = Integer.parseInt(w.substring(14, 16));
+                    dailySecond = Integer.parseInt(w.substring(17, 19));
                 }
                 triggerAt = at;
+            }
+            if (!lifeTaskId.isEmpty()) {
+                if (!"once".equals(repeat)) throw new IllegalArgumentException("生活助理唤醒仅支持 once");
+                triggerAt = input.optLong("lifeRunAt", triggerAt);
             }
             if (triggerAt <= System.currentTimeMillis()) {
                 // interval 模式：when 已过则从 1 分钟后起算（避免报错打断循环任务）
@@ -4464,41 +4530,23 @@ public class MainActivity extends Activity {
                 }
             }
 
-            android.app.AlarmManager am = (android.app.AlarmManager) getSystemService(Context.ALARM_SERVICE);
-            // 存任务到文件（AlarmReceiver 到点时读取并自动执行）
-            String taskId = "task-" + System.currentTimeMillis();
-            saveScheduledTask(taskId, text, triggerAt, repeat, intervalMin);
-            Intent i = new Intent(this, AlarmReceiver.class);
-            i.putExtra("task", text);
-            i.putExtra("taskId", taskId);
-            i.putExtra("repeatType", repeat);
-            i.putExtra("intervalMin", intervalMin);
-            i.putExtra("triggerAt", triggerAt);
-            android.app.PendingIntent pi = android.app.PendingIntent.getBroadcast(this, 0, i,
-                    android.app.PendingIntent.FLAG_UPDATE_CURRENT | android.app.PendingIntent.FLAG_IMMUTABLE);
-            // 用 setAlarmClock（系统最高优先级闹钟，无需特殊权限、Doze 也触发）最可靠；
-            // 失败则降级 setExactAndAllowWhileIdle / set
-            try {
-                if (Build.VERSION.SDK_INT >= 21) {
-                    Intent show = new Intent(this, MainActivity.class);
-                    show.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
-                    android.app.PendingIntent showPi = android.app.PendingIntent.getActivity(this, 1, show,
-                            android.app.PendingIntent.FLAG_UPDATE_CURRENT | android.app.PendingIntent.FLAG_IMMUTABLE);
-                    am.setAlarmClock(new android.app.AlarmManager.AlarmClockInfo(triggerAt, showPi), pi);
-                } else {
-                    am.setExact(android.app.AlarmManager.RTC_WAKEUP, triggerAt, pi);
+            String taskId = "task-" + java.util.UUID.randomUUID().toString();
+            ScheduledTaskStore.Task record = new ScheduledTaskStore.Task(taskId, triggerAt, repeat, intervalMin, text);
+            if (dailyHour >= 0 && "daily".equals(repeat)) record = record.withDailyTime(dailyHour, dailyMinute, dailySecond, 0);
+            if (!lifeTaskId.isEmpty()) record = record.withLifeTask(lifeTaskId);
+            synchronized (ScheduledTaskStore.LOCK) {
+                ScheduledTaskStore store = new ScheduledTaskStore(getFilesDir());
+                if (!lifeTaskId.isEmpty()) {
+                    if (!ScheduleBridge.lifeEnabled(this, lifeTaskId))
+                        throw new IllegalArgumentException("生活助理任务已禁用或不存在");
+                    for (ScheduledTaskStore.Task old : store.list())
+                        if (lifeTaskId.equals(old.lifeTaskId)) ScheduleAlarms.cancel(this, old.id);
                 }
-            } catch (Throwable t) {
-                try {
-                    if (Build.VERSION.SDK_INT >= 23) {
-                        am.setExactAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, triggerAt, pi);
-                    } else {
-                        am.setExact(android.app.AlarmManager.RTC_WAKEUP, triggerAt, pi);
-                    }
-                } catch (Throwable t2) {
-                    am.set(android.app.AlarmManager.RTC_WAKEUP, triggerAt, pi);
-                }
+                store.put(record);
+                try { ScheduleAlarms.register(this, record); }
+                catch (RuntimeException e) { store.cancel(taskId); throw e; }
             }
+            logSchedule("任务已设置 taskId=" + taskId + " text=" + text);
             long secs = (triggerAt - System.currentTimeMillis()) / 1000;
             String whenStr = secs >= 3600
                     ? (secs / 3600) + "小时" + ((secs % 3600) / 60) + "分钟后"
@@ -4507,77 +4555,15 @@ public class MainActivity extends Activity {
             if (repeat.equals("daily")) repStr = "每天";
             else if (repeat.equals("interval")) repStr = "每" + intervalMin + "分钟";
             else repStr = "一次性";
-            return "{\"ok\":true,\"at\":\"" + whenStr + "\",\"repeat\":\"" + repStr
+            return "{\"ok\":true,\"taskId\":\"" + taskId + "\",\"triggerAt\":" + triggerAt + ",\"at\":\"" + whenStr + "\",\"repeat\":\"" + repStr
                     + "\",\"hint\":\"到点会自动拉起引擎执行任务（无需操作），完成后推送通知；重复任务到点后自动安排下一次；若 App 被杀，闹钟仍会触发并自动启动\"}";
         } catch (Throwable t) {
             return "{\"ok\":false,\"error\":\"" + String.valueOf(t.getMessage()).replace("\"", "'") + "\"}";
         }
     }
 
-    // ============ 定时任务持久化 ============
-    /** 任务文件：内部私有目录（AlarmReceiver 与 MainActivity 都能读） */
-    private File scheduledTasksFile() { return new File(getFilesDir(), "scheduled-tasks.json"); }
-    /** 执行记录日志：任务到点/执行/通知都追加，防止丢失 */
-    private File scheduledLogFile() { return new File(getFilesDir(), "scheduled-log.txt"); }
-
-    /** 保存一条定时任务到文件（jsonl 格式：taskId|triggerAt|repeatType|intervalMin|text）。
-     *  repeatType: once=一次性 daily=每天 interval=每隔 N 分钟（intervalMin>0）。 */
-    private void saveScheduledTask(String taskId, String text, long triggerAt, String repeatType, int intervalMin) {
-        try {
-            File f = scheduledTasksFile();
-            String line = taskId + "|" + triggerAt + "|" + repeatType + "|" + intervalMin + "|"
-                    + text.replace("|", " ").replace("\n", " ") + "\n";
-            FileOutputStream fos = new FileOutputStream(f, true);
-            fos.write(line.getBytes("UTF-8"));
-            fos.close();
-            logSchedule("任务已设置: " + text + " @ " + new java.text.SimpleDateFormat("MM-dd HH:mm:ss", Locale.US).format(new Date(triggerAt)));
-        } catch (Throwable t) {
-            Log.w(TAG, "saveScheduledTask error", t);
-        }
-    }
-
-    /** 读取所有已到点的任务（triggerAt <= now），并从未到点列表中删除它们（标记已处理）。 */
-    private List<String[]> takeDueScheduledTasks() {
-        List<String[]> due = new ArrayList<>();
-        try {
-            File f = scheduledTasksFile();
-            if (!f.exists()) return due;
-            long now = System.currentTimeMillis();
-            StringBuilder keep = new StringBuilder();
-            BufferedReader r = new BufferedReader(new InputStreamReader(new FileInputStream(f), "UTF-8"));
-            String line;
-            while ((line = r.readLine()) != null) {
-                if (line.trim().isEmpty()) continue;
-                String[] parts = line.split("\\|", 3);
-                if (parts.length < 3) continue;
-                try {
-                    long at = Long.parseLong(parts[1]);
-                    if (at <= now) {
-                        due.add(parts); // 到点：取走
-                    } else {
-                        keep.append(line).append("\n"); // 未到点：保留
-                    }
-                } catch (Exception ignored) {}
-            }
-            r.close();
-            FileOutputStream fos = new FileOutputStream(f, false);
-            fos.write(keep.toString().getBytes("UTF-8"));
-            fos.close();
-        } catch (Throwable t) {
-            Log.w(TAG, "takeDueScheduledTasks error", t);
-        }
-        return due;
-    }
-
-    /** 追加一条执行记录日志（防丢失）。 */
-    private void logSchedule(String msg) {
-        try {
-            FileOutputStream fos = new FileOutputStream(scheduledLogFile(), true);
-            String line = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date()) + " " + msg + "\n";
-            fos.write(line.getBytes("UTF-8"));
-            fos.close();
-        } catch (Throwable ignored) {}
-    }
+    // 定时任务登记统一由 ScheduledTaskStore 管理。
+    private void logSchedule(String msg) { ScheduleExecutor.log(this, msg); }
 
     /**
      * 从请求体里取一个字符串字段。
@@ -6029,6 +6015,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onPause() {
+        if (draftInput != null) draftInput.pause();
         super.onPause();
         if (webView != null) webView.onPause();
         disableNfcReader();   // v1.16：退后台/锁屏立刻关 reader mode（别抢用户的卡）
@@ -6037,6 +6024,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         trustedWebDocument = false;
+        if (draftInput != null) draftInput.destroy();
         if (webView != null) webView.destroy();
         super.onDestroy();
     }
@@ -6335,6 +6323,7 @@ public class MainActivity extends Activity {
             org.json.JSONObject lf = new org.json.JSONObject();
             readLifeDbState(lf);
             o.put("life", lf);
+            o.put("schedules", ScheduleBridge.list(this));
         } catch (Throwable t) {
             try { o.put("error", String.valueOf(t.getMessage())); } catch (Throwable ignored) {}
         }
@@ -6397,6 +6386,12 @@ public class MainActivity extends Activity {
                         conToast("无法打开链接: " + t.getMessage());
                     }
                 }
+                return;
+            }
+            if ("schedule.cancel".equals(id)) {
+                org.json.JSONObject request = new org.json.JSONObject(arg);
+                org.json.JSONObject result = ScheduleBridge.cancel(this, request.optString("source", "app"), request.optString("id", ""));
+                conToast(result.optBoolean("ok") ? result.optString("warning", "已取消后续触发") : result.optString("error", "取消失败"));
                 return;
             }
             if ("update.check".equals(id)) { checkForUpdate(true); return; }
@@ -6495,7 +6490,8 @@ public class MainActivity extends Activity {
             @Override public void run() {
                 try {
                     File node = new File(getFilesDir(), "payload/runtime/bin/node");
-                    File tool = new File("/sdcard/DeepSeekHarness/tools/life.js");
+                    File tool = new File(getFilesDir(), "payload/dshhome/skills/dsh-life/scripts/life.js");
+                    if (!tool.isFile()) tool = new File("/sdcard/DeepSeekHarness/tools/life.js");
                     if (!tool.exists()) return;
                     java.util.List<String> cmd = new java.util.ArrayList<>();
                     cmd.add(node.getAbsolutePath());

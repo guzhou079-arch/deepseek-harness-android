@@ -45,6 +45,7 @@ GEN_A=$SB/work/gen/com/deepseek/harness/R.java
 RUN=/data/user/0/com.deepseek.harness/files/work/linux/run.sh
 RG=/data/user/0/com.deepseek.harness/files/payload/runtime/bin/rg
 NODE=/data/user/0/com.deepseek.harness/files/payload/runtime/bin/node
+export LD_LIBRARY_PATH="/data/user/0/com.deepseek.harness/files/payload/runtime/lib:${LD_LIBRARY_PATH:-}"
 INNER=$BUILD/inner-javac.sh
 
 usage() {
@@ -68,18 +69,21 @@ done
 [ -f "$LIBS/shizuku-api.aar" ] || { echo "✗ 缺少 $LIBS/shizuku-api.aar" >&2; exit 1; }
 
 mkdir -p "$BUILD/logs" "$BUILD/aar" "$BUILD/classes" "$BUILD/dex"
-# 清掉上一版「平铺布局」的残留（旧产物曾直接放在 work/appbuild/ 下，现统一收进 out/）
-rm -rf "$SB/work/appbuild/classes" "$SB/work/appbuild/dex" \
-       "$SB/work/appbuild/classes.rsp" "$SB/work/appbuild/classes.dex" \
-       "$SB/work/appbuild/gen-temp" "$SB/work/appbuild/inner-javac.sh" \
-       "$SB/work/appbuild/logs" "$SB/work/appbuild/aar" \
-       "$SB/work/appbuild/rcheck.txt" 2>/dev/null || true
+# 只清理显式的旧产物路径，删除前回读真实绝对父目录。
+APPBUILD=$(realpath "$BUILD")
+[ "$APPBUILD" = "$(realpath "$SB/work")/appbuild/out" ] || { echo '✗ appbuild 路径异常'; exit 1; }
+for item in classes dex classes.rsp classes.dex gen-temp inner-javac.sh logs aar rcheck.txt; do
+  target="$APPBUILD/$item"
+  [ "$(dirname "$(realpath -m "$target")")" = "$APPBUILD" ] || exit 1
+  rm -rf "$target"
+done
+mkdir -p "$BUILD/logs" "$BUILD/aar" "$BUILD/classes" "$BUILD/dex"
 
 # 10 个 App 类 + vscreen/*.java（与 build.sh 的 javac 源列表一致）
 # 同时准备两份路径：APP_SRCS=Android 视角（给本脚本检查/生成 R），APP_SRCS_P=proot 视角
 APP_SRCS=""; APP_SRCS_P=""
 for c in MainActivity EngineRpc NotificationArchive BackupValidator BackupRestore SafeFiles EngineService AlarmReceiver ScheduleExecutor OverlayService \
-         UsageStatsHelper AccessibilityService VsreenBridgeService LogShareProvider NfcStore BuildEnvInstaller VoiceManager; do
+         UsageStatsHelper AccessibilityService VsreenBridgeService LogShareProvider NfcStore BuildEnvInstaller VoiceManager ScheduledTaskStore ScheduleAlarms ScheduleBridge ShareInbox DraftInputBridge; do
   [ -f "$HARNESS/$c.java" ] || { echo "✗ 缺少源码 $HARNESS/$c.java" >&2; exit 1; }
   APP_SRCS="$APP_SRCS $HARNESS/$c.java"
   APP_SRCS_P="$APP_SRCS_P $R/v118/android-app/src/com/deepseek/harness/$c.java"
@@ -182,7 +186,7 @@ echo "[proot] shizuku class 数: $NSHIZUKU"
 GEN_CP=$(dirname "$(dirname "$(dirname "$RJAVA")")")
 CP="$GEN_CP:$AARDIR/shizuku-api/classes.jar:$AARDIR/shizuku-provider/classes.jar:$AARDIR/shizuku-aidl/classes.jar"
 rm -rf "$BUILD/classes"; mkdir -p "$BUILD/classes"
-javac -encoding UTF-8 -source 1.8 -target 1.8 -bootclasspath "$AJ" \
+javac -J-Xmx256m -encoding UTF-8 -source 1.8 -target 1.8 -bootclasspath "$AJ" \
   -classpath "$CP" -d "$BUILD/classes" \
   $APP_SRCS "$VSCD"/*.java "$RJAVA" \
   > "$BUILD/logs/javac.log" 2>&1 || {
@@ -204,7 +208,7 @@ echo "[proot] classes.rsp 行数: $(wc -l < "$RSP")"
 
 # ---- 3) d8 ----------------------------------------------------------------
 rm -rf "$BUILD/dex"; mkdir -p "$BUILD/dex"
-java -cp "$D8JAR" com.android.tools.r8.D8 --release --lib "$AJ" --min-api 24 \
+java -Xmx320m -cp "$D8JAR" com.android.tools.r8.D8 --release --lib "$AJ" --min-api 24 \
   --output "$BUILD/dex" "@$RSP" > "$BUILD/logs/d8.log" 2>&1 || {
     echo "!! d8 失败，日志尾部："; tail -40 "$BUILD/logs/d8.log"; exit 1;
   }
@@ -213,6 +217,14 @@ java -cp "$D8JAR" com.android.tools.r8.D8 --release --lib "$AJ" --min-api 24 \
 cp "$BUILD/dex/classes.dex" "$BUILD/classes.dex"
 echo "[proot] classes.dex: $(stat -c%s "$BUILD/dex/classes.dex") bytes"
 INNER_EOF
+
+# ---- 记录实际编译源和编译前输入哈希；编译后必须仍一致 ------------------
+SOURCES="$BUILD/sources.txt"
+: > "$SOURCES"
+for source in $APP_SRCS $VSC_SRCS "$RJAVA"; do printf '%s\n' "$source" >> "$SOURCES"; done
+MODE=generated
+[ "$R_MODE" != "临时占位（只含源码引用的字段，值全 0）" ] || MODE=placeholder
+"$NODE" "$SB/scripts/release-receipts.mjs" compile-begin --rjava "$RJAVA" --sources "$SOURCES" --inner "$INNER" --mode "$MODE" --out "$BUILD/compile-inputs.json"
 
 # ---- 跑 proot -------------------------------------------------------------
 sh "$RUN" sh "$INNER_P" "$SRC_P" "$VSC_P" "$LIBS_P" "$BUILD_P" \
@@ -279,5 +291,6 @@ else
   echo "  (未找到 node，跳过 dex 深度自检)"
 fi
 
-echo "✓ 交付：$DEX  （R.java 来源：$R_MODE）"
+"$NODE" "$SB/scripts/release-receipts.mjs" compile-finish --inputs "$BUILD/compile-inputs.json" --dex "$DEX" --out "$BUILD/compile-receipt.json"
+echo "✓ 交付：$DEX  （R.java 来源：$R_MODE；内容哈希收据已写出）"
 exit 0

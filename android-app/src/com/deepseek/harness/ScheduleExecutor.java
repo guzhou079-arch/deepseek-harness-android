@@ -309,18 +309,65 @@ public final class ScheduleExecutor {
         }
     }
 
-    /** 追加执行记录到外部目录（Lite 版用 DeepSeekHarnessLite，正式版用 DeepSeekHarness，便于排查）。 */
-    static void log(Context ctx, String msg) {
+    /** Run only packaged local cron actions; this path never submits an AI message. */
+    static void tickLife(Context ctx, Runnable onStarted) {
+        boolean reported = false;
         try {
-            String rootName = ctx.getPackageName().contains(".beta")
-                    ? "DeepSeekHarnessLite" : "DeepSeekHarness";
+            File payload = new File(ctx.getFilesDir(), "payload");
+            File tool = new File(payload, "dshhome/skills/dsh-life/scripts/life.js");
+            File node = new File(payload, "runtime/bin/node");
+            if (!tool.isFile() || !node.isFile()) throw new java.io.IOException("Packaged life runtime unavailable");
+            ProcessBuilder pb = new ProcessBuilder(node.getAbsolutePath(), tool.getAbsolutePath(), "tick");
+            pb.environment().put("LD_LIBRARY_PATH", new File(payload, "runtime/lib").getAbsolutePath());
+            pb.environment().put("PATH", new File(payload, "runtime/bin").getAbsolutePath() + ":/system/bin");
+            pb.redirectErrorStream(true);
+            Process p = pb.start();
+            reported = true; onStarted.run();
+            InputStream output = p.getInputStream(); byte[] bytes = new byte[1024];
+            try { while (output.read(bytes) != -1) { /* Drain output to avoid blocking child pipes. */ } }
+            finally { output.close(); }
+            int code = p.waitFor(); log(ctx, "生活助理本地调度完成 exit=" + code);
+        } catch (Exception e) { log(ctx, "生活助理本地调度失败: " + e.toString()); }
+        finally { if (!reported) onStarted.run(); }
+    }
+
+    private static final Object LOG_LOCK = new Object();
+
+    /** New events use one app-private log; overview also reads the old external logs. */
+    static void log(Context ctx, String msg) {
+        synchronized (LOG_LOCK) {
+            try {
+                FileOutputStream fos = new FileOutputStream(new File(ctx.getFilesDir(), "scheduled-log.txt"), true);
+                try {
+                    String line = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date()) + " "
+                            + msg.replace('\r', ' ').replace('\n', ' ') + "\n";
+                    fos.write(line.getBytes("UTF-8"));
+                } finally { fos.close(); }
+            } catch (Exception e) { Log.w(TAG, "Cannot append schedule history", e); }
+        }
+    }
+    static java.util.List<String> history(Context ctx, int limit) throws java.io.IOException {
+        synchronized (LOG_LOCK) {
+            java.util.SortedSet<String> rows = new java.util.TreeSet<String>();
+            readLogTail(new File(ctx.getFilesDir(), "scheduled-log.txt"), rows);
+            String rootName = ctx.getPackageName().contains(".beta") ? "DeepSeekHarnessLite" : "DeepSeekHarness";
             File root = new File(android.os.Environment.getExternalStorageDirectory(), rootName);
-            if (!root.exists()) root.mkdirs();
-            File f = new File(root, "scheduled-log.txt");
-            FileOutputStream fos = new FileOutputStream(f, true);
-            String line = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date()) + " " + msg + "\n";
-            fos.write(line.getBytes("UTF-8"));
-            fos.close();
-        } catch (Throwable ignored) {}
+            readLogTail(new File(root, "scheduled-log.txt"), rows);
+            // The early MainActivity logger used filesDir, while ScheduleExecutor used this external path.
+            java.util.List<String> out = new java.util.ArrayList<String>(rows);
+            return new java.util.ArrayList<String>(out.subList(Math.max(0, out.size() - limit), out.size()));
+        }
+    }
+    private static void readLogTail(File f, java.util.Set<String> rows) throws java.io.IOException {
+        if (!f.isFile() || !f.canRead()) return;
+        java.io.RandomAccessFile r = new java.io.RandomAccessFile(f, "r");
+        try {
+            long start = Math.max(0, r.length() - 65536); r.seek(start);
+            byte[] bytes = new byte[(int)(r.length() - start)]; r.readFully(bytes);
+            String[] lines = new String(bytes, "UTF-8").split("\n");
+            for (int i = start > 0 ? 1 : 0; i < lines.length; i++) {
+                String line = lines[i].trim(); if (!line.isEmpty()) rows.add(line);
+            }
+        } finally { r.close(); }
     }
 }
