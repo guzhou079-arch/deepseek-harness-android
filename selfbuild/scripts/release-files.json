@@ -16,6 +16,7 @@
   {"repo":"selfbuild/scripts/set-apk-version.js","local":"selfbuild/scripts/set-apk-version.js"},
   {"repo":"selfbuild/scripts/scan-dist-privacy.py","local":"selfbuild/scripts/scan-dist-privacy.py"},
   {"repo":"selfbuild/scripts/diff-dist-payloads.py","local":"selfbuild/scripts/diff-dist-payloads.py"},
+  {"repo":"selfbuild/patch-check.sh","local":"selfbuild/patch-check.sh"},
   {"repo":"selfbuild/scripts/verify-dist-isolated.sh","local":"selfbuild/scripts/verify-dist-isolated.sh"},
   {"repo":"selfbuild/lib/android-manifest.js","local":"selfbuild/lib/android-manifest.js"},
   {"repo":"selfbuild/lib/ziptool.js","local":"selfbuild/lib/ziptool.js"},
