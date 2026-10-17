@@ -1,23 +1,45 @@
 # DeepSeek Harness · Android port (enhanced)
 
+<div align="center">
+
+**English** | [中文](README.md)
+
+<br>
+
+[![Stars](https://img.shields.io/github/stars/guzhou079-arch/deepseek-harness-android?style=flat&label=stars)](https://github.com/guzhou079-arch/deepseek-harness-android/stargazers)
+[![Release](https://img.shields.io/github/v/release/guzhou079-arch/deepseek-harness-android?label=latest%20release)](https://github.com/guzhou079-arch/deepseek-harness-android/releases/latest)
+![Platform](https://img.shields.io/badge/Platform-Android%208.0%2B-brightgreen)
+[![Last commit](https://img.shields.io/github/last-commit/guzhou079-arch/deepseek-harness-android)](https://github.com/guzhou079-arch/deepseek-harness-android/commits/main)
+
+</div>
+
 **DeepSeek Harness**, packaged as a ready-to-install **Android APK** — one that **builds itself**:
 edit the code on the phone, then `javac → dex → package → sign → release`, with no computer in the loop.
 
 **No Termux, no root, no setup** — the terminal, file access and command execution all run inside the app,
 and 21 skills come bundled.
 
-[中文](README.md) | **English**
-
 | What you get | Detail |
 |---|---|
 | 🐳 **Floating ball / desktop pet** | Tap the ball and it "speaks": lines, account balance, usage today, last-turn cost, peak/off-peak hints |
 | ☁️ **Fluid notification card** | While the AI is writing, a capsule appears under the status bar; tap to expand into a card you can scroll by hand |
+| 🎛️ **Console inside settings** | The native console and the web settings page are fused: engine control, rescue mode, permission overview, plugin switches, time-machine backup |
 | 📱 **Phone automation** | Screen reading, tapping, text input, notification access, scheduled tasks, virtual display |
 | 🔧 **Self-building on the phone** | javac → dex → package → sign → release, all on-device (the build environment is downloaded on demand) |
 | 🧩 **21 bundled skills** | Ready out of the box — no plugin hunting: diagrams, slide decks, storyboards, memory hub, Office batch processing, Word/公文 publishing, Excel multi-sheet alignment, meeting notes, business mail, local RAG search, full-site backup, phone automation, cross-vendor review, effort tiering, web crawling, code craft, data insight, deep research, scrum planning, life hub, voice |
 | ⬇️ **Quick install** | Download the APK → allow installing unknown apps → open it, follow the permission guide → paste your own model API key |
 
-**Download**: see **Releases**. Each release lists the APK's SHA-256 so you can verify it before installing.
+## Install in three steps
+
+1. Open **[Releases](https://github.com/guzhou079-arch/deepseek-harness-android/releases/latest)** and download the latest `DeepSeekHarness-vX.Y-dist.apk` (~95 MB, Android 8.0 and up).
+2. Install it, then follow the first-run permission guide (accessibility, notifications, floating window — every one of them can be revoked in system settings later).
+3. Paste your own model API key in the settings page and start talking to it. No Termux, no root, no computer.
+
+Each release note carries the APK's **SHA-256**, so you can verify the file before installing it.
+
+> **In mainland China, where `github.com` often will not open?** The first line of every release note is an
+> accelerator link (`ghproxy`-style prefix + the official URL). You can also prefix the official URL yourself:
+> `https://ghproxy.net/`, `https://ghfast.top/`, `https://gh-proxy.com/`.
 
 **Docs** (English): [install & requirements](docs/en/install.md) · [permissions & privacy](docs/en/permissions.md) · [FAQ](docs/en/faq.md) · [upgrade & rescue](docs/en/upgrade-and-rescue.md) · [build environment](docs/en/build-on-device.md) · [attribution & license](docs/en/sources-and-licenses.md) · [changelog](CHANGELOG.en.md)
 
