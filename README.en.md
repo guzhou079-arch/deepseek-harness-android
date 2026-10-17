@@ -45,9 +45,16 @@ Each release note carries the APK's **SHA-256**, so you can verify the file befo
 
 > 中文文档（最新原文）：[安装与要求](docs/安装与要求.md) · [权限与隐私](docs/权限与隐私.md) · [常见问题](docs/常见问题.md) · [升级与救援](docs/升级与救援.md) · [自建环境与出包](docs/自建环境与出包.md)
 
-**Related**: [Discussions](https://github.com/guzhou079-arch/deepseek-harness-android/discussions) — install / upgrade / usage questions ·
-companion plugin [dsh-plugin-android-vscreen](https://github.com/guzhou079-arch/dsh-plugin-android-vscreen)
-(drive apps on a **virtual display** — screen reading, taps, swipes — while your own screen stays yours)
+**Related**: [Discussions](https://github.com/guzhou079-arch/deepseek-harness-android/discussions) — install / upgrade / usage questions
+
+**Companion plugin** — [dsh-plugin-android-vscreen](https://github.com/guzhou079-arch/dsh-plugin-android-vscreen):
+drive *other* apps on a **virtual display** (screen reading, taps, swipes, frames) while your own screen
+stays yours. The same tools are already built into this APK; DSH on a computer can install the plugin
+separately over `adb`:
+
+```sh
+dsh plugin --profile web add https://github.com/guzhou079-arch/dsh-plugin-android-vscreen/releases/download/v0.1.0/dsh-plugin-android-vscreen-0.1.0.tgz
+```
 
 > ## ⚠️ Read before upgrading — only update from this repository's Releases
 >

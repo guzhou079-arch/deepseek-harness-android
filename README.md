@@ -53,9 +53,13 @@
 
 **文档**：[安装与系统要求](docs/安装与要求.md) · [权限与隐私](docs/权限与隐私.md) · [常见问题](docs/常见问题.md) · [升级与救援](docs/升级与救援.md) · [自建环境与出包](docs/自建环境与出包.md)
 
-**相关**：[提问与交流（Discussions）](https://github.com/guzhou079-arch/deepseek-harness-android/discussions) ·
-配套插件 [dsh-plugin-android-vscreen](https://github.com/guzhou079-arch/dsh-plugin-android-vscreen)
-（让 AI 在**虚拟显示器**上操作手机：读屏、点击、滑动，你自己的主屏照常用，互不打扰）
+**相关**：[提问与交流（Discussions）](https://github.com/guzhou079-arch/deepseek-harness-android/discussions)
+
+**配套插件**：[dsh-plugin-android-vscreen](https://github.com/guzhou079-arch/dsh-plugin-android-vscreen) —— 让 AI 在**虚拟显示器**上操作别的 App（读屏、点击、滑动、截图），你自己的主屏照常用，互不打扰。同样的能力在这个 APK 里已经内置；电脑上的 DSH 想用同一套工具，可以单独装这个插件（走 adb）：
+
+```sh
+dsh plugin --profile web add https://github.com/guzhou079-arch/dsh-plugin-android-vscreen/releases/download/v0.1.0/dsh-plugin-android-vscreen-0.1.0.tgz
+```
 
 > ## ⚠️ 更新前必读 —— 只从本仓库 Releases 更新
 >
