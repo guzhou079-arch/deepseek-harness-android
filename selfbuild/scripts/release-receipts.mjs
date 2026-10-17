@@ -8,7 +8,10 @@ import { fileURLToPath } from 'node:url';
 const require = createRequire(import.meta.url);
 const { readZip, readEntry } = require('../lib/ziptool.js');
 const { describeManifest, hasShareTarget } = require('../lib/android-manifest.js');
-export const VERSION = '1.38', CODE = 70, TARGET = 'com.deepseek.harness.MainActivity';
+// 版本号允许用环境变量覆盖（1.40 起），默认仍是出包当时的 1.38/70 —— 历史收据不复算
+export const VERSION = process.env.DSH_DIST_VERSION || '1.38',
+  CODE = Number(process.env.DSH_DIST_CODE || 70),
+  TARGET = 'com.deepseek.harness.MainActivity';
 export const project = path.resolve(process.env.DSH_PROJECT || path.join(path.dirname(fileURLToPath(import.meta.url)), '../..'));
 export const sb = path.join(project, 'selfbuild');
 const HASH = /^[a-f0-9]{64}$/;

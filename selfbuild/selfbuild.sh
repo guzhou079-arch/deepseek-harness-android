@@ -40,7 +40,8 @@ KEYS=/data/user/0/com.deepseek.harness/files/keys
 PAYLOAD_DIR=/data/user/0/com.deepseek.harness/files/payload
 BASE=${DSH_BASE:-$WORK/base-current-175.apk}
 export LD_LIBRARY_PATH="/data/user/0/com.deepseek.harness/files/payload/runtime/lib:${LD_LIBRARY_PATH:-}"
-PAY_OLD=$WORK/payload-old.zip
+# 换内核后底本不再是 1.38 的 payload-old.zip；用 DSH_PAY_OLD 指到新内核底本（默认仍是老的）
+PAY_OLD=${DSH_PAY_OLD:-$WORK/payload-old.zip}
 PAY_NEW=$WORK/payload-new.zip
 
 # ── 背景图 CSS：**唯一源**是 ../bg-patch/dsh-bg.css ──────────────────────

@@ -20,7 +20,7 @@ dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-vsc
 # ⑤ 交付文件「打开」的引擎侧 android 分支（v1.15）
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-native-command/lib/index.js|02919aacf8e4fce787532686a00409f6|androidBridgeOpen
 # ⑥ 移动端 UI 改造
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-layout/lib/client.js|a61395c7e5c5236e1f44d8eebfd463b2|sidebarCollapsed
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-layout/lib/client.js|12d4084bf0c805536c803e04aac78ca8|sidebarCollapsed
 # ui-cordis：2026-09-30 查实 —— 旧期望值 499056c4… 是「cordis 插件按钮」补丁(header.utilities)
 # 在老内核时代的 md5；该标记在 0.2.0 bundle 里确实已不存在（实测命中 0 次），补丁随之作废。
 # 当前 md5 = APK payload 里的上游原版（实测与 payload 逐字节一致）。
@@ -42,9 +42,9 @@ dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-update-c
 #      这条会报「文件不存在」——那是预期，不是污染。
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/dsh-bg.svg|83e42b419ed900dcdcba7f1e6b9e1650|svg
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/dsh-bg-user.png|c4b5a66b33ea99892a76f2c485beed1d|-|local
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-open-in-app/lib/client.js|765201c682a1bfb7d8346025df2a4b10|dsh-user-bg
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-open-in-app/lib/client.js|fb5cca87fab0b347b373a54509504f31|dsh-user-bg
 # ⑫ v1.32：局域网绑定需要 DSH_ALLOW_LAN=1（默认仍拒绝 0.0.0.0）
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-app/lib/startup.js|d70e2a712c87c5efa13d151b2f9ce5c2|DSH_ALLOW_LAN
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-app/lib/startup.js|d43e847fd89abedb7b8bcfa2c50206b1|DSH_ALLOW_LAN
 # ⑬ v1.35 起：应用更新日志（随包分发 + 界面可打开 /CHANGELOG.md）
 #    ⛔ 这两条**不钉 md5**，只验「文件在 + 还是更新日志」：正文每发一版都会加章节，
 #       钉死 md5 = 每次发版都必然过期。实测它已连续过期 4 次（724934d7 → 08238f81 →
@@ -55,9 +55,14 @@ dshroot/CHANGELOG.md|-|更新日志
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/CHANGELOG.md|-|更新日志
 # ⑭ v1.36：账户 UI —— 放开上游「桌面独占」门禁（apply 首行 dshDesktop 检查）
 #    刻意不注入全局 dshDesktop，以免挤掉 settings-models 的 API Key 引导。
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-settings-account/lib/client.js|816b017f03dd80cc9e57e0dd0098cd8c|dsh-android-patch v3
+#    ⚠ 2026-10-17 换 0.2.1 时发现：上游自己把这道门禁去掉了（apply 里只剩
+#    `const desktop = "dshDesktop" in globalThis;` 这个布尔量，不再 early return），
+#    注释还写明 "Register account UI in Desktop and plain Web clients"。
+#    ⇒ 本补丁**自然作废**，不再需要 patches/account-ui-enable 重打；
+#    关键字改成 `desktop`（该布尔量必须还在），防的是上游哪天又把门禁加回来。
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-settings-account/lib/client.js|0b2d35d54369b31a31532425a94e9e15|desktop
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/node-addon-require-builtin/lib/index.js|23c1201e436009f11de735dae37cd763|Android 适配
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/node-addon-system/lib/flock.js|b9c771f5aaa32c498c0b8a950ee23f1b|noopBinding
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/node-addon-system/lib/flock.js|03d8a933a6b2c34790539ca3fd1818b4|noopBinding
 # ⑮ v1.37（rc.2 修复·问题3）：bash-local 的 sandboxMode 覆盖必须进 overlay。
 #    为什么以前不需要：rc.1 时代这个 getter 是**基础包 payload 自带**的，不在我们 overlay 里；
 #    rc.2 内核层一覆盖就把它顶没了 → dsh-permission-presets 构造抛 "no sandboxMode"
@@ -69,16 +74,16 @@ dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-bash-loc
 #    平台的「打开应用」按钮用本机未注册的 scheme，点了没反应（实测）；
 #    改为引擎直接调 App 特权桥执行 am start（shell uid 2000）。
 #    补丁脚本：selfbuild/scripts/patch-bring-to-front.js
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-deepseek-account-platform/lib/index.js|04c0e29955451e7c0156387b0eb58b35|dsh-android-patch v4 (bring-to-front)
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/index.html|6c56d1780cbe05adaede87508435cab5|/mobile.css
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-deepseek-account-platform/lib/index.js|c83acb5ad065aa1e80ecd651731a64bb|dsh-android-patch v4 (bring-to-front)
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/index.html|ba5378fbdb5e680d07348e025c81a027|/mobile.css
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/mobile.js|ad907fd1fc84e4da84501e45c7eb2f50|dsh-update-banner
 # ④ Android 运行环境适配（2026-10-03 rc.2 事故后补录：这 6 个文件的补丁原先只手工塞在 payload 里，
 #    换内核时随上游改动一起被覆盖 → 每轮 EACCES。纳入清单后，装机前的 verify 就能拦住）
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/index.js|8f7d81e9c9fd0800e42d3d7cbaca2606|open(currentPath, "wx")
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/index.js|4c0b92b8f85f030b51aa7da75ce46b27|open(currentPath, "wx")
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-fs-local/lib/index.js|9612532ae447891802d15fb144862fc6|isHardlinkUnsupported
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-attachment-local/lib/index.js|786c67c021c111485c80d4ed9eaa6363|sharp-shim
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-llm-deepseek/lib/index.js|63b86285e7b42fe34507da4c68f28e7b|isAttachmentError
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-ptc-runtime-node/lib/index.js|00fd24b60a35eae0408cdcf50176b1de|LD_LIBRARY_PATH
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-llm-deepseek/lib/index.js|7ca9f56a6c9bacc230e61ad74b37fed6|isAttachmentError
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-ptc-runtime-node/lib/index.js|2222f584f928ed1c056bd193d38d8d7f|LD_LIBRARY_PATH
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-fs-search/lib/index.js|a4e290d7e60914351f0173c9ed0941eb|ripgrep is unavailable
 
 # ② 分享进来的可见性与落盘副本（2026-10-15 事故：两份副本里服务的是"瘦"的那份，

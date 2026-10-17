@@ -15,8 +15,12 @@
    （rc.1 是 .D_tfqW_*，rc.2 变成 .wSkVaW_*）。前端 build 一换哈希就整批变，
    规则全成死选择器 → 壁纸消失（不报错、不崩、清单也查不出来）。
    ⇒ 换内核后**必须重新映射哈希**：从新前端 bundle 里按类名后缀找唯一对应
+
+     实测三轮：rc.1 .D_tfqW_* → 0.2.0-rc.2 .wSkVaW_*（会话列整批变）
+     → 0.2.1 只换 AppFrame：.ZTP-Xa_frame → .pI_x6G_frame（dsh-client-ui-layout/lib/client.js）
+     会话列 .wSkVaW_root/_embeddedBody/_composerSeat 这轮没变。
      （`.wSkVaW_composerSeat` 在 dsh-client-ui-conversation/lib/client.js；
-       `.ZTP-Xa_frame` 那次恰好没变）。`mobile.css` 有同一个坑。
+       `.pI_x6G_frame` 那次恰好没变）。`mobile.css` 有同一个坑。
 
    想换图，三种改法（从易到难）：
      1) 直接替换 dist/dsh-bg.svg（保持文件名，随手用别的 SVG 覆盖即可）；
@@ -78,16 +82,16 @@ body[data-ds-dark-theme] {
 
 
 /* ---------- 全窗口铺图 ----------
-   图与遮罩全部放在 .ZTP-Xa_frame::before 里（AppFrame 根容器，原样式
+   图与遮罩全部放在 .pI_x6G_frame::before 里（AppFrame 根容器，原样式
    background:var(--dsw-alias-bg-base)，无 !important，这里压得住）。
    ::before 是绝对定位（脱离 grid 布局），z-index:-1 → 画在本容器背景之上、
    所有内容之下；正文/控件因此不受 filter/模糊影响。
-   ⚠ 不要同时给 .ZTP-Xa_frame 自己也铺一份图：::before 是半透明的，
+   ⚠ 不要同时给 .pI_x6G_frame 自己也铺一份图：::before 是半透明的，
      两层叠加会把图和遮罩各画两遍 → 灰蒙蒙。所以这里把根容器背景置空。 */
-.ZTP-Xa_frame {
+.pI_x6G_frame {
   background: transparent !important;
 }
-.ZTP-Xa_frame::before {
+.pI_x6G_frame::before {
   content: "";
   position: absolute;
   inset: -10px;                 /* 盖住模糊溢出的边，避免出现一圈亮边 */

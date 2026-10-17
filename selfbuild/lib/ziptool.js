@@ -54,8 +54,11 @@ function readEntry(file, entry) {
   throw new Error('Unsupported ZIP method: ' + entry.method);
 }
 function writeZip(entries, out, when = new Date()) {
-  if (entries.length >= 65535) throw new Error('ZIP64 required');
-  const fd = fs.openSync(out, 'w'), central = []; let offset = 0;
+  // entries 可以是数组，也可以是**生成器**（内核树 200MB 不能全进堆，见 prep-kernel-payload.js）。
+  // 所以条目数不能用 entries.length —— 生成器没有 length，写进 EOCD 会变成 0，
+  // 读回来就是 "Unexpected ZIP directory data"。这里改成自己数。
+  if (Array.isArray(entries) && entries.length >= 65535) throw new Error('ZIP64 required');
+  const fd = fs.openSync(out, 'w'), central = []; let offset = 0, written = 0;
   const put = b => { let n = 0; while (n < b.length) n += fs.writeSync(fd, b, n, b.length - n); };
   const defaultTime = ((when.getHours() & 31) << 11) | ((when.getMinutes() & 63) << 5) | ((when.getSeconds() / 2) & 31);
   const defaultDate = (((when.getFullYear() - 1980) & 127) << 9) | ((when.getMonth() + 1) << 5) | when.getDate();
@@ -88,10 +91,11 @@ function writeZip(entries, out, when = new Date()) {
       ch.writeUInt16LE(name.length, 28); ch.writeUInt16LE(ce.length, 30); ch.writeUInt16LE(comment.length, 32);
       ch.writeUInt16LE(e.internalAttrs || 0, 36); ch.writeUInt32LE(e.externalAttrs || 0, 38); ch.writeUInt32LE(offset, 42);
       central.push(ch, name, ce, comment); offset += 30 + name.length + extra.length + raw.length;
+      if (++written >= 65535) throw new Error('ZIP64 required');
     }
     const cd = Buffer.concat(central), end = Buffer.alloc(22);
     if (offset + cd.length > 0xffffffff) throw new Error('ZIP64 required');
-    end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(entries.length, 8); end.writeUInt16LE(entries.length, 10);
+    end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(written, 8); end.writeUInt16LE(written, 10);
     end.writeUInt32LE(cd.length, 12); end.writeUInt32LE(offset, 16); put(cd); put(end);
   } finally { fs.closeSync(fd); }
 }
