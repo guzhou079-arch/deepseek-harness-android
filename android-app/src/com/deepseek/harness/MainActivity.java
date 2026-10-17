@@ -102,7 +102,8 @@ public class MainActivity extends Activity {
     private volatile String engineTokenUrl = null;
     /** WebView 与健康探测应使用的地址：拿到 token 就用带 token 的，否则退回普通地址。 */
     private String webHomeUrl() {
-        String u = engineTokenUrl;
+        // v1.39.1：内存里没有令牌时先到日志尾部捞（引擎重启后靠这条兜住，否则 WebView 401）
+        String u = currentEngineTokenUrl();
         return (u != null && !u.isEmpty()) ? u : homeUrl();
     }
     static {
@@ -3265,13 +3266,23 @@ public class MainActivity extends Activity {
                         }
                     }
 
-                    if (!done.exists()) {
+                    // 2026-10-17：覆盖升级也要刷新运行时二进制。原来只补「缺失」文件
+                    //（internal-patch），node/*.so 这类**同名旧文件永不更新** → 新包配旧运行时，
+                    // 表现为 CANNOT LINK EXECUTABLE … libz.so.1 not found / ERR_MODULE_NOT_FOUND，
+                    // 且从崩溃日志完全看不出是「包没换」而不是「包坏了」。
+                    // 现在 .extracted 里写安装包身份戳（versionCode@lastUpdateTime），不一致就整段重解。
+                    String installStamp = payloadStamp();
+                    String extractedStamp = readStampFile(done);
+                    boolean runtimeStale = done.exists() && !"unknown".equals(installStamp)
+                            && !installStamp.equals(extractedStamp);
+                    if (!done.exists() || runtimeStale) {
+                        if (runtimeStale) Log.i(TAG, "payload 运行时版本不一致，重解：" + extractedStamp + " -> " + installStamp);
                         // 关键：先解压内部关键运行时（node/.so/dshhome/bin/rish），再解压 dshroot。
                         // 解压中途被打断时，只要内部已就位引擎仍能启动；缺的文件由 dshrootNeedsSync 幂等补齐。
                         extractPayload(payload, null, "internal");
-                        done.createNewFile();
+                        writeStampFile(done, installStamp);
                     } else {
-                        // 覆盖升级：补齐内部运行时缺失的新增文件（如 runtime/bin/rg），已有文件不动
+                        // 同一安装包（或读不到包信息）：只补缺失的新增文件，已有文件不动
                         try { extractPayload(payload, null, "internal-patch"); } catch (Throwable ignored) {}
                     }
 
@@ -3985,10 +3996,56 @@ public class MainActivity extends Activity {
         }
     }
 
+    /**
+     * v1.39.1：从一段日志文本里取**最后一条** {@code http://…?token=…}。
+     * 不写死 host —— 局域网模式下引擎打印 {@code http://0.0.0.0:3080/?token=…}，
+     * 只认 127.0.0.1 会一条都捞不到。顺手把绑定地址归一化成 127.0.0.1
+     * （0.0.0.0 / :: 只是监听地址，本机访问仍走回环），令牌不变。
+     */
+    private String tokenUrlIn(String text) {
+        if (text == null) return null;
+        try {
+            int tk = text.lastIndexOf("?token=");
+            if (tk < 0) return null;
+            int at = text.lastIndexOf("http://", tk);
+            if (at < 0) return null;
+            int end = tk + 7;
+            while (end < text.length() && " \r\n\t\"'<>".indexOf(text.charAt(end)) < 0) end++;
+            if (end <= tk + 7) return null;
+            int slash = text.indexOf('/', at + 7);          // host 结束（端口之后）
+            if (slash < 0 || slash > tk) return null;
+            String hostPort = text.substring(at + 7, slash);   // 例：0.0.0.0:3080
+            String addr = hostPort;
+            String port = "";
+            int colon = hostPort.lastIndexOf(':');
+            if (colon > 0) {
+                addr = hostPort.substring(0, colon);
+                port = hostPort.substring(colon);              // 含冒号，例如 ":3080"
+            }
+            if (addr.equals("0.0.0.0") || addr.equals("[::]") || addr.equals("::")) addr = "127.0.0.1";
+            if (port.isEmpty()) port = ":" + enginePort;       // 丢了端口会落到 80 → 白屏
+            return "http://" + addr + port + text.substring(slash, end);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /** 当前引擎的带令牌 URL：内存里没有就去日志尾部捞（引擎重启后内存值是空的）。 */
+    private String currentEngineTokenUrl() {
+        String u = engineTokenUrl;
+        if (u != null && !u.isEmpty()) return u;
+        String fromLog = conTokenFromLog();
+        if (fromLog != null && !fromLog.isEmpty()) {
+            engineTokenUrl = fromLog;
+            return fromLog;
+        }
+        return null;
+    }
+
     /** 从引擎打印的带令牌 URL（engineTokenUrl）里取出 token 值；没有则返回 ""。 */
     private String engineTokenValue() {
         try {
-            String u = engineTokenUrl;
+            String u = currentEngineTokenUrl();
             if (u == null) return "";
             int i = u.indexOf("token=");
             if (i < 0) return "";
@@ -4896,6 +4953,43 @@ public class MainActivity extends Activity {
         }
     }
 
+    /** 安装包身份戳：versionCode@lastUpdateTime。覆盖安装/更新后 lastUpdateTime 必变。 */
+    private String payloadStamp() {
+        try {
+            android.content.pm.PackageInfo pi = getPackageManager().getPackageInfo(getPackageName(), 0);
+            return "v" + pi.versionCode + "@" + pi.lastUpdateTime;
+        } catch (Throwable t) {
+            Log.w(TAG, "payloadStamp 读取失败", t);
+            return "unknown";
+        }
+    }
+
+    private static String readStampFile(File f) {
+        try {
+            if (f == null || !f.isFile() || f.length() == 0) return "";
+            java.io.FileInputStream in = new java.io.FileInputStream(f);
+            try {
+                byte[] b = new byte[128];
+                int n = in.read(b);
+                return n <= 0 ? "" : new String(b, 0, n, "UTF-8").trim();
+            } finally {
+                try { in.close(); } catch (Throwable ignored) {}
+            }
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
+    private static void writeStampFile(File f, String stamp) {
+        try {
+            java.io.FileOutputStream fos = new java.io.FileOutputStream(f);
+            try { fos.write((stamp == null ? "" : stamp).getBytes("UTF-8")); }
+            finally { try { fos.close(); } catch (Throwable ignored) {} }
+        } catch (Throwable t) {
+            Log.w("DSH", "write stamp failed: " + t);
+        }
+    }
+
     private void writeDshrootComplete(File dshrootBase) {
         File complete = new File(dshrootBase, "dshroot/" + DSHROOT_COMPLETE);
         try {
@@ -5108,7 +5202,30 @@ public class MainActivity extends Activity {
     }
 
     // 判断某条目是否属于官方强制覆盖白名单（外部 dshroot 也随 APK 更新）。
+    // 2026-10-17：overlay 改过的内核文件清单（构建时写进 assets/dshroot_forced.txt）。
+    // 起因：同内核重出包时 ① REVISION 与设备上一致 → dshroot 同步不跑；② 就算跑了，
+    // fast/add 也只写 REVISION + 免检前缀 → overlay 改过的旧文件永远不更新。
+    // 实测代价：v1.41 新加的 dsh-host-webserver 补丁没落到设备，用户一开局域网引擎就死。
+    private java.util.HashSet<String> forcedAssetPaths;
+
+    private java.util.HashSet<String> forcedAssetPaths() {
+        if (forcedAssetPaths != null) return forcedAssetPaths;
+        java.util.HashSet<String> set = new java.util.HashSet<String>();
+        try {
+            for (String line : readAssetText("dshroot_forced.txt").split("\n")) {
+                String t = line.trim();
+                if (!t.isEmpty() && !t.startsWith("#")) set.add(t);
+            }
+            Log.i(TAG, "overlay 强制覆盖清单：" + set.size() + " 条");
+        } catch (Throwable t) {
+            Log.i(TAG, "包内无 dshroot_forced.txt（旧包），按旧策略");
+        }
+        forcedAssetPaths = set;
+        return set;
+    }
+
     private boolean isForceOverwrite(String name) {
+        if (forcedAssetPaths().contains(name)) return true;
         for (String p : FORCE_OVERWRITE_PREFIXES) {
             if (name.startsWith(p)) return true;
         }
@@ -5717,12 +5834,11 @@ public class MainActivity extends Activity {
                             if (!t.isEmpty()) Log.i(TAG, "node: " + t);
                             // 0.1.5 认证：引擎打印 "dsh web: http://127.0.0.1:3080/?token=..."，
                             // 解析出来供健康探测与 WebView 首次加载使用。
-                            int at = t.indexOf("http://127.0.0.1");
-                            int tk = t.indexOf("?token=");
-                            if (at >= 0 && tk > at) {
-                                String u = t.substring(at);
-                                int sp = u.indexOf(' ');
-                                if (sp > 0) u = u.substring(0, sp);
+                            // v1.39.1：不再写死 127.0.0.1 —— 局域网模式下引擎打印的是
+                            // "http://0.0.0.0:3080/?token=…"，写死前缀一条都匹配不到，
+                            // 于是 /lan 报 tokenReady:false、urls 空（开关能开、链接却没有）。
+                            String u = tokenUrlIn(t);
+                            if (u != null) {
                                 engineTokenUrl = u;
                                 Log.i(TAG, "engine token url captured");
                             }
@@ -5905,10 +6021,10 @@ public class MainActivity extends Activity {
                             lastRespawnAt = now;
                             Log.w(TAG, "node died, respawning engine");
                             spawnNode(new File(getFilesDir(), "payload"));
-                            final WebView wv = webView;
-                            ui.post(new Runnable() {
-                                @Override public void run() { wv.loadUrl(webHomeUrl()); }
-                            });
+                            // v1.39.2：以前这里 spawnNode 之后立刻 loadUrl —— 端口还没 listen，
+                            // WebView 直接撞 ERR_CONNECTION_REFUSED，且没人再导航，页面就一直白屏
+                            // （用户只能滑掉 App 重进）。改成等引擎真的答话再导航，最多等 40s。
+                            reloadWhenEngineReady();
                         }
                     } catch (Throwable t) {
                         Log.w(TAG, "watchdog error", t);
@@ -5916,6 +6032,23 @@ public class MainActivity extends Activity {
                 }
             }
         }, "node-watchdog").start();
+    }
+
+    /** v1.39.2：等引擎端口真的答话再导航；看门狗重拉引擎后专用，避免白屏卡死。 */
+    private void reloadWhenEngineReady() {
+        new Thread(new Runnable() {
+            @Override public void run() {
+                for (int i = 0; i < 160; i++) {           // 每次 250ms，最多等 40 秒
+                    if (healthOk()) break;
+                    try { Thread.sleep(250); } catch (InterruptedException e) { return; }
+                }
+                final WebView wv = webView;
+                if (wv == null) return;
+                ui.post(new Runnable() {
+                    @Override public void run() { wv.loadUrl(webHomeUrl()); }
+                });
+            }
+        }, "engine-ready-reload").start();
     }
 
     private void loadHome() {
@@ -6157,14 +6290,10 @@ public class MainActivity extends Activity {
         try {
             File f = conLogFile();
             if (!f.exists()) return null;
-            String tail = conTailOf(f, 300);
-            int at = tail.lastIndexOf("http://127.0.0.1");
-            if (at < 0) return null;
-            int tk = tail.indexOf("?token=", at);
-            if (tk < 0) return null;
-            int end = tk + 7;
-            while (end < tail.length() && !" \r\n\t".contains(String.valueOf(tail.charAt(end)))) end++;
-            return tail.substring(at, end);
+            // v1.39.1：解析逻辑统一到 tokenUrlIn（不限 host），否则局域网模式下
+            // 日志里只有 http://0.0.0.0:3080/?token=… 这一种形态，这里同样捞不到。
+            String tail = conTailOf(f, 400);
+            return tokenUrlIn(tail);
         } catch (Throwable t) { return null; }
     }
 
@@ -7458,6 +7587,10 @@ public class MainActivity extends Activity {
             try { Thread.sleep(600); } catch (InterruptedException ignored) {}
         }
         nodeProcess = null;
+        // v1.39.1：引擎死了，上一实例的令牌立即作废。不清空的话，局域网开关重启引擎后
+        // /lan 会把旧令牌当成有效值发出去（链接能点开、全是 401）。清空后由
+        // currentEngineTokenUrl() 从新实例的日志里取。
+        engineTokenUrl = null;
     }
 
     private void enterMainUi() {

@@ -3,10 +3,36 @@
 > Chinese original (authoritative and most up to date): [CHANGELOG.md](CHANGELOG.md).
 > This English page mirrors it; if the two ever disagree, the Chinese one wins.
 
-> Current release: `1.37`. Every release installs **straight over the previous one** — same signing key,
+> Current release: `1.39.2`. Every release installs **straight over the previous one** — same signing key,
 > in-place upgrade, no uninstall (uninstalling wipes all app-private data).
 
 ---
+
+## v1.39.2 — no more blank page after the engine is restarted
+
+- **A watchdog respawn no longer leaves a blank page.** The old code navigated the WebView the
+  instant it respawned the engine, before the port was listening: the page hit
+  `ERR_CONNECTION_REFUSED` and nothing ever navigated again, so it stayed stuck until you
+  swiped the app away. It now waits until the engine actually answers before navigating
+  (up to 40 s). Measured on device: `kill -9` the engine → the page comes back on its own
+  12 s later with the session history intact.
+- **LAN mode can read the engine token again.** In LAN mode the engine prints
+  `http://0.0.0.0:3080/?token=…`; the old parser hard-coded a `127.0.0.1` prefix and matched
+  nothing, so the switch flipped on while the link list stayed empty. Parsing is now
+  host-agnostic and normalises to loopback; the token itself is unchanged.
+- **In-place upgrades now refresh the runtime binaries.** Only *missing* files used to be
+  extracted, so same-named files (node, the `.so` set) were never updated — a new package
+  paired with an old runtime showed up as `CANNOT LINK EXECUTABLE … libz.so.1 not found` or
+  `ERR_MODULE_NOT_FOUND`, with logs that never hinted the package had not been swapped in.
+  Extraction is now keyed to an install stamp (`versionCode@lastUpdateTime`).
+- The previous instance's token is cleared when the engine exits, so LAN links no longer
+  carry a dead token (which opened a page of 401s).
+
+## v1.39 — kernel 0.2.1-rc.2
+
+- Bundled kernel updated to `@deepseek-ai/dsh 0.2.1-rc.2` (the upstream build that adds the
+  new model label UI and the new model API surface).
+- The wallpaper picker's style hook follows the upstream rename, so custom wallpapers stay applied.
 
 ## v1.37 — take a photo straight from the attachment picker + notification taps go to the session
 
