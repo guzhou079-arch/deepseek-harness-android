@@ -10,11 +10,11 @@
 
 ## v1.39.4 — console tolerates a missing service, tap an APK in chat to install
 
-- **The Console page reads its services defensively.** The console in the 1.39.3 release is fine;
-  the blank page only happened in internal builds made while preparing that release (a dependency
-  declaration was changed to stop a plugin from waiting forever, and one read site was missed).
-  Those builds were never published. It now degrades to a message instead of going blank, and the
-  tab sits after "Agent presets".
+- **The Console page tolerates a missing service.** On a clean 1.39.3 install the console works.
+  It only broke when a plugin that takes over model selection (such as the reasoning-effort slider
+  used on the maintainer's device) left the service it reads unavailable: the old code either hid
+  the tab or, in internal builds that were never published, rendered a blank page. It now shows a
+  "service not ready" message instead, and the tab sits after "Agent presets".
 - **APKs in chat install directly.** Tapping an APK file card used to be handed to the system file
   viewer, which answered "cannot preview". It now opens the installer.
 - **Leave safe mode from the launcher.** While in safe mode, long-pressing the app icon offers
