@@ -3,10 +3,22 @@
 > Chinese original (authoritative and most up to date): [CHANGELOG.md](CHANGELOG.md).
 > This English page mirrors it; if the two ever disagree, the Chinese one wins.
 
-> Current release: `1.39.4`. Every release installs **straight over the previous one** — same signing key,
+> Current release: `1.39.5`. Every release installs **straight over the previous one** — same signing key,
 > in-place upgrade, no uninstall (uninstalling wipes all app-private data).
 
 ---
+
+## v1.39.5 — install the document-preview engine in one tap
+
+- **The missing piece for document preview**: previewing docx / xlsx / pptx needs a LibreOffice
+  engine (~48 MB download, ~150 MB on disk). It was never shipped inside the APK, so opening those
+  documents simply failed with no visible reason. You can now install it from Settings.
+- **How**: Settings → “文档预览” → “下载并安装”. It downloads, unpacks and verifies itself, and
+  **works immediately — no engine restart**; the next document you open previews fine.
+- **If you skip it**: only those three document types are affected; chat, models, the console and
+  everything else keep working.
+- The engine lives in app data and **survives in-place upgrades**, so you download it only once.
+- Also: the changelog now includes the missing 1.39.4 and 1.39.5 entries.
 
 ## v1.39.4 — console tolerates a missing service, tap an APK in chat to install
 
