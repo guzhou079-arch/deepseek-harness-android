@@ -89,8 +89,8 @@ dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-fs-
 # ② 分享进来的可见性与落盘副本（2026-10-15 事故：两份副本里服务的是"瘦"的那份，
 #    且"到货卡片"只挂在会话页 → 用户分享进来的文件收下了却没人看见。
 #    这两条把「带 shell.overlay 到货横幅的那一份」钉死，两份副本都必须一致）
-dshhome/profiles/web/node_modules/dsh-android-console/lib/client.js|f3db7c740a0541117dc0e7620041ce94|android-share-notice
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-android-console/lib/client.js|f3db7c740a0541117dc0e7620041ce94|android-share-notice
+dshhome/profiles/web/node_modules/dsh-android-console/lib/client.js|7a17ebdc0b777bd39c7f5db5a8ef500f|android-share-notice
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-android-console/lib/client.js|7a17ebdc0b777bd39c7f5db5a8ef500f|android-share-notice
 # ⚠️ 2026-10-15 之前这条清单**没覆盖**这两个文件，于是"源码改了、包里带的还是旧的"
 #    能一路通过 verify。装 1.39 之前，patch-check 对这两条会报漂移（装机副本还是旧的）——那是**正确**的。
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-plugin-auto-summary-policy/lib/index.js|d0beb2db51a199d1d7b4a45b5cc74936|0.1.2-effective-policy
@@ -106,4 +106,8 @@ dshhome/profiles/web/node_modules/dsh-plugin-turn-notify/lib/index-v3.js|3e40e4c
 # 2026-10-18 更新 md5（be946ec→430d9fd）：本层新增 Codex 电源滑块注册
 # （dsh-codex-power-slider）+ 停用 ui-model-selection，让滑块接管 composer 模型槽。
 # 关键字沿用 modelPolicies：auto-summary-policy 的调优块仍在，没被这次追加挤掉。
-dshhome/cordis.patch.yml|430d9fd9ee161fc8fd5223b5240050ce|modelPolicies
+dshhome/cordis.patch.yml|b5b30cad6a67ddc49b77686794d5c3ef|modelPolicies
+
+# 2026-10-18 v1.39.5：文档预览引擎改为按需下载（不随包），插件提供
+# /dsh-office-kit/status 与 /install 两条路由；装了引擎才解析得到。
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-office-kit/lib/index.js|9c334d372670a245396bdb730b604c5a|office-kit: status route
