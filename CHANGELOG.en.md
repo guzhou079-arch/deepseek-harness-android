@@ -8,13 +8,13 @@
 
 ---
 
-## v1.39.4 — console page fixed, tap an APK in chat to install
+## v1.39.4 — console tolerates a missing service, tap an APK in chat to install
 
-- **The Console page is no longer blank.** For a while the Console tab appeared but its body stayed
-  empty with no error at all. The registration read a service that was not declared as a dependency;
-  the throw was swallowed by an outer error boundary, the whole area rendered as nothing, and the
-  page was additionally marked as "abandoned" — so it stayed blank until the app restarted. It now
-  degrades to empty instead of throwing. The tab also moved after "Agent presets".
+- **The Console page reads its services defensively.** The console in the 1.39.3 release is fine;
+  the blank page only happened in internal builds made while preparing that release (a dependency
+  declaration was changed to stop a plugin from waiting forever, and one read site was missed).
+  Those builds were never published. It now degrades to a message instead of going blank, and the
+  tab sits after "Agent presets".
 - **APKs in chat install directly.** Tapping an APK file card used to be handed to the system file
   viewer, which answered "cannot preview". It now opens the installer.
 - **Leave safe mode from the launcher.** While in safe mode, long-pressing the app icon offers
