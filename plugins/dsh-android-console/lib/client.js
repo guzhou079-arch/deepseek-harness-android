@@ -348,6 +348,16 @@ window.__ModuleLoader__.load({
     /** 独立轮询局域网协同状态 */
     function useLanMeshState() {
       const [lan, setLan] = react.useState({ ips: [], clipboard: '', files: [] });
+      const [access, setAccessState] = react.useState({ enabled: false, host: '127.0.0.1', urls: [] });
+      const fetchAccess = async () => {
+        try {
+          const res = await fetch('/lan-mesh/api/access');
+          if (res.ok) {
+            const d = await res.json();
+            if (d && d.ok) setAccessState({ enabled: !!d.enabled, host: d.host || '', urls: d.urls || [] });
+          }
+        } catch (_) {}
+      };
       const fetchLan = async () => {
         try {
           const res = await fetch('/lan-mesh/api/status');
@@ -362,7 +372,8 @@ window.__ModuleLoader__.load({
 
       react.useEffect(() => {
         fetchLan();
-        const timer = setInterval(fetchLan, 3500);
+        fetchAccess();
+        const timer = setInterval(() => { fetchLan(); fetchAccess(); }, 3500);
         return () => clearInterval(timer);
       }, []);
 
@@ -381,7 +392,23 @@ window.__ModuleLoader__.load({
         }
       };
 
-      return { lan: lan, setClipboard: setClipboard, refresh: fetchLan };
+      const setAccess = async (enabled) => {
+        try {
+          const res = await fetch('/lan-mesh/api/access', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ enabled: !!enabled }),
+          });
+          const data = await res.json();
+          setTimeout(fetchAccess, 1200);
+          setTimeout(fetchAccess, 6000);
+          return data;
+        } catch (e) {
+          return { ok: false, error: e.message };
+        }
+      };
+
+      return { lan: lan, access: access, setAccess: setAccess, setClipboard: setClipboard, refresh: fetchLan };
     }
 
     function executeAction(id, arg) {
@@ -1467,6 +1494,7 @@ window.__ModuleLoader__.load({
       // ---------------- 局域网协同与文件投送 (LAN Mesh)
       if (page === 'lan') {
         const lan = lanHook.lan || {};
+        const access = lanHook.access || {};
         const ips = lan.ips || [];
         const files = lan.files || [];
 
@@ -1474,6 +1502,35 @@ window.__ModuleLoader__.load({
           jsx(Back, { title: '局域网协同与隔空投送', onBack: () => setPage('main') }),
           jsx(Note, { children: '跨设备互联：电脑浏览器直连手机 DSH 控制台，支持跨设备剪贴板双向同步与大文件拖拽隔空投送。' }),
           jsx('div', { className: 'ctl-sep' }),
+
+          // 0. 局域网访问总开关
+          jsxs('div', { className: 'ctl-life-card', children: [
+            jsx(Row, {
+              title: '局域网访问',
+              desc: access.enabled
+                ? '已开启 · 引擎绑 ' + (access.host || '0.0.0.0') + ' · 同网段浏览器可直连'
+                : '已关闭 · 只有手机自己能打开。开启会重启引擎（几秒）',
+              right: jsx(Switch, {
+                checked: !!access.enabled,
+                label: '局域网访问',
+                onChange: (next) => {
+                  lanHook.setAccess(next).then((r) => {
+                    if (r && r.ok) say(next ? '已开启，引擎重启中…' : '已关闭局域网访问');
+                    else say((r && r.error) || '操作失败');
+                  });
+                },
+              }),
+            }),
+            (access.urls && access.urls.length)
+              ? jsx('div', { style: { padding: '0 12px 10px' }, children: access.urls.map((u) => jsxs('div', { key: u.address, className: 'ctl-item-row', children: [
+                  jsxs('div', { className: 'ctl-main', children: [
+                    jsx('a', { href: u.url, target: '_blank', rel: 'noreferrer', className: 'ctl-code-pill', children: 'http://' + u.address + ':3080/' }),
+                    jsx('div', { className: 'ctl-desc', children: u.name + (u.hasToken ? ' · 带登录令牌，点开即用' : ' · 无令牌，需手动带 token') }),
+                  ] }),
+                ] }))
+              })
+              : jsx('div', { className: 'ctl-desc', style: { padding: '0 12px 10px' }, children: '令牌走明文 HTTP（同网段可嗅探），只在可信 Wi-Fi 下开启；不用时记得关掉。' }),
+          ] }),
 
           // 1. 局域网 IP
           jsxs('div', { className: 'ctl-life-card', children: [
@@ -1924,7 +1981,7 @@ window.__ModuleLoader__.load({
       });
     }
 
-    const inject = ['slots', 'sessions', 'modelDirectories'];
+    const inject = ['slots', 'sessions'];
 
     function apply(ctx) {
       ctx.slots.inject('conversation.composer.dock', () => ctx.inject(['uiConversation'], scope => scope.slots.register({
@@ -1934,10 +1991,13 @@ window.__ModuleLoader__.load({
       ctx.slots.inject('settings.section', () => ctx.slots.register({
         name: 'settings.section',
         id: 'android-console',
-        order: 20,
+        order: 30,
         label: () => '控制台',
+        inject: () => ({}),
       }, function ConsoleSectionGuarded(props) {
-        props = { ...props, modelServices: { sessions: ctx.sessions, modelDirectories: ctx.modelDirectories } };
+        var _md = null;
+        try { _md = ctx.modelDirectories || null; } catch (_e) { _md = null; }
+        props = { ...props, modelServices: { sessions: ctx.sessions, modelDirectories: _md } };
         return Boundary === null
           ? jsx(ConsoleSection, props)
           : jsx(Boundary, { children: jsx(ConsoleSection, props) });
