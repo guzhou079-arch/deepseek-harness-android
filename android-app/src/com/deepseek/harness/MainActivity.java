@@ -297,6 +297,14 @@ public class MainActivity extends Activity {
     private SplashLogoView splashLogoView;
     private View splashBox;
     private TextView splashBrand;
+
+    // ===== 开机动画（assets/boot.html 在主 WebView 里跑；原生启动页退为兜底）=====
+    private static boolean bootFilmPlayed;          // 每个进程只放一次（Activity 重建不重播）
+    private boolean bootFilmOn, bootFilmReady, bootFilmDone;
+    private String bootFilmPending;
+    private float bootFilmP, bootFilmRate, bootFilmTarget;
+    private long bootFilmStartAt, bootFilmAt, bootEngineAt;
+    private int bootStage;                          // 0 文件 1 引擎 2 连接 3 就绪
     private final Handler ui = new Handler(Looper.getMainLooper());
     // 运行时确定的 dshroot 目录（外部公共目录优先，失败回退内部 files/payload/dshroot）
     private File dshrootDir = null;
@@ -371,6 +379,17 @@ public class MainActivity extends Activity {
         ws.setTextZoom(100);
         webView.setBackgroundColor(chromeBg()); // v1.13.11：跟随主题（浅色模式下不再是深色闪屏）
         checkWebViewCompat(); // WebView 兼容检测：老内核提示引导（DSH 前端需 Chromium 80+）
+        // v1.39.5：网页里点「文件卡片 / 下载链接」时，WebView 默认没有 DownloadListener，
+        // 下载请求会被交给系统（默认浏览器 / 文件预览器）→ 点 APK 卡片只得到「该格式文件
+        // 暂时无法预览」，安装器根本不弹。这里接管：本地 file:// 直接交给安装器，
+        // http(s) 走系统 DownloadManager（通知栏可见，点开即装）。
+        ws.setSupportMultipleWindows(true); // 配合下面的 onCreateWindow，拦 target=_blank
+        webView.setDownloadListener(new android.webkit.DownloadListener() {
+            @Override public void onDownloadStart(String url, String userAgent, String contentDisposition,
+                                                  String mimetype, long contentLength) {
+                handleWebDownload(url, userAgent, contentDisposition, mimetype);
+            }
+        });
         webView.setWebViewClient(new android.webkit.WebViewClient() {
             private int errorRetries = 0;
 
@@ -453,6 +472,9 @@ public class MainActivity extends Activity {
             }
 
             private android.webkit.WebResourceResponse guardResource(String url, boolean mainFrame) {
+                // 开机动画：主文档是 data: URL（不走回环），只在 bootFilmOn 窗口内放行。
+                if (bootFilmOn && mainFrame && url != null
+                        && (url.startsWith("data:") || url.startsWith("about:"))) return null;
                 if (resourceAllowed(url, mainFrame)) return null;
                 return new android.webkit.WebResourceResponse("text/plain", "UTF-8", 403, "Forbidden",
                         java.util.Collections.<String, String>emptyMap(), new java.io.ByteArrayInputStream(new byte[0]));
@@ -475,6 +497,8 @@ public class MainActivity extends Activity {
             public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
                 super.onPageStarted(view, url, favicon);
                 trustedWebDocument = com.deepseek.harness.vscreen.LocalHttpFence.isLoopbackUrl(url, enginePort);
+                // 开机动画的主文档不是回环 → 放行，但绝不注入 DSH 脚本（trustedWebDocument 保持 false）。
+                if (bootFilmOn && !trustedWebDocument) return;
                 if (draftInput != null) draftInput.navigation();
                 if (!trustedWebDocument) { view.stopLoading(); return; }
                 injectAbortSignalAny(view);
@@ -495,6 +519,14 @@ public class MainActivity extends Activity {
 
             @Override
             public void onPageFinished(WebView view, String url) {
+                if (bootFilmOn && !trustedWebDocument) {          // 片子就绪：补发积压的那条指令
+                    bootFilmReady = true;
+                    if (bootFilmPending != null) {
+                        view.evaluateJavascript(bootFilmPending, null);
+                        bootFilmPending = null;
+                    }
+                    return;
+                }
                 if (!trustedWebDocument || !com.deepseek.harness.vscreen.LocalHttpFence.isLoopbackUrl(url, enginePort)) return;
                 errorRetries = 0;
                 if (draftInput != null) view.evaluateJavascript(draftInput.bootstrap(), null);
@@ -566,6 +598,34 @@ public class MainActivity extends Activity {
         // 附件/文件选择：官方前端用 <input type="file"> 选文件，Android WebView 必须实现
         // onShowFileChooser 才会弹系统文件选择器，否则点「添加附件」没有任何反应。
         webView.setWebChromeClient(new WebChromeClient() {
+            // v1.39.5：target=_blank / window.open 的下载或本地文件，同样交给 handleWebDownload，
+            // 否则 WebView 会把它交回系统，APK 又落进「文件预览」而不是安装器。
+            // 只接管 .apk 与 file:// 两类；其余返回 true 但不处理（保持原有被动行为）。
+            @Override
+            public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture,
+                                          android.os.Message resultMsg) {
+                try {
+                    final WebView probe = new WebView(MainActivity.this);
+                    probe.setWebViewClient(new android.webkit.WebViewClient() {
+                        @Override
+                        public boolean shouldOverrideUrlLoading(WebView v,
+                                                                android.webkit.WebResourceRequest r) {
+                            String u = r == null ? null : r.getUrl().toString();
+                            probe.destroy();
+                            if (u != null && (u.startsWith("file://") || u.contains(".apk"))) {
+                                handleWebDownload(u, null, null, null);
+                            }
+                            return true;
+                        }
+                    });
+                    android.webkit.WebView.WebViewTransport tr =
+                            (android.webkit.WebView.WebViewTransport) resultMsg.obj;
+                    tr.setWebView(probe);
+                    resultMsg.sendToTarget();
+                } catch (Throwable ignored) {}
+                return true;
+            }
+
             // dsh-android-patch v6b (2026-09-30)：给 WebView 补上 onJsPrompt。
             // WebView 默认不实现它（返回 false = 网页调 prompt() 什么都不显示），
             // 这里接一个原生输入框，把这个通用能力补齐。
@@ -710,6 +770,9 @@ public class MainActivity extends Activity {
             if (in != null && in.getBooleanExtra("safe_mode_boot", false)) {
                 conToast("正在通过桌面快捷方式进入安全模式…");
                 conSafeModeNow();
+            } else if (in != null && in.getBooleanExtra("safe_mode_exit", false)) {
+                conToast("正在通过桌面快捷方式退出安全模式…");
+                conExitSafeModeNow();
             } else {
                 startEngine();
             }
@@ -731,10 +794,76 @@ public class MainActivity extends Activity {
         if (intent != null && intent.getBooleanExtra("safe_mode_boot", false)) {
             conToast("正在通过桌面快捷方式进入安全模式…");
             conSafeModeNow();
+        } else if (intent != null && intent.getBooleanExtra("safe_mode_exit", false)) {
+            conToast("正在通过桌面快捷方式退出安全模式…");
+            conExitSafeModeNow();
         }
         handleNotificationIntent(intent);
         if (draftInput != null) draftInput.accept(intent);
     }
+
+    //#region dsh-android-patch v1.39.5 (2026-10-18)：网页端「文件卡片」点击的落地点
+    // 背景：DSH 聊天里的交付卡片给出的是文件下载 URL。WebView 默认没有 DownloadListener，
+    // 这类请求被交回系统 → 点 APK 卡片只会拉起「文件预览」，一路显示「该格式文件暂时无法
+    // 预览」，安装器根本不弹（2026-10-18 用户实测）。这里接管两类 URL：
+    //   · file:// 且文件存在 → 直接交给系统（.apk 走安装器）
+    //   · 其余 http(s) → 系统 DownloadManager 下载到「下载」目录，通知栏点开即装
+    // 回滚：删掉本 region，并删掉 new WebView 处两行 setDownloadListener / setSupportMultipleWindows
+    //      以及 WebChromeClient 里的 onCreateWindow。
+    /** 网页触发的下载：本地文件直接交给安装器/系统打开；远程走 DownloadManager。 */
+    private void handleWebDownload(String url, String userAgent, String contentDisposition, String mimetype) {
+        if (url == null || url.isEmpty()) return;
+        try {
+            if (url.startsWith("file://")) {
+                String p = android.net.Uri.decode(url.substring("file://".length()));
+                if (openLocalFile(p)) return;
+            }
+            android.app.DownloadManager dm =
+                    (android.app.DownloadManager) getSystemService(DOWNLOAD_SERVICE);
+            if (dm == null) throw new IllegalStateException("系统下载服务不可用");
+            android.app.DownloadManager.Request req =
+                    new android.app.DownloadManager.Request(android.net.Uri.parse(url));
+            if (userAgent != null && !userAgent.isEmpty()) req.addRequestHeader("User-Agent", userAgent);
+            String name = android.webkit.URLUtil.guessFileName(url, contentDisposition, mimetype);
+            req.setTitle(name);
+            req.setNotificationVisibility(
+                    android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+            req.setDestinationInExternalPublicDir(
+                    android.os.Environment.DIRECTORY_DOWNLOADS, name);
+            dm.enqueue(req);
+            conToast("已开始下载：" + name);
+        } catch (Throwable t) {
+            Log.w(TAG, "handleWebDownload failed: " + url, t);
+            conToast("下载失败：" + t.getMessage());
+        }
+    }
+
+    /** 用系统打开本地文件（.apk 走安装器）。返回 false 表示这个文件没法交给系统。 */
+    private boolean openLocalFile(String path) {
+        try {
+            java.io.File f = new java.io.File(path);
+            if (!f.isFile()) {
+                conToast("文件不存在：" + path);
+                return true;
+            }
+            boolean apk = path.toLowerCase().endsWith(".apk");
+            android.net.Uri u = LogShareProvider.uriForAbs(this, path);
+            if (u == null) {
+                Log.w(TAG, "openLocalFile: cannot expose " + path);
+                return false;
+            }
+            Intent i = new Intent(Intent.ACTION_VIEW);
+            i.setDataAndType(u, apk ? "application/vnd.android.package-archive" : "*/*");
+            i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(i);
+            return true;
+        } catch (Throwable t) {
+            Log.w(TAG, "openLocalFile failed: " + path, t);
+            conToast("打开失败：" + t.getMessage());
+            return true;
+        }
+    }
+    //#endregion
 
     private void initDynamicShortcuts() {
         if (Build.VERSION.SDK_INT < 25) return;
@@ -742,19 +871,34 @@ public class MainActivity extends Activity {
             android.content.pm.ShortcutManager sm = getSystemService(android.content.pm.ShortcutManager.class);
             if (sm == null) return;
 
-            Intent safeIntent = new Intent(Intent.ACTION_VIEW, null, this, MainActivity.class);
-            safeIntent.putExtra("safe_mode_boot", true);
-            safeIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            // v1.39.4：快捷方式跟随安全模式状态 —— 处于安全模式时给「退出安全模式」，
+            // 否则给「安全模式启动」。长按桌面图标即可就近操作，不必先进控制台
+            // （安全模式下控制台可能因插件问题打不开，这条是逃生口）。
+            boolean inSafe = safeModeActive();
+            Intent si = new Intent(Intent.ACTION_VIEW, null, this, MainActivity.class);
+            si.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
 
-            android.content.pm.ShortcutInfo safeShortcut = new android.content.pm.ShortcutInfo.Builder(this, "shortcut_safe_mode")
-                    .setShortLabel("安全模式启动")
-                    .setLongLabel("安全模式启动（跳过用户层，保护数据）")
-                    .setIcon(android.graphics.drawable.Icon.createWithResource(this, R.drawable.ic_launcher))
-                    .setIntent(safeIntent)
-                    .build();
+            android.content.pm.ShortcutInfo sc;
+            if (inSafe) {
+                si.putExtra("safe_mode_exit", true);
+                sc = new android.content.pm.ShortcutInfo.Builder(this, "shortcut_exit_safe_mode")
+                        .setShortLabel("退出安全模式")
+                        .setLongLabel("退出安全模式（还原被旁置的用户层）")
+                        .setIcon(android.graphics.drawable.Icon.createWithResource(this, R.drawable.ic_launcher))
+                        .setIntent(si)
+                        .build();
+            } else {
+                si.putExtra("safe_mode_boot", true);
+                sc = new android.content.pm.ShortcutInfo.Builder(this, "shortcut_safe_mode")
+                        .setShortLabel("安全模式启动")
+                        .setLongLabel("安全模式启动（跳过用户层，保护数据）")
+                        .setIcon(android.graphics.drawable.Icon.createWithResource(this, R.drawable.ic_launcher))
+                        .setIntent(si)
+                        .build();
+            }
 
             java.util.List<android.content.pm.ShortcutInfo> list = new java.util.ArrayList<android.content.pm.ShortcutInfo>();
-            list.add(safeShortcut);
+            list.add(sc);
             sm.setDynamicShortcuts(list);
         } catch (Throwable t) {
             Log.w(TAG, "initDynamicShortcuts failed", t);
@@ -1177,6 +1321,144 @@ public class MainActivity extends Activity {
         root.addView(box, bp);
 
         setContentView(root);
+        showBootFilm();
+    }
+
+    /**
+     * 开机动画：把片子放进主 WebView（不新开 WebView，省内存；片子走 data: 文档，
+     * 由 bootFilmOn 临时放行主文档围栏）。任何异常都退回原生启动页，不让启动白屏。
+     */
+    private void showBootFilm() {
+        if (bootFilmOn || bootFilmPlayed || webView == null) return;
+        try {
+            showBootFilmImpl();
+        } catch (Throwable t) {                                  // 片子出错绝不能连累启动
+            Log.w(TAG, "boot film failed, keep native splash", t);
+            bootFilmOn = false;
+            bootFilmReady = false;
+            if (splashBox != null) splashBox.setVisibility(View.VISIBLE);
+        }
+    }
+
+    private void showBootFilmImpl() {
+        String html;
+        try {
+            html = readAssetText("boot.html");          // 复用已有的 assets 读取实现
+        } catch (Throwable t) {
+            Log.w(TAG, "boot.html missing, keep native splash", t);
+            return;
+        }
+        if (html == null || html.length() < 2000) return;          // 没有片子 → 保持原生启动页
+        bootFilmPlayed = true;
+        bootFilmOn = true;
+        bootFilmReady = false;
+        bootFilmDone = false;
+        bootFilmP = 0f;
+        bootFilmRate = 0f;
+        bootFilmTarget = 0.10f;
+        bootStage = 0;
+        bootFilmStartAt = System.currentTimeMillis();
+        bootFilmAt = bootFilmStartAt;
+        final String body = html.replace("<body>", "<body class=\"clean\">");
+        webView.setBackgroundColor(0xFF04050A);
+        webView.post(new Runnable() {
+            @Override public void run() {
+                webView.loadDataWithBaseURL(null, body, "text/html", "utf-8", null);
+            }
+        });
+        if (splashBox != null) splashBox.setVisibility(View.INVISIBLE);
+        ui.postDelayed(new Runnable() {
+            @Override public void run() {
+                if (bootFilmOn && !bootFilmReady) {
+                    Log.w(TAG, "boot film not ready in 6s, fall back to native splash");
+                    bootFilmOn = false;
+                    if (splashBox != null) splashBox.setVisibility(View.VISIBLE);
+                }
+            }
+        }, 6000);
+        ui.post(bootFilmTick);
+    }
+
+    /** 200ms 心跳：把平滑后的总进度 / 阶段 / 剩余秒数推给片子。 */
+    private final Runnable bootFilmTick = new Runnable() {
+        @Override public void run() {
+            if (!bootFilmOn) return;
+            if (!bootFilmDone) {                 // ready() 之后停推，否则会把 100% 又盖回 97%
+                try {
+                    bootFilmTickBody();
+                } catch (Throwable t) {
+                    Log.w(TAG, "boot film tick failed", t);
+                }
+            }
+            ui.postDelayed(this, 200);
+        }
+    };
+
+    private void bootFilmTickBody() {
+            long now = System.currentTimeMillis();
+            float dt = Math.min(1.5f, Math.max(0.05f, (now - bootFilmAt) / 1000f));
+            bootFilmAt = now;
+            float prev = bootFilmP;
+            bootFilmP += (bootFilmTarget - bootFilmP) * Math.min(0.75f, dt / 0.55f);
+            if (bootFilmP > bootFilmTarget) bootFilmP = bootFilmTarget;
+            if (bootFilmTarget - bootFilmP < 0.003f) bootFilmP = bootFilmTarget;
+            float inst = (bootFilmP - prev) / dt;
+            bootFilmRate = bootFilmRate * 0.72f + inst * 0.28f;
+            filmJs("DSH_BOOT.progress(" + String.format(java.util.Locale.US, "%.3f", bootFilmP) + ")");
+            filmJs("DSH_BOOT.stage(" + bootStage + ")");
+            int eta = bootFilmEta();
+            if (eta > 0) filmJs("DSH_BOOT.eta(" + eta + ")");
+    }
+
+    private int bootFilmEta() {
+        if (bootFilmP >= 0.995f) return 0;
+        if (bootStage == 1) {                                   // 起引擎：按历史均值倒数
+            long e = (System.currentTimeMillis() - (bootEngineAt > 0 ? bootEngineAt : bootFilmStartAt)) / 1000L;
+            return (int) Math.max(1, avgEngineSecs() - e);
+        }
+        if (bootFilmRate > 3e-4f) {                             // 解压：按实测速率外推
+            int eta = Math.round((1f - bootFilmP) / bootFilmRate);
+            return Math.max(1, Math.min(180, eta));
+        }
+        return 0;
+    }
+
+    private int avgEngineSecs() {
+        String s = getSharedPreferences(PREFS, MODE_PRIVATE).getString("engine_secs", "");
+        int sum = 0, n = 0;
+        for (String x : s.split(",")) {
+            try {
+                int v = Integer.parseInt(x.trim());
+                if (v > 0 && v < 300) { sum += v; n++; }
+            } catch (Throwable ignored) {}
+        }
+        return n > 0 ? Math.max(2, Math.round(sum / (float) n)) : 6;
+    }
+
+    private void recordEngineSecs() {
+        if (bootEngineAt <= 0) return;
+        int sec = (int) Math.max(1, Math.min(300, (System.currentTimeMillis() - bootEngineAt) / 1000L));
+        SharedPreferences sp = getSharedPreferences(PREFS, MODE_PRIVATE);
+        java.util.ArrayList<String> list = new java.util.ArrayList<String>();
+        for (String x : sp.getString("engine_secs", "").split(",")) if (x.trim().length() > 0) list.add(x.trim());
+        list.add(String.valueOf(sec));
+        while (list.size() > 5) list.remove(0);
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < list.size(); i++) { if (i > 0) sb.append(','); sb.append(list.get(i)); }
+        SharedPreferences.Editor e = sp.edit();
+        e.putString("engine_secs", sb.toString());
+        e.apply();
+        Log.i(TAG, "engine start " + sec + "s, history=" + sb);
+    }
+
+    private void filmJs(final String js) {
+        if (!bootFilmOn) return;
+        final WebView wv = webView;
+        if (wv == null) return;
+        if (!bootFilmReady) { bootFilmPending = js; return; }
+        wv.post(new Runnable() {
+            @Override public void run() { wv.evaluateJavascript(js, null); }
+        });
     }
 
     /** 退出确认对话框（浮动按钮与系统返回键共用） */
@@ -6055,6 +6337,31 @@ public class MainActivity extends Activity {
         // v1.12：控制台还开着时不抢界面（引擎就绪后由用户点「打开主界面」进来）
         if (consoleVisible) return;
         startWatchdog();
+        final boolean film = bootFilmOn && !bootFilmDone;
+        if (film) {
+            // 片子收尾：连接阶段亮起 → 就绪 → 淡黑谢幕，然后才把 WebView 切到 GUI
+            bootFilmDone = true;
+            if (bootStage == 1) recordEngineSecs();
+            bootStage = 2;
+            bootFilmTarget = 0.97f;
+            filmJs("DSH_BOOT.progress(0.970)");
+            filmJs("DSH_BOOT.stage(2)");
+            ui.postDelayed(new Runnable() {
+                @Override public void run() {
+                    filmJs("DSH_BOOT.ready()");
+                    ui.postDelayed(new Runnable() {
+                        @Override public void run() {
+                            bootFilmOn = false;
+                            bootFilmReady = false;
+                            if (webView != null) {
+                                webView.loadUrl(webHomeUrl());
+                                webView.clearHistory();
+                            }
+                        }
+                    }, 1500);
+                }
+            }, 520);
+        }
         ui.post(new Runnable() {
             @Override public void run() {
                 if (splashBox != null && splashBox.getVisibility() == View.VISIBLE) {
@@ -6082,7 +6389,7 @@ public class MainActivity extends Activity {
                     progressBar.setIndeterminate(false);
                     progressBar.setVisibility(View.GONE);
                 }
-                webView.loadUrl(webHomeUrl());
+                if (!film) webView.loadUrl(webHomeUrl());   // 开机动画在放时，由上面的收尾流程接管
             }
         });
     }
@@ -6102,6 +6409,9 @@ public class MainActivity extends Activity {
     }
 
     private void setProgress(final int percent, final String s) {
+        if (bootFilmOn && bootStage == 0 && bootFilmTarget < 0.82f) {
+            bootFilmTarget = Math.max(bootFilmTarget, 0.10f + 0.72f * Math.min(100, Math.max(0, percent)) / 100f);
+        }
         ui.post(new Runnable() {
             @Override public void run() {
                 if (splashLogoView != null) splashLogoView.setProgress(percent);
@@ -6121,6 +6431,11 @@ public class MainActivity extends Activity {
     }
 
     private void showIndeterminate(final String s) {
+        if (bootFilmOn && bootStage < 1) {                       // 进入「起引擎」阶段
+            bootStage = 1;
+            bootEngineAt = System.currentTimeMillis();
+            bootFilmTarget = Math.max(bootFilmTarget, 0.86f);
+        }
         ui.post(new Runnable() {
             @Override public void run() {
                 if (splashLogoView != null) splashLogoView.setIndeterminate(true);
@@ -8749,7 +9064,7 @@ public class MainActivity extends Activity {
             ui.post(new Runnable() { @Override public void run() {
                 conToast(err == null ? "已进入安全模式，正在启动引擎…" : err);
                 refreshConsole();
-                if (err == null) { engineStoppedByUser = false; engineStartAborted = false; conEngineClick(); }
+                if (err == null) { initDynamicShortcuts(); engineStoppedByUser = false; engineStartAborted = false; conEngineClick(); }
             }});
         }}, "safe-mode-on").start();
     }
@@ -8784,7 +9099,7 @@ public class MainActivity extends Activity {
             ui.post(new Runnable() { @Override public void run() {
                 conToast(err == null ? "已退出安全模式，正在启动引擎…" : err);
                 refreshConsole();
-                if (err == null) { engineStoppedByUser = false; engineStartAborted = false; conEngineClick(); }
+                if (err == null) { initDynamicShortcuts(); engineStoppedByUser = false; engineStartAborted = false; conEngineClick(); }
             }});
         }}, "safe-mode-off").start();
     }

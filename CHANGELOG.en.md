@@ -3,10 +3,27 @@
 > Chinese original (authoritative and most up to date): [CHANGELOG.md](CHANGELOG.md).
 > This English page mirrors it; if the two ever disagree, the Chinese one wins.
 
-> Current release: `1.39.2`. Every release installs **straight over the previous one** — same signing key,
+> Current release: `1.39.4`. Every release installs **straight over the previous one** — same signing key,
 > in-place upgrade, no uninstall (uninstalling wipes all app-private data).
 
 ---
+
+## v1.39.4 — console page fixed, tap an APK in chat to install
+
+- **The Console page is no longer blank.** For a while the Console tab appeared but its body stayed
+  empty with no error at all. The registration read a service that was not declared as a dependency;
+  the throw was swallowed by an outer error boundary, the whole area rendered as nothing, and the
+  page was additionally marked as "abandoned" — so it stayed blank until the app restarted. It now
+  degrades to empty instead of throwing. The tab also moved after "Agent presets".
+- **APKs in chat install directly.** Tapping an APK file card used to be handed to the system file
+  viewer, which answered "cannot preview". It now opens the installer.
+- **Leave safe mode from the launcher.** While in safe mode, long-pressing the app icon offers
+  "Exit safe mode".
+
+## v1.39.3 — new splash screen and a slider-based model picker
+
+- **Splash screen**: cold starts show a loading animation instead of a black screen.
+- **Model picker as a slider**: reasoning effort is now a drag control.
 
 ## v1.39.2 — no more blank page after the engine is restarted
 

@@ -50,3 +50,34 @@ for (const dst of [`${SB}/build-overlay/${REL}/${PKG}/${FILE}`, `${OVL}/${REL2}/
   fs.writeFileSync(dst, s);
 }
 console.log('  → 写出 build-overlay + overlay 两份');
+
+// ── 追加（2026-10-17）：rc2 的第二道闸 ──────────────────────────────
+// rc2 的 dsh-host-webserver Config.host transform 从「只认 127.0.0.1|0.0.0.0」
+// 改成了「一律拒绝 wildcard」，且**没有**读 DSH_ALLOW_LAN。
+// 只补 startup.js 时：LAN 开关一开，webserver 配置解析就抛错 → 引擎直接起不来。
+// 这里给它加上同一开关的显式放行（默认仍拒绝），并把结果同步进 overlay。
+// patch-webserver-rc2
+{
+  const PKG2 = 'dsh-host-webserver', FILE2 = 'lib/index.js';
+  const src2 = `${N}/${PKG2}/${FILE2}`;
+  let t = fs.readFileSync(src2, 'utf8');
+  const anchor = 'if (isWildcardAddress(parsed)) throw new Error(';
+  const repl = 'if (isWildcardAddress(parsed) && process.env.DSH_ALLOW_LAN !== "1") throw new Error(';
+  if (t.includes('process.env.DSH_ALLOW_LAN')) {
+    console.log('  ✓ dsh-host-webserver 已是放行状态 → 直通同步（幂等）');
+  } else {
+    const cnt = t.split(anchor).length - 1;
+    if (cnt !== 1) { console.error(`✗ webserver 锚点期望 1 处，实际 ${cnt} 处 → 中止`); process.exit(1); }
+    t = t.replace(anchor, repl);
+    const tmp2 = path.join(SB, 'work', 'webserver-lan-check.mjs');
+    fs.writeFileSync(tmp2, t);
+    const chk = cp.spawnSync(process.execPath, ['--check', tmp2], { encoding: 'utf8' });
+    if (chk.status !== 0) { console.error('✗ webserver 语法错误: ' + (chk.stderr || '').slice(0, 300)); process.exit(1); }
+    console.log('  ✓ dsh-host-webserver/lib/index.js: wildcard 改为需 DSH_ALLOW_LAN=1（--check 通过）');
+  }
+  for (const dst of [`${SB}/build-overlay/${REL}/${PKG2}/${FILE2}`, `${OVL}/${REL2}/${PKG2}/${FILE2}`]) {
+    fs.mkdirSync(path.dirname(dst), { recursive: true });
+    fs.writeFileSync(dst, t);
+    console.log('  → ' + dst);
+  }
+}

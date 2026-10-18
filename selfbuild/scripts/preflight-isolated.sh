@@ -45,6 +45,14 @@ if [ $LAN = 1 ]; then
   echo "== 局域网模式：绑定 0.0.0.0（需 DSH_ALLOW_LAN=1），trusted-host=$LANIP =="
 fi
 
+# ── 2026-10-17 事后补：LAN 开关的两道闸必须双向可控 ──────────────────
+# rc2 在 dsh-host-webserver 的 Config 层加了第二道 wildcard 拒绝，LAN 补丁只覆盖了
+# startup.js 的第一道 → 用户一开 LAN，引擎必死；而当时的门禁只跑默认 127.0.0.1，
+# 全绿也照样起不来（lesson-preflight-must-run-the-user-action）。探针 1 秒，双向断言。
+LAN_CAND="$R/v118/dsh-patches/overlay/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-host-webserver/lib/index.js"
+[ $APPLY = 0 ] && LAN_CAND="$F/payload/$REL/dsh-host-webserver/lib/index.js"
+DSH_LAN_CANDIDATE="$LAN_CAND" "$NODE" "$SB/scripts/check-lan-gate.mjs" || { echo "✗ LAN 门禁探针失败 → 禁止装机"; exit 3; }
+
 rm -rf "$ISO"; mkdir -p "$ISO"
 echo "== 复制隔离 DSH_HOME（不动真实会话）=="
 cp -a "$F/payload/dshhome" "$ISO/dshhome" 2>/dev/null || { echo "✗ 复制 dshhome 失败"; exit 2; }

@@ -79,6 +79,18 @@ payload)
   ;;
 patch)
   [ -f "$PAY_OLD" ] || { echo "✗ 先跑 payload"; exit 1; }
+  # 2026-10-17：REVISION 改成「本次构建号」，并在 overlay 应用前写入。
+  # 原来 payload.zip 里的 dshroot/REVISION 是内核投放日期（20260929…），同内核重出包时
+  # 与设备上的值**完全一致** → dshrootRevisionChanged() 恒 false → dshroot 同步根本不跑。
+  # 后果实测：本版新加进 overlay 的 dsh-host-webserver 补丁没落到设备，用户一开局域网引擎仍死。
+  REV_STAMP="$(date +%Y%m%d%H%M%S)"
+  printf '%s\n' "$REV_STAMP" > "$SB/build-overlay/dshroot/REVISION"
+  # overlay 改过的文件清单：随包发 assets/dshroot_forced.txt，MainActivity 据此强制覆盖。
+  # 没有它，即使同步跑了，fast/add 也只写 REVISION + 免检前缀，改过的旧文件永远不更新。
+  mkdir -p "$WORK"
+  # 归一化：overlay 里既有 lib/... 也有 dshroot/... 两种布局，统一成 payload 内的 dshroot/... 路径
+  ( cd "$SB/../v118/dsh-patches/overlay" && find . -type f | sed 's|^\./||; s|^dshroot/||' | sed 's|^|dshroot/|' | sort ) > "$WORK/dshroot_forced.txt"
+  echo "  REVISION(构建号)=$REV_STAMP；overlay 强制清单 $(wc -l < "$WORK/dshroot_forced.txt") 条"
   "$NODE" "$SB/lib/selfbuild.js" payload-patch "$PAY_OLD" "$PAY_NEW" "$SB/build-overlay"
 
   # ⚠️ 门禁：overlay 里的 open-in-app/lib/client.js 是"上游干净版"，
@@ -101,6 +113,9 @@ pack)
     esac
   done
   if [ -f "$PAY_NEW" ]; then PAY=$PAY_NEW; else PAY=-; fi
+  if [ -f "$WORK/dshroot_forced.txt" ]; then
+    ASSETS="$ASSETS --asset $WORK/dshroot_forced.txt:assets/dshroot_forced.txt"
+  fi
   [ "$PAY" = "-" ] && [ -z "$DEX" ] && [ -z "$ASSETS" ] && { echo "✗ 既没有 payload-new.zip 也没有 --dex/--asset"; exit 1; }
   [ -n "$DEX" ] && { [ -f "$DEX" ] || { echo "✗ 找不到 dex: $DEX"; exit 1; }; echo "  换 dex: $DEX"; }
   if [ -n "$DEX" ]; then

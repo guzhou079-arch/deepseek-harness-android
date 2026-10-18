@@ -108,6 +108,7 @@ def build_slide_xml(title, bullets, is_cover=False, author=""):
         <p:nvSpPr><p:cNvPr id="2" name="Background"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>
         <p:spPr>
           <a:xfrm><a:off x="0" y="0"/><a:ext cx="12192000" cy="6858000"/></a:xfrm>
+          <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
           <a:solidFill><a:srgbClr val="0D1117"/></a:solidFill>
         </p:spPr>
       </p:sp>
@@ -137,8 +138,8 @@ def build_slide_xml(title, bullets, is_cover=False, author=""):
         b_escaped = escape(bullet)
         bullets_xml += f'''
           <a:p>
-            <a:pPr lvl="0"><a:buChar char="✦"/></a:pPr>
-            <a:r><a:rPr lang="zh-CN" sz="1800"><a:solidFill><a:srgbClr val="F0F6FC"/></a:solidFill></a:rPr><a:t>{b_escaped}</a:t></a:r>
+            <a:pPr lvl="0" marL="342900" indent="-342900"><a:spcBef><a:spcPts val="1800"/></a:spcBef><a:buClr><a:srgbClr val="58A6FF"/></a:buClr><a:buChar char="✦"/></a:pPr>
+            <a:r><a:rPr lang="zh-CN" sz="2000"><a:solidFill><a:srgbClr val="E6EDF3"/></a:solidFill></a:rPr><a:t>{b_escaped}</a:t></a:r>
           </a:p>'''
 
     return f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -152,6 +153,7 @@ def build_slide_xml(title, bullets, is_cover=False, author=""):
         <p:nvSpPr><p:cNvPr id="2" name="Background"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>
         <p:spPr>
           <a:xfrm><a:off x="0" y="0"/><a:ext cx="12192000" cy="6858000"/></a:xfrm>
+          <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
           <a:solidFill><a:srgbClr val="0D1117"/></a:solidFill>
         </p:spPr>
       </p:sp>
@@ -160,6 +162,7 @@ def build_slide_xml(title, bullets, is_cover=False, author=""):
         <p:nvSpPr><p:cNvPr id="3" name="Card"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>
         <p:spPr>
           <a:xfrm><a:off x="609600" y="457200"/><a:ext cx="10972800" cy="5943600"/></a:xfrm>
+          <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
           <a:solidFill><a:srgbClr val="161B22"/></a:solidFill>
           <a:ln w="19050"><a:solidFill><a:srgbClr val="30363D"/></a:solidFill></a:ln>
         </p:spPr>
@@ -180,7 +183,7 @@ def build_slide_xml(title, bullets, is_cover=False, author=""):
         <p:nvSpPr><p:cNvPr id="5" name="Content"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>
         <p:spPr><a:xfrm><a:off x="914400" y="1981200"/><a:ext cx="10363200" cy="4114800"/></a:xfrm></p:spPr>
         <p:txBody>
-          <a:bodyPr anchor="t"/>
+          <a:bodyPr anchor="ctr"/>
           {bullets_xml}
         </p:txBody>
       </p:sp>

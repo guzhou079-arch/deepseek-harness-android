@@ -46,7 +46,9 @@ function walk(dir, rel, map) {
     const r = rel ? rel + '/' + n : n;
     const st = fs.statSync(f);
     if (st.isDirectory()) walk(f, r, map);
-    else if (!/\.(md5|sha256|bak)$/.test(n)) map.set(r, fs.readFileSync(f));
+    // 2026-10-18：`.bak-before-<事项>-<时间戳>` 这类备份过去能漏进 payload（只挡了 .bak 结尾）。
+    // overlay 里每加一次备份就多一个垃圾文件进包，直接按前缀挡掉。
+    else if (!/(\.(md5|sha256|bak)$)|(\.bak-)/.test(n)) map.set(r, fs.readFileSync(f));
   }
   return map;
 }
@@ -134,7 +136,15 @@ else if (cmd === 'apk-pack') {
   });
   if (pbuf && !hitP) die('骨架里没有 ' + ASSET);
   if (dbuf && !hitD) die('骨架里没有 classes.dex');
-  for (const [src, name] of assetSpecs) if (!hitA.has(name)) die(`骨架里没有 ${name}（--asset ${src}）`);
+  // 2026-10-17：允许新增骨架里没有的 asset（原实现直接 die）。
+  // 用于随包发「overlay 强制覆盖清单」assets/dshroot_forced.txt —— 没有它，
+  // 同内核升级时 fast 同步不会重写被 overlay 改过的内核文件（LAN 补丁就是这么漏的）。
+  for (const [src, name] of assetSpecs) {
+    if (hitA.has(name)) continue;
+    const buf = fs.readFileSync(src);
+    es.push({ name, data: buf });
+    log(`  新增 ${name}: ${buf.length} 字节（来自 ${src}）`);
+  }
   writeZip(es, out);
   log(`✓ 写出未签名 APK ${out}（${fs.statSync(out).size} 字节，条目 ${es.length}）`);
 }
