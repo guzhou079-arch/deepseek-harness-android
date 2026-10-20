@@ -219,6 +219,12 @@ public class MainActivity extends Activity {
     // 用于识别「解压中途被打断」：即使 REVISION 一致也强制补齐缺失文件。
     private static final String DSHROOT_COMPLETE = ".complete";
     private static final String PREFS = "dsh_setup";
+    /** v1.41：本地桥的 CORS 头 —— 让网页设置页(127.0.0.1:3080)能跨端口调这里(127.0.0.1:3081)。
+     *  Origin 仍由 LocalHttpFence 限制在回环引擎源，别处发来的请求照旧 403。 */
+    private static final String CORS_HEADERS =
+            "Access-Control-Allow-Origin: *\r\n"
+            + "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
+            + "Access-Control-Allow-Headers: Content-Type\r\n";
     private static final int REQ_STORAGE = 200;
     private static final int REQ_NOTIFICATION = 201;
     private DraftInputBridge draftInput;
@@ -350,6 +356,81 @@ public class MainActivity extends Activity {
         StatusProvider provider;
     }
 
+    //#region dsh-android-patch v2 (2026-09-30)：外部链接交给系统浏览器
+    // 背景：账户登录对话框只提供「复制授权链接」（上游设计，自动拉起浏览器由桌面壳
+    // dshDesktop 负责）。Web 壳没有 dshDesktop，于是每次登录都要手动复制粘贴。
+    // 而 WebView 默认没有 shouldOverrideUrlLoading 时，点链接会「原地加载」——
+    // 整个 GUI 被平台登录页顶掉。这里补上：非本机回环的链接一律外发系统浏览器。
+    // 本机回环（127.0.0.1 / localhost / ::1）是 DSH 自己的 GUI 与 API，仍交回 WebView。
+    //
+    // v1.39.6 (2026-10-18)：本方法从 WebViewClient 匿名类**提到 Activity 级**，
+    // 因为 target=_blank 的弹窗（onCreateWindow）也要复用同一套判据。
+    // 回滚：删掉本 region，把方法体放回 WebViewClient 匿名类（v1.39.5 形态）。
+    /**
+     * @param u 待判定的目标地址。
+     * @return true = 已外发（WebView 不再加载）；false = 交回 WebView 原地加载。
+     */
+    private boolean openExternally(android.net.Uri u) {
+        if (u == null) return true;
+        String scheme = u.getScheme();
+        if (com.deepseek.harness.vscreen.LocalHttpFence.isLoopbackUrl(u.toString(), enginePort)) return false;
+        if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)
+                && !"mailto".equalsIgnoreCase(scheme) && !"tel".equalsIgnoreCase(scheme)) return true;
+        try {
+            Intent ext = new Intent(Intent.ACTION_VIEW, u);
+            ext.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            // dsh-android-patch v5 (2026-09-30)：改为「让用户选浏览器」，不直接用默认浏览器。
+            //
+            // 背景：账户登录的回调是环回地址 http://127.0.0.1:<port>/oauth/callback，
+            // 由引擎本地的 HTTP 服务接收。不同浏览器对环回地址的处理差别极大：
+            //   · Chrome / 系统浏览器：正常跳转 ✓
+            //   · UC / 夸克 / QQ浏览器 / 部分厂商浏览器：把 127.0.0.1 当危险地址拦截、
+            //     或当成搜索词、或跳到白页 → 引擎永远收不到 code → 登录卡在"等待中"
+            // 直接 startActivity 会强制用默认浏览器，用户被默认浏览器坑了也无从选择。
+            // 改成选择器后，用户可以换一个能跑通的浏览器重试。
+            // 回滚：把下面三行 chooser 换回 startActivity(ext)。
+            Intent chooser = Intent.createChooser(ext, "选择浏览器完成登录");
+            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(chooser);
+            return true;
+        } catch (Throwable t) {
+            conToast("无法打开外部链接");
+            return true;
+        }
+    }
+
+    //#region dsh-android-patch v1.39.6 (2026-10-18)：target=_blank 的落地
+    // 背景：v1.39.5 为了让「聊天文件卡片里的 APK」能被拦到，打开了
+    // setSupportMultipleWindows(true) 并实现 onCreateWindow。但那个探针只认
+    // file:// 与 .apk，**其余 URL 一律静默丢弃** —— 而这类链接在打开多窗口之前
+    // 本来会走主框架导航 → shouldOverrideUrlLoading → 系统浏览器。
+    // 结果：设置 → 账号与余额 里的「查询用量 / 充值 / 更多账号信息」点了没反应
+    // （2026-10-18 用户实测）。
+    // 这里给弹窗 URL 补上与主框架完全相同的落地判据。
+    // 回滚：删掉本 region，onCreateWindow 的探针恢复成「只处理 file:// 与 .apk」。
+    /**
+     * @param u 弹窗（target=_blank / window.open）要打开的地址。
+     * @return 恒为 true：弹窗请求已被本方法接管。
+     */
+    private boolean routeNewWindow(String u) {
+        if (u == null || u.isEmpty()) return true;
+        if (u.startsWith("file://") || u.contains(".apk")) {
+            handleWebDownload(u, null, null, null);
+            return true;
+        }
+        try {
+            if (com.deepseek.harness.vscreen.LocalHttpFence.isLoopbackUrl(u, enginePort)) {
+                // 回环地址属于 DSH 自己：交给主 WebView 原地加载，不要外发。
+                if (webView != null) webView.loadUrl(u);
+                return true;
+            }
+            openExternally(android.net.Uri.parse(u));
+        } catch (Throwable ignored) {}
+        return true;
+    }
+    //#endregion
+
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         // v1.13.11：主题必须先定（且必须在 super.onCreate 之前）。
@@ -394,44 +475,8 @@ public class MainActivity extends Activity {
             private int errorRetries = 0;
 
             //#region dsh-android-patch v2 (2026-09-30)：外部链接交给系统浏览器
-            // 背景：账户登录对话框只提供「复制授权链接」（上游设计，自动拉起浏览器由桌面壳
-            // dshDesktop 负责）。Web 壳没有 dshDesktop，于是每次登录都要手动复制粘贴。
-            // 而 WebView 默认没有 shouldOverrideUrlLoading 时，点链接会「原地加载」——
-            // 整个 GUI 被平台登录页顶掉。这里补上：非本机回环的链接一律外发系统浏览器。
-            // 本机回环（127.0.0.1 / localhost / ::1）是 DSH 自己的 GUI 与 API，仍交回 WebView。
-            // 回滚：删除本 region（含 shouldOverrideUrlLoading 两个重载与 openExternally）。
-            /**
-             * @param u 待判定的目标地址。
-             * @return true = 已外发（WebView 不再加载）；false = 交回 WebView 原地加载。
-             */
-            private boolean openExternally(android.net.Uri u) {
-                if (u == null) return true;
-                String scheme = u.getScheme();
-                if (com.deepseek.harness.vscreen.LocalHttpFence.isLoopbackUrl(u.toString(), enginePort)) return false;
-                if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)
-                        && !"mailto".equalsIgnoreCase(scheme) && !"tel".equalsIgnoreCase(scheme)) return true;
-                try {
-                    Intent ext = new Intent(Intent.ACTION_VIEW, u);
-                    ext.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                    // dsh-android-patch v5 (2026-09-30)：改为「让用户选浏览器」，不直接用默认浏览器。
-                    //
-                    // 背景：账户登录的回调是环回地址 http://127.0.0.1:<port>/oauth/callback，
-                    // 由引擎本地的 HTTP 服务接收。不同浏览器对环回地址的处理差别极大：
-                    //   · Chrome / 系统浏览器：正常跳转 ✓
-                    //   · UC / 夸克 / QQ浏览器 / 部分厂商浏览器：把 127.0.0.1 当危险地址拦截、
-                    //     或当成搜索词、或跳到白页 → 引擎永远收不到 code → 登录卡在"等待中"
-                    // 直接 startActivity 会强制用默认浏览器，用户被默认浏览器坑了也无从选择。
-                    // 改成选择器后，用户可以换一个能跑通的浏览器重试。
-                    // 回滚：把下面三行 chooser 换回 startActivity(ext)。
-                    Intent chooser = Intent.createChooser(ext, "选择浏览器完成登录");
-                    chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                    startActivity(chooser);
-                    return true;
-                } catch (Throwable t) {
-                    conToast("无法打开外部链接");
-                    return true;
-                }
-            }
+            // 判据已提到 Activity 级的 openExternally（v1.39.6）；这里只保留两个重载。
+            // 回滚：删除本 region（含两个 shouldOverrideUrlLoading 重载）。
 
             @Override
             public boolean shouldOverrideUrlLoading(WebView view,
@@ -517,6 +562,20 @@ public class MainActivity extends Activity {
                 }
             }
 
+            // 2026-10-19 诊断用：把子资源的 4xx/5xx 打到 logcat。
+            // 客户端插件包 URL 带 rev，而 rev 取自文件 mtime（dsh-client-modules：mtimeMs），
+            // 对不上就被服务端拒绝（"mismatched revisions are rejected"）→ 404，
+            // 前端只少加载一个插件、界面看不出异常，功能整块消失。没有这条日志就完全瞎。
+            @Override
+            public void onReceivedHttpError(WebView view, android.webkit.WebResourceRequest request,
+                                            android.webkit.WebResourceResponse errorResponse) {
+                try {
+                    if (request == null || errorResponse == null) return;
+                    int code = errorResponse.getStatusCode();
+                    if (code >= 400) diagLog("DSHNET", code + " " + String.valueOf(request.getUrl()));
+                } catch (Throwable ignored) {}
+            }
+
             @Override
             public void onPageFinished(WebView view, String url) {
                 if (bootFilmOn && !trustedWebDocument) {          // 片子就绪：补发积压的那条指令
@@ -529,7 +588,9 @@ public class MainActivity extends Activity {
                 }
                 if (!trustedWebDocument || !com.deepseek.harness.vscreen.LocalHttpFence.isLoopbackUrl(url, enginePort)) return;
                 errorRetries = 0;
-                if (draftInput != null) view.evaluateJavascript(draftInput.bootstrap(), null);
+                injectDraftBootstrap(view);
+                diagLog("PAGE", "finished trusted=" + trustedWebDocument + " " + url);
+                probePageState(view);
                 // v1.13.11：页面底色决定状态栏/导航栏颜色（前端主题可独立于系统设置），
                 // 且主题可能在页面挂载后才被前端插件应用 → 多试几次，取到即刷新。
                 final int[] delays = {0, 700, 2000, 5000};
@@ -598,24 +659,57 @@ public class MainActivity extends Activity {
         // 附件/文件选择：官方前端用 <input type="file"> 选文件，Android WebView 必须实现
         // onShowFileChooser 才会弹系统文件选择器，否则点「添加附件」没有任何反应。
         webView.setWebChromeClient(new WebChromeClient() {
+            // 2026-10-19 诊断用：WebView 里的 JS 异常与 console 输出以前**完全看不到**
+            // （没有 onConsoleMessage 转发），插件加载失败的原因只能靠猜。
+            // ERROR/WARNING 全记；INFO/LOG 只在含插件相关关键词时记，避免刷爆 256KiB 环形缓冲。
+            @Override
+            public boolean onConsoleMessage(android.webkit.ConsoleMessage m) {
+                try {
+                    if (m == null) return true;
+                    String lvl = String.valueOf(m.messageLevel());
+                    String msg = String.valueOf(m.message());
+                    boolean bad = "ERROR".equals(lvl) || "WARNING".equals(lvl);
+                    String low = msg.toLowerCase();
+                    if (bad || low.contains("plugin") || low.contains("console")
+                            || low.contains("slot") || low.contains("inject")) {
+                        diagLog("DSHJS", lvl + " " + m.sourceId() + ":" + m.lineNumber() + " " + msg);
+                    }
+                } catch (Throwable ignored) {}
+                return true;
+            }
             // v1.39.5：target=_blank / window.open 的下载或本地文件，同样交给 handleWebDownload，
             // 否则 WebView 会把它交回系统，APK 又落进「文件预览」而不是安装器。
-            // 只接管 .apk 与 file:// 两类；其余返回 true 但不处理（保持原有被动行为）。
+            // v1.39.6 (2026-10-18)：其余 URL 不再静默丢弃 —— 交给 routeNewWindow 落地
+            // （回环 → 主 WebView；其余 http(s)/mailto/tel → 系统浏览器）。
             @Override
             public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture,
                                           android.os.Message resultMsg) {
                 try {
                     final WebView probe = new WebView(MainActivity.this);
+                    // 两个重载只允许落地一次（老内核可能先走 String 版再走 Request 版）。
+                    final boolean[] routed = {false};
                     probe.setWebViewClient(new android.webkit.WebViewClient() {
+                        private boolean routeOnce(String u) {
+                            // 登录对话框会先 window.open("about:blank") 预占一个标签页，
+                            // 再 location.replace(授权地址)。空页不能算「已落地」，否则
+                            // 真正的授权地址会被这道闸挡掉（2026-10-18 账号登录复现）。
+                            if (u == null || u.isEmpty() || "about:blank".equals(u)) return false;
+                            if (routed[0]) return true;
+                            routed[0] = true;
+                            probe.destroy();
+                            return routeNewWindow(u);
+                        }
+
                         @Override
                         public boolean shouldOverrideUrlLoading(WebView v,
                                                                 android.webkit.WebResourceRequest r) {
-                            String u = r == null ? null : r.getUrl().toString();
-                            probe.destroy();
-                            if (u != null && (u.startsWith("file://") || u.contains(".apk"))) {
-                                handleWebDownload(u, null, null, null);
-                            }
-                            return true;
+                            return routeOnce(r == null ? null : r.getUrl().toString());
+                        }
+
+                        @Override
+                        @SuppressWarnings("deprecation")
+                        public boolean shouldOverrideUrlLoading(WebView v, String url) {
+                            return routeOnce(url);
                         }
                     });
                     android.webkit.WebView.WebViewTransport tr =
@@ -782,6 +876,7 @@ public class MainActivity extends Activity {
         ui.post(new Runnable() {
             @Override public void run() {
                 handleNotificationIntent(getIntent());
+                injectDraftBootstrap(webView);   // v1.40.5：分享进来先补令牌，否则前端桥是空的
                 if (draftInput != null) draftInput.accept(getIntent());
             }
         });
@@ -799,7 +894,26 @@ public class MainActivity extends Activity {
             conExitSafeModeNow();
         }
         handleNotificationIntent(intent);
+        injectDraftBootstrap(webView);   // v1.40.5：同 onCreate
         if (draftInput != null) draftInput.accept(intent);
+    }
+
+    /**
+     * v1.40.5：把输入栏桥的令牌**主动补注入**进页面。
+     *
+     * 只在 onPageFinished 注一次并不够：WebView 复用/恢复文档、或从别的 App 分享进来时，
+     * 文档可能没走完一次 onPageStarted→onPageFinished 就活着，令牌永远进不了页面；
+     * 前端 nativeInput() 恒为 null → 分享卡片、听写**全都静默不工作**，界面上一个字都没有。
+     * 注入幂等（bootstrap 只设全局变量、不轮换令牌），resume / 分享到达时各补一次。
+     */
+    private void injectDraftBootstrap(final android.webkit.WebView view) {
+        if (view == null || draftInput == null || !trustedWebDocument) return;
+        view.post(new Runnable() {
+            @Override public void run() {
+                try { view.evaluateJavascript(draftInput.bootstrap(), null); }
+                catch (Throwable t) { Log.w(TAG, "inject draft bootstrap failed", t); }
+            }
+        });
     }
 
     //#region dsh-android-patch v1.39.5 (2026-10-18)：网页端「文件卡片」点击的落地点
@@ -3460,6 +3574,7 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         if (draftInput != null) draftInput.resume();
+        injectDraftBootstrap(webView);   // v1.40.5：切回前台补注入令牌，页面可能没走完一次加载
         if (webView != null) webView.onResume();
         rootOk = null; // 从设置页/Shizuku 返回时重新探测 root
         refreshAllStatuses();
@@ -3902,6 +4017,15 @@ public class MainActivity extends Activity {
                     final String fullPath = path;
                     int qIdx = path.indexOf('?');
                     if (qIdx >= 0) path = path.substring(0, qIdx);
+                    // v1.41：CORS 预检直接 204 放行（设置页若改成 JSON POST，浏览器会先发 OPTIONS）。
+                    if (h.startsWith("OPTIONS ")) {
+                        BufferedWriter ow = new BufferedWriter(new OutputStreamWriter(s.getOutputStream(), "UTF-8"));
+                        ow.write("HTTP/1.1 204 No Content\r\n" + CORS_HEADERS
+                                + "Access-Control-Max-Age: 600\r\nConnection: close\r\n\r\n");
+                        ow.flush();
+                        s.close();
+                        return;
+                    }
                     int clIdx = h.toLowerCase().indexOf("content-length:");
                     if (clIdx >= 0) {
                         int eol = h.indexOf('\r', clIdx);
@@ -3967,8 +4091,12 @@ public class MainActivity extends Activity {
                         respBody = "{\"ok\":false,\"error\":\"未知路径: " + path + "\"}";
                     }
                     BufferedWriter w = new BufferedWriter(new OutputStreamWriter(s.getOutputStream(), "UTF-8"));
-                    w.write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: "
-                            + respBody.getBytes("UTF-8").length + "\r\nConnection: close\r\n\r\n" + respBody);
+                    // v1.41：网页设置页（127.0.0.1:3080）跨端口调本桥（:3081）要 CORS 头，
+                    // 否则浏览器直接抛 TypeError: Failed to fetch —— 开关看起来"点了没反应"。
+                    // 本桥仍由 LocalHttpFence 把 Origin 限制在回环引擎源，不因此对公网开放。
+                    w.write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n" + CORS_HEADERS
+                            + "Content-Length: " + respBody.getBytes("UTF-8").length
+                            + "\r\nConnection: close\r\n\r\n" + respBody);
                     w.flush();
                     s.close();
                 } catch (Throwable t) {
@@ -4484,8 +4612,27 @@ public class MainActivity extends Activity {
                         + ",\"engineUp\":" + OverlayService.engineUp
                         + ",\"visible\":" + OverlayService.visible
                         + ",\"appForeground\":" + overlayForeground
+                        // v1.41：设置页「桌宠」页的三个开关读这里。
+                        + ",\"fluid\":" + (OverlayService.isRunning
+                            ? OverlayService.fluidOn()
+                            : getSharedPreferences("dsh_prefs", MODE_PRIVATE).getBoolean("ovl_fluid", true))
+                        + ",\"vscreen\":" + OverlayService.vscreenOn()
                         + ",\"debug\":" + OverlayService.debugState()
                         + ",\"granted\":" + (Build.VERSION.SDK_INT < 23 || Settings.canDrawOverlays(this)) + "}";
+            }
+            // v1.41：设置页「桌宠」里的流体云 / 悬浮屏预览开关（不依赖长按菜单或面板按钮）。
+            if (action.equals("fluid") || action.equals("vscreen")) {
+                String sv = jsonField(raw, "on");
+                if (sv.isEmpty()) sv = queryField(path, "on");
+                boolean on = !("0".equals(sv) || "false".equalsIgnoreCase(sv));
+                if (!OverlayService.isRunning) {
+                    // 服务没跑时开关没有落点：明说，别让页面显示"开了"其实什么都没发生。
+                    return "{\"ok\":false,\"error\":\"悬浮球没开，先打开「显示桌宠」\"}";
+                }
+                boolean after = action.equals("fluid")
+                        ? OverlayService.setFluidFromBridge(on)
+                        : OverlayService.setVscreenFromBridge(on);
+                return "{\"ok\":true,\"action\":\"" + action + "\",\"on\":" + after + "}";
             }
             if (Build.VERSION.SDK_INT >= 23 && !Settings.canDrawOverlays(this)) {
                 return "{\"ok\":false,\"error\":\"未授予悬浮窗权限，请在权限引导页/系统设置里开启\"}";
@@ -4502,6 +4649,9 @@ public class MainActivity extends Activity {
                 boolean refresh = !("0".equals(rf) || "false".equalsIgnoreCase(rf));
                 if (!OverlayService.isRunning) startOverlayService();
                 setOverlayWanted(true);   // v1.66：显式开面板 = 想要悬浮球，下次启动自动恢复
+                // v2.04：面板是用户现在就要看的 —— 先把它叫到前台并取消贴边半藏，
+                // 否则 App 在前台时 applyVisibleNow() 仍按 foregroundWantsHidden 把整窗藏掉。
+                OverlayService.reshowFromBridge();
                 return OverlayService.togglePanelFromBridge(show, refresh);
             }
             if (action.equals("show") || action.equals("toggle")) {
@@ -4512,15 +4662,15 @@ public class MainActivity extends Activity {
                         return "{\"ok\":true,\"running\":false}";
                     }
                     setOverlayWanted(true);
-                    // v1.67：服务还活着时也要**真的再显示一次** —— 解除 userHidden 并重应用可见性。
-                    // 原来这里直接 return "已在运行"，于是被"拖到底部隐藏"的球（userHidden=true）
-                    // 从控制台怎么点都出不来（服务在跑、窗口在、就是不露脸）。
-                    return "{\"ok\":true,\"running\":true,\"msg\":\"已在运行\",\"reshow\":"
+                    // v2.04：「召回桌宠」= 现在露脸。服务活着时也要取消贴边半藏、
+                    // 清掉 App 前台隐藏，并把整只鲸鱼重新摆正 —— 只回一句"已在运行"等于没反应。
+                    return "{\"ok\":true,\"running\":true,\"revealed\":true,\"reshow\":"
                             + OverlayService.reshowFromBridge() + "}";
                 }
                 setOverlayWanted(true);
                 startOverlayService();
-                return "{\"ok\":true,\"running\":true}";
+                OverlayService.reshowFromBridge();   // 服务还没建好：记下 pendingReveal，onCreate 后整只露出
+                return "{\"ok\":true,\"running\":true,\"starting\":true}";
             }
             if (action.equals("hide")) {
                 setOverlayWanted(false);
@@ -6281,6 +6431,70 @@ public class MainActivity extends Activity {
             Log.w(TAG, "scheduled prompt failed", e);
             return false;
         }
+    }
+
+    /**
+     * 2026-10-19：页面挂载 6 秒后，把关键 JS 状态回读落盘。
+     *
+     * 没有 WebView devtools 时，evaluateJavascript 的返回值回调是**唯一**能拿到页面内部事实的
+     * 通道。这里问的全是能"二选一"的问题：模块加载器在不在、桥注没注入、
+     * 控制台插件到底有没有往 DOM 里放东西（它的类名都带 ctl- 前缀）。
+     */
+    private void probePageState(final WebView view) {
+        if (view == null) return;
+        view.postDelayed(new Runnable() {
+            @Override public void run() {
+                try {
+                    final String js = "(function(){try{"
+                        + "var all=document.querySelectorAll('*'),ctl=0,i,c;"
+                        + "for(i=0;i<all.length;i++){c=all[i].className;"
+                        + "if(typeof c==='string'&&c.indexOf('ctl-')>=0)ctl++;}"
+                        + "return JSON.stringify({booted:!!window.__ModuleLoader__,"
+                        + "token:!!window.__DSH_INPUT_TOKEN,bridge:!!window.dshinput,"
+                        + "shareApi:!!(window.dshinput&&window.dshinput.shareState),"
+                        + "ctlNodes:ctl,nodes:all.length,"
+                        + "ta:document.querySelectorAll('textarea').length,"
+                        + "ce:document.querySelectorAll('[contenteditable]').length});"
+                        + "}catch(e){return 'ERR:'+e}})()";
+                    view.evaluateJavascript(js, new android.webkit.ValueCallback<String>() {
+                        @Override public void onReceiveValue(String v) {
+                            diagLog("PROBE", String.valueOf(v));
+                        }
+                    });
+                } catch (Throwable t) {
+                    diagLog("PROBE", "failed " + t);
+                }
+            }
+        }, 6000L);
+    }
+
+    /**
+     * 2026-10-19：WebView 诊断**落盘**。
+     *
+     * 为什么不能只靠 logcat：logcat 环形缓冲只有 256 KiB，等包装上、用户回来找我时，
+     * 页面加载期的日志早滚没了（这次就被这个坑住，只能靠猜）。落盘到 files/diag/webview.log，
+     * 超 512 KiB 整体轮转成 webview.old.log，最多占 1 MB。
+     */
+    private void diagLog(String tag, String msg) {
+        try {
+            Log.i(tag, msg);
+            java.io.File dir = new java.io.File(getFilesDir(), "diag");
+            if (!dir.isDirectory() && !dir.mkdirs()) return;
+            java.io.File f = new java.io.File(dir, "webview.log");
+            if (f.length() > 512 * 1024) {
+                java.io.File old = new java.io.File(dir, "webview.old.log");
+                try { if (old.exists()) old.delete(); } catch (Throwable ignored) {}
+                try { f.renameTo(old); } catch (Throwable ignored) {}
+            }
+            String stamp = new java.text.SimpleDateFormat("MM-dd HH:mm:ss", java.util.Locale.US)
+                    .format(new java.util.Date());
+            java.io.FileOutputStream out = new java.io.FileOutputStream(f, true);
+            try {
+                out.write((stamp + " " + tag + " " + msg + "\n").getBytes("UTF-8"));
+            } finally {
+                try { out.close(); } catch (Throwable ignored) {}
+            }
+        } catch (Throwable ignored) {}
     }
 
     /** node 看门狗：node 进程死亡且服务不可用时自动重启引擎并刷新页面 */

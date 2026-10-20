@@ -92,13 +92,14 @@ function describeTree(doc) {
       dataRestrictions: f.children.filter(c => c.name === 'data').flatMap(c => c.attrs.filter(a => a.name !== 'mimeType').map(a => a.name))
     }))
   }));
-  return { packageName: pkg, versionName: attr(doc.root, 'versionName')?.value, versionCode: attr(doc.root, 'versionCode')?.data, activities };
+  const permissions = doc.root.children.filter(n => n.name === 'uses-permission').map(n => attr(n, 'name')?.value).filter(Boolean);
+  return { packageName: pkg, versionName: attr(doc.root, 'versionName')?.value, versionCode: attr(doc.root, 'versionCode')?.data, permissions, activities };
 }
 function hasShareTarget(summary, target) {
   const activity = summary.activities.find(a => a.name === target);
   return activity?.exported === true && activity.launchMode === 1 && ['android.intent.action.SEND', 'android.intent.action.SEND_MULTIPLE'].every(action => activity.intentFilters.some(f => f.actions.length === 1 && f.actions[0] === action && f.categories.includes('android.intent.category.DEFAULT') && f.mimeTypes.includes('*/*') && f.dataRestrictions.length === 0));
 }
-function patchManifest(input, { versionName, versionCode, shareTarget } = {}) {
+function patchManifest(input, { versionName, versionCode, shareTarget, permissions } = {}) {
   const doc = parse(input), replacement = new Map(), before = new Map(), after = new Map();
   function string(s) { const old = doc.pool.strings.indexOf(s); if (old >= 0) return old; doc.pool.strings.push(s); return doc.pool.strings.length - 1; }
   function name(s) {
@@ -130,6 +131,19 @@ function patchManifest(input, { versionName, versionCode, shareTarget } = {}) {
   }
   if (versionName !== undefined) { invariant(typeof versionName === 'string' && versionName.length > 0, 'Invalid versionName'); invariant(attr(doc.root, 'versionName'), 'Missing versionName'); update(doc.root, 'versionName', versionName, 3); }
   if (versionCode !== undefined) { invariant(Number.isInteger(versionCode) && versionCode > 0 && versionCode <= 0x7fffffff, 'Invalid versionCode'); invariant(attr(doc.root, 'versionCode'), 'Missing versionCode'); update(doc.root, 'versionCode', versionCode, 0x10); }
+  if (permissions) {
+    invariant(Array.isArray(permissions), 'permissions must be an array');
+    const declared = new Set(doc.root.children.filter(n => n.name === 'uses-permission').map(n => attr(n, 'name')?.value));
+    const app = doc.root.children.find(n => n.name === 'application');
+    invariant(app, 'Missing application element');
+    const line = app.start.bytes.readUInt32LE(8), additions = [];
+    for (const p of permissions) {
+      invariant(/^[A-Za-z0-9_.]+$/.test(p), 'Invalid permission: ' + p);
+      if (declared.has(p)) continue;
+      additions.push(...element('uses-permission', [attribute('name', p)], line));
+    }
+    if (additions.length) before.set(app.start, additions);
+  }
   if (shareTarget) {
     const summary = describeTree(doc), app = doc.root.children.find(n => n.name === 'application');
     const candidates = (app?.children || []).filter(n => n.name === 'activity' && fullName(attr(n, 'name')?.value, summary.packageName) === shareTarget);
@@ -152,6 +166,7 @@ function patchManifest(input, { versionName, versionCode, shareTarget } = {}) {
   const checked = describeTree(parse(result));
   invariant(versionName === undefined || checked.versionName === versionName, 'versionName readback mismatch');
   invariant(versionCode === undefined || checked.versionCode === versionCode, 'versionCode readback mismatch');
-  invariant(!shareTarget || hasShareTarget(checked, shareTarget), 'Share filters readback mismatch'); return result;
+  invariant(!shareTarget || hasShareTarget(checked, shareTarget), 'Share filters readback mismatch');
+  invariant(!permissions || permissions.every(p => checked.permissions.includes(p)), 'permission readback mismatch'); return result;
 }
 module.exports = { NS, IDS, NONE, parse, parsePool, buildPool, describeManifest: b => describeTree(parse(b)), hasShareTarget, patchManifest };

@@ -17,10 +17,12 @@ import android.os.Handler;
 import android.os.Looper;
 import android.util.DisplayMetrics;
 import android.util.Log;
+import android.util.SparseArray;
 import android.view.Display;
 import android.view.WindowManager;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
+import android.view.accessibility.AccessibilityWindowInfo;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -345,6 +347,9 @@ public class AccessibilityService extends android.accessibilityservice.Accessibi
 
         if (base.equals("/status")) return handleStatus();
         if (base.equals("/dump")) return handleDump();
+        // v1.40 多屏读取：虚拟屏（display != 0）上的窗口不是 active window，
+        // getRootInActiveWindow() 只返回主屏那个，所以单开一路走 getWindowsOnAllDisplays()。
+        if (base.equals("/dump-display")) return handleDumpDisplay(path);
         if (base.equals("/tap")) return handleTap(path);
         if (base.equals("/input")) return handleInput(path);
         if (base.equals("/back")) return handleGlobalAction(GLOBAL_ACTION_BACK);
@@ -1167,6 +1172,128 @@ public class AccessibilityService extends android.accessibilityservice.Accessibi
         }
     }
 
+    /**
+     * 读取指定 display 的窗口节点树（v1.40）。
+     *
+     * 为什么要单开这一路：虚拟屏（display != 0）上的 App 窗口不算 "active window"，
+     * getRootInActiveWindow() 永远只返回主屏那个 —— 这就是虚拟屏此前只能截图看像素的根因。
+     * getWindowsOnAllDisplays()（API 30+）能拿到所有 display 的窗口，前提是服务开了
+     * flagRetrieveInteractiveWindows（本服务已开）。
+     *
+     * 路由：/dump-display              → 只列有哪些 display、各有几个窗口
+     *       /dump-display?display=N    → dump 该 display 上所有窗口的节点（带屏幕坐标）
+     */
+    private String handleDumpDisplay(String path) {
+        try {
+            if (Build.VERSION.SDK_INT < 30) {
+                return jsonError("getWindowsOnAllDisplays 需要 Android 11+（当前 API " + Build.VERSION.SDK_INT + "）");
+            }
+            final int want = (int) parseDoubleSafe(queryParam(path, "display"), -1);
+            final SparseArray<List<AccessibilityWindowInfo>> all = getWindowsOnAllDisplays();
+            JSONObject o = new JSONObject();
+            o.put("ok", true);
+            JSONArray displays = new JSONArray();
+            if (all != null) {
+                for (int i = 0; i < all.size(); i++) {
+                    int did = all.keyAt(i);
+                    List<AccessibilityWindowInfo> ws = all.valueAt(i);
+                    if (want >= 0 && did != want) continue;
+                    JSONObject d = new JSONObject();
+                    d.put("display", did);
+                    d.put("windowCount", ws == null ? 0 : ws.size());
+                    displays.put(d);
+                }
+            }
+            o.put("displays", displays);
+            if (want < 0) {
+                o.put("note", "未指定 display；带 ?display=N 可读该屏幕的节点");
+                return o.toString();
+            }
+            List<AccessibilityWindowInfo> windows = all == null ? null : all.get(want);
+            if (windows == null) windows = new ArrayList<>();
+            final JSONArray nodes = new JSONArray();
+            final JSONArray winMeta = new JSONArray();
+            final int[] emitted = {0};
+            final boolean[] truncated = {false};
+            String pkg = "";
+            for (int wi = 0; wi < windows.size(); wi++) {
+                AccessibilityWindowInfo w = windows.get(wi);
+                if (w == null) continue;
+                AccessibilityNodeInfo root = null;
+                try { root = w.getRoot(); } catch (Throwable ignored) {}
+                JSONObject m = new JSONObject();
+                m.put("index", wi);
+                m.put("type", w.getType());
+                m.put("layer", w.getLayer());
+                m.put("active", w.isActive());
+                m.put("focused", w.isFocused());
+                m.put("hasRoot", root != null);
+                if (root != null) {
+                    CharSequence p = root.getPackageName();
+                    if (p != null) {
+                        m.put("package", p.toString());
+                        if (pkg.isEmpty()) pkg = p.toString();
+                    }
+                }
+                winMeta.put(m);
+                if (root == null) continue;
+                final int winIndex = wi;
+                walk(root, new NodeVisitor() {
+                    @Override
+                    public void visit(AccessibilityNodeInfo node, int depth) {
+                        if (emitted[0] >= MAX_NODES) { truncated[0] = true; return; }
+                        if (node == null) return;
+                        try {
+                            CharSequence textCs = node.getText();
+                            CharSequence descCs = node.getContentDescription();
+                            String text = textCs == null ? "" : textCs.toString().trim();
+                            String desc = descCs == null ? "" : descCs.toString().trim();
+                            boolean clickable = node.isClickable();
+                            String cls = node.getClassName() == null ? "" : node.getClassName().toString();
+                            boolean input = node.isEditable() || "android.widget.EditText".equals(cls);
+                            boolean scrollable = node.isScrollable();
+                            if (text.isEmpty() && desc.isEmpty() && !clickable && !input && !scrollable) return;
+                            Rect bounds = new Rect();
+                            node.getBoundsInScreen(bounds);
+                            if (bounds.width() <= 0 || bounds.height() <= 0) return;
+                            if (text.length() > MAX_TEXT_LEN) text = text.substring(0, MAX_TEXT_LEN) + "…";
+                            if (desc.length() > MAX_TEXT_LEN) desc = desc.substring(0, MAX_TEXT_LEN) + "…";
+                            JSONObject n = new JSONObject();
+                            n.put("text", text);
+                            n.put("desc", desc);
+                            n.put("cls", cls);
+                            n.put("x", bounds.left);
+                            n.put("y", bounds.top);
+                            n.put("w", bounds.width());
+                            n.put("h", bounds.height());
+                            n.put("clickable", clickable);
+                            n.put("input", input);
+                            n.put("checked", node.isChecked());
+                            n.put("selected", node.isSelected());
+                            n.put("scrollable", scrollable);
+                            n.put("win", winIndex);
+                            n.put("depth", depth);
+                            nodes.put(n);
+                            emitted[0]++;
+                        } catch (Throwable ignored) {}
+                    }
+                }, 0);
+            }
+            o.put("display", want);
+            o.put("package", pkg);
+            o.put("windows", winMeta);
+            o.put("count", emitted[0]);
+            o.put("truncated", truncated[0]);
+            o.put("nodes", nodes);
+            if (emitted[0] == 0) {
+                o.put("hint", "该屏幕没有可读控件（WebView 未暴露 a11y / 自绘界面 / 窗口未就绪），可改用截图。");
+            }
+            return o.toString();
+        } catch (Throwable t) {
+            return jsonError("dump-display error: " + t.getMessage());
+        }
+    }
+
     /** 从节点向上找最近的可点击祖先（含自身）；找不到返回 null。
      *  v1.13：按钮内部常常是若干不可点击的子 TextView，直接拿最深节点做 ACTION_CLICK 会失败，
      *  退化成投递手势——而手势会被悬浮窗（远程控制/小窗等）吃掉。向上找可点击祖先即可绕过。 */
@@ -1195,14 +1322,48 @@ public class AccessibilityService extends android.accessibilityservice.Accessibi
         return null;
     }
 
-    private AccessibilityNodeInfo findNodeByText(String needle) {
+    /**
+     * 指定 display 的窗口根节点列表。display &lt; 0 时退回主屏（getRootInActiveWindow）。
+     *
+     * 虚拟屏上的窗口不在 active window 里，必须按 displayId 从 getWindowsOnAllDisplays() 取，
+     * 否则查找/点击/输入全都只作用在主屏 —— 这是虚拟屏只能靠 input 注入的根因。
+     */
+    private List<AccessibilityNodeInfo> rootsForDisplay(int displayId) {
+        List<AccessibilityNodeInfo> roots = new ArrayList<>();
+        if (displayId < 0 || Build.VERSION.SDK_INT < 30) {
+            AccessibilityNodeInfo r = getRootInActiveWindow();
+            if (r != null) roots.add(r);
+            return roots;
+        }
+        SparseArray<List<AccessibilityWindowInfo>> all = getWindowsOnAllDisplays();
+        List<AccessibilityWindowInfo> ws = all == null ? null : all.get(displayId);
+        if (ws == null) return roots;
+        for (int i = 0; i < ws.size(); i++) {
+            AccessibilityWindowInfo w = ws.get(i);
+            if (w == null) continue;
+            try {
+                AccessibilityNodeInfo r = w.getRoot();
+                if (r != null) roots.add(r);
+            } catch (Throwable ignored) {}
+        }
+        return roots;
+    }
+
+    /** 解析 display 参数：缺省 -1 表示主屏；其它值表示指定 display（虚拟屏用）。 */
+    private int displayParam(String path) {
+        String d = queryParam(path, "display");
+        if (d == null || d.isEmpty()) return -1;
+        return (int) parseDoubleSafe(d, -1);
+    }
+
+    private AccessibilityNodeInfo findNodeByText(String needle, int display) {
         if (needle == null || needle.isEmpty()) return null;
         final String target = needle.trim().toLowerCase();
-        final AccessibilityNodeInfo root = getRootInActiveWindow();
-        if (root == null) return null;
+        final List<AccessibilityNodeInfo> roots = rootsForDisplay(display);
+        if (roots.isEmpty()) return null;
         final AccessibilityNodeInfo[] best = {null};
         final int[] bestRank = {-1};   // 4=精确且可点击 3=包含且可点击 2=精确 1=包含
-        walk(root, new NodeVisitor() {
+        NodeVisitor visitor = new NodeVisitor() {
             @Override
             public void visit(AccessibilityNodeInfo node, int depth) {
                 if (node == null || bestRank[0] == 4) return;
@@ -1223,17 +1384,21 @@ public class AccessibilityService extends android.accessibilityservice.Accessibi
                     best[0] = node;
                 }
             }
-        }, 0);
+        };
+        for (int i = 0; i < roots.size(); i++) {
+            if (bestRank[0] == 4) break;
+            walk(roots.get(i), visitor, 0);
+        }
         return best[0];
     }
 
     /** 包含该坐标的**最深可点击节点**（无则退回最深节点）。 */
-    private AccessibilityNodeInfo findNodeByPoint(final int x, final int y) {
-        final AccessibilityNodeInfo root = getRootInActiveWindow();
-        if (root == null) return null;
+    private AccessibilityNodeInfo findNodeByPoint(final int x, final int y, int display) {
+        final List<AccessibilityNodeInfo> roots = rootsForDisplay(display);
+        if (roots.isEmpty()) return null;
         final AccessibilityNodeInfo[] best = {null};
         final int[] bestDepth = {-1};
-        walk(root, new NodeVisitor() {
+        NodeVisitor visitor = new NodeVisitor() {
             @Override
             public void visit(AccessibilityNodeInfo node, int depth) {
                 if (node == null) return;
@@ -1247,7 +1412,10 @@ public class AccessibilityService extends android.accessibilityservice.Accessibi
                 }
                 if (depth >= bestDepth[0]) { bestDepth[0] = depth; best[0] = clickable; }
             }
-        }, 0);
+        };
+        for (int i = 0; i < roots.size(); i++) {
+            walk(roots.get(i), visitor, 0);
+        }
         return best[0];
     }
 
@@ -1265,16 +1433,18 @@ public class AccessibilityService extends android.accessibilityservice.Accessibi
             }
             int tapX = coordFromParams(path, "x", "fx", screenW);
             int tapY = coordFromParams(path, "y", "fy", screenH);
+            final int display = displayParam(path);
             JSONObject o = new JSONObject();
             o.put("ok", true);
+            if (display >= 0) o.put("display", display);
 
             AccessibilityNodeInfo target = null;
             String method = "";
             if (!text.isEmpty() || !desc.isEmpty()) {
-                target = findNodeByText(!text.isEmpty() ? text : desc);
+                target = findNodeByText(!text.isEmpty() ? text : desc, display);
                 method = "node-text";
             } else if (tapX >= 0 && tapY >= 0) {
-                target = findNodeByPoint(tapX, tapY);
+                target = findNodeByPoint(tapX, tapY, display);
                 method = "node-coord";
             } else {
                 return jsonError("tap 需要 text/desc 或 x/y（或 fx/fy）参数");
@@ -1325,22 +1495,29 @@ public class AccessibilityService extends android.accessibilityservice.Accessibi
             String mode = queryParam(path, "mode");
             JSONObject o = new JSONObject();
             o.put("ok", true);
+            final int display = displayParam(path);
+            o.put("display", display);
+            List<AccessibilityNodeInfo> roots = rootsForDisplay(display);
+            if (roots.isEmpty()) return jsonError("当前没有活动窗口（display=" + display + "）");
             AccessibilityNodeInfo target = null;
-            AccessibilityNodeInfo root = getRootInActiveWindow();
-            if (root == null) return jsonError("当前没有活动窗口");
-            target = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT);
-            if (target == null) {
-                final AccessibilityNodeInfo[] editable = {null};
-                walk(root, new NodeVisitor() {
-                    @Override
-                    public void visit(AccessibilityNodeInfo node, int depth) {
-                        if (editable[0] != null) return;
-                        if (node != null && (node.isEditable() || node.isFocusable())) editable[0] = node;
-                    }
-                }, 0);
-                target = editable[0];
+            for (int i = 0; i < roots.size(); i++) {
+                target = roots.get(i).findFocus(AccessibilityNodeInfo.FOCUS_INPUT);
+                if (target != null) break;
             }
-            if (target == null) return jsonError("未找到可输入的文本框");
+            if (target == null) {
+                for (int i = 0; i < roots.size() && target == null; i++) {
+                    final AccessibilityNodeInfo[] editable = {null};
+                    walk(roots.get(i), new NodeVisitor() {
+                        @Override
+                        public void visit(AccessibilityNodeInfo node, int depth) {
+                            if (editable[0] != null) return;
+                            if (node != null && (node.isEditable() || node.isFocusable())) editable[0] = node;
+                        }
+                    }, 0);
+                    target = editable[0];
+                }
+            }
+            if (target == null) return jsonError("未找到可输入的文本框（display=" + display + "）");
             boolean ok;
             if (!target.isFocused()) {
                 target.performAction(AccessibilityNodeInfo.ACTION_FOCUS);

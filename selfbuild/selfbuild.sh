@@ -196,6 +196,18 @@ verify)
   MCHK=""
   if [ -f "$BASE" ]; then MCHK="--base $BASE"; fi
   "$NODE" "$SB/scripts/check-install-manifest.js" "$APK" $MCHK
+  # 关键 asset 闸门：2026-10-18 手搓 pack 命令漏了 --asset .../splash/boot.html，
+  #   开机动画静默消失（Java 读不到就退回原生启动页），上面这些闸门全绿也看不出来。
+  echo '— 关键 asset 必须真的在包里 —'
+  if [ -f "$SB/required-assets.list" ]; then
+    while IFS='|' read -r AN AMIN; do
+      case "$AN" in ''|'#'*) continue;; esac
+      ASZ=$(unzip -l "$APK" "$AN" 2>/dev/null | awk -v n="$AN" '$4==n {print $1}' | head -1)
+      [ -n "$ASZ" ] || { echo "✗ 包里缺 asset: $AN"; exit 1; }
+      [ "$ASZ" -ge "${AMIN:-1}" ] || { echo "✗ asset 太小: $AN ($ASZ < $AMIN)"; exit 1; }
+      echo "  ✓ $AN ($ASZ B)"
+    done < "$SB/required-assets.list"
+  fi
   if [ -f "$WORK/appbuild/out/compile-receipt.json" ]; then
     "$NODE" "$SB/scripts/release-receipts.mjs" compile-check --receipt "$WORK/appbuild/out/compile-receipt.json"
     "$NODE" "$SB/lib/selfbuild.js" dex-extract "$APK" "$WORK/check-classes.dex"

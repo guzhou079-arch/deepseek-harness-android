@@ -31,8 +31,16 @@ final class DraftInputBridge {
         try { return new JSONObject().put("ok", false).put("error", message == null ? "操作失败" : message).toString(); }
         catch (Exception ignored) { return "{\"ok\":false}"; }
     }
+    private volatile long lastRejectLog = 0;
     @JavascriptInterface public String shareState(String credential) {
-        if (!admitted(credential)) return failure("untrusted document");
+        if (!admitted(credential)) {
+            long now = System.currentTimeMillis();
+            if (now - lastRejectLog > 5000) {
+                lastRejectLog = now;
+                android.util.Log.w("DraftInput", "shareState rejected: trusted=" + guard.allowed() + " tokenMatch=" + token.equals(credential));
+            }
+            return failure("untrusted document");
+        }
         try { return new ShareInbox(activity).snapshot().toString(); } catch (Exception e) { return failure(e.getMessage()); }
     }
     @JavascriptInterface public String shareChunk(String credential, String id, int index, long offset) {
@@ -129,15 +137,9 @@ final class DraftInputBridge {
         final Intent copy = new Intent(incoming); incoming.putExtra("dsh.shareHandled", true);
         new Thread(new Runnable() { public void run() {
             try {
-                final JSONObject item = new ShareInbox(activity).enqueue(copy);
-                final String archive = item == null ? "" : item.optString("archive", "");
-                ui.post(new Runnable() { public void run() {
-                    // 说清去哪儿找：分享卡片只在聊天框里，若他停在控制台/设置页，只有这条 toast 告诉他东西在哪。
-                    Toast.makeText(activity, archive.isEmpty()
-                            ? "分享已接收，在聊天框选择加入草稿"
-                            : "分享已接收，副本存到 " + archive + "；聊天框里可加入草稿",
-                            Toast.LENGTH_LONG).show();
-                }});
+                new ShareInbox(activity).enqueue(copy);
+                // 成功时**不弹 toast**：前端会把附件直接挂成输入栏里的卡片（用户要的就是这一种），
+                // 底部 toast 既挡键盘又和卡片重复。失败仍由下面的 catch 报出来，不静默。
             } catch (final Exception e) {
                 ui.post(new Runnable() { public void run() { Toast.makeText(activity, "分享接收失败: " + e.getMessage(), Toast.LENGTH_LONG).show(); }});
             }

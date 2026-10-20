@@ -5,6 +5,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { readZip, readEntry, writeZip } = require('../lib/ziptool.js');
 const { patchManifest, describeManifest } = require('../lib/android-manifest.js');
+// 自建包沿用旧骨架 APK 的清单，骨架里没有 RECORD_AUDIO（源码清单里其实早就声明了），
+// 于是装机版永远拿不到麦克风：checkSelfPermission 恒为拒绝，requestPermissions 静默不弹窗，
+// 听写永远停在「等待麦克风权限」。每次出包补上，别再让它漏。
+const BASELINE_PERMISSIONS = ['android.permission.RECORD_AUDIO'];
 function main(args) {
   const input = args[0];
   const get = key => { const i = args.indexOf(key); if (i < 0) return undefined; const v = args[i + 1]; if (!v || v.startsWith('--')) throw new Error('Missing value: ' + key); return v; };
@@ -22,7 +26,7 @@ function main(args) {
   const target = share < 0 ? undefined : args[share + 1] && !args[share + 1].startsWith('--') ? args[share + 1] : 'com.deepseek.harness.MainActivity';
   if (name === undefined && code === undefined && !target) throw new Error('No patch requested');
   if (code !== undefined && !/^[1-9][0-9]*$/.test(code)) throw new Error('Invalid --code');
-  const changed = patchManifest(original, { versionName: name, versionCode: code === undefined ? undefined : Number(code), shareTarget: target });
+  const changed = patchManifest(original, { versionName: name, versionCode: code === undefined ? undefined : Number(code), shareTarget: target, permissions: BASELINE_PERMISSIONS });
   writeZip(entries.map(e => e === manifest[0] ? { name: e.name, data: changed, store: true } : e), output);
   const back = readZip(output, { load: false });
   const written = readEntry(output, back.find(e => e.name === 'AndroidManifest.xml'));

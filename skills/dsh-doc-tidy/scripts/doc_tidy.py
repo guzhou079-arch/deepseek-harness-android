@@ -102,10 +102,89 @@ def read_xlsx(path):
 
 
 # ---------------------------------------------------------------- docx / pptx
+def _val(el):
+    """读 OOXML 的 w:val 属性（属性名带命名空间，不能直接 get("val")）。"""
+    if el is None:
+        return None
+    return next((v for k, v in el.attrib.items() if local(k) == "val"), None)
+
+
+def _docx_styles(z):
+    """styleId -> {name, based, outline}；没有 styles.xml 也能读（返回空表）。"""
+    if "word/styles.xml" not in z.namelist():
+        return {}
+    out = {}
+    for st in _xml(z, "word/styles.xml").iter():
+        if local(st.tag) != "style":
+            continue
+        sid = next((v for k, v in st.attrib.items() if local(k) == "styleId"), None)
+        if not sid:
+            continue
+        out[sid] = {
+            "name": _val(st.find("{*}name")) or "",
+            "based": _val(st.find("{*}basedOn")) or "",
+            "outline": _val(st.find("{*}pPr/{*}outlineLvl")),
+        }
+    return out
+
+
+def _style_level(sid, styles, seen=None):
+    """把 Word 样式解析成大纲级别：0=Title，1..6=Heading 1..6，None=正文。
+
+    OOXML 的 outlineLvl 是 0-based（0 表示 1 级标题）；这里统一转成
+    “1=一级标题”的 1-based 语义，Title 只靠样式名识别，不占用 outlineLvl。
+    """
+    if not sid:
+        return None
+    seen = seen or set()
+    if sid in seen:
+        return None
+    seen.add(sid)
+    st = styles.get(sid)
+    if not st:
+        return None
+    raw = st.get("outline")
+    if raw not in (None, ""):
+        try:
+            n = int(raw)
+        except ValueError:
+            n = -1
+        if 0 <= n <= 8:          # 9 = 正文；0 是 Word 的“1 级大纲”
+            return n + 1
+    name = (st.get("name") or "").strip()
+    m = re.match(r"^(?:heading|标题)\s*([1-9])$", name, re.I)
+    if m:
+        return int(m.group(1))
+    if name.lower() in ("title", "标题"):
+        return 0
+    m = re.match(r"^(?:heading|标题)\s*([1-9])$", sid, re.I)
+    if m:
+        return int(m.group(1))
+    return _style_level(st.get("based"), styles, seen)
+
+
+def _paragraph_level(p, styles):
+    """段落自身 outlineLvl 优先；否则按 pStyle（含 basedOn 链）解析。"""
+    ppr = p.find("{*}pPr")
+    if ppr is None:
+        return None
+    direct = _val(ppr.find("{*}outlineLvl"))
+    if direct not in (None, ""):
+        try:
+            n = int(direct)
+        except ValueError:
+            n = -1
+        if 0 <= n <= 8:
+            return n + 1
+    return _style_level(_val(ppr.find("{*}pStyle")), styles)
+
+
 def read_docx(path):
     with zipfile.ZipFile(path) as z:
         root = _xml(z, "word/document.xml")
+        styles = _docx_styles(z)
     paras = []
+    outline = []
     for p in root.iter():
         if local(p.tag) != "p":
             continue
@@ -118,8 +197,12 @@ def read_docx(path):
                 buf.append("\n")
             elif lt == "tab":
                 buf.append("\t")
-        paras.append("".join(buf))
-    return {"type": "docx", "paragraphs": paras}
+        text = "".join(buf)
+        paras.append(text)
+        level = _paragraph_level(p, styles)
+        if level is not None and text.strip():
+            outline.append({"level": level, "text": text.strip()})
+    return {"type": "docx", "paragraphs": paras, "outline": outline}
 
 
 def read_pptx(path):
@@ -163,7 +246,9 @@ def cmd_info(path):
     elif d["type"] == "docx":
         ps = [p for p in d["paragraphs"]]
         out = {"file": os.path.basename(path), "type": "docx", "paragraphs": len(ps),
-               "chars": sum(len(p) for p in ps), "head": [p for p in ps if p.strip()][:8]}
+               "chars": sum(len(p) for p in ps), "outline": d["outline"],
+               "outline_count": len(d["outline"]),
+               "head": [p for p in ps if p.strip()][:8]}
     else:
         out = {"file": os.path.basename(path), "type": "pptx", "slides": len(d["slides"]),
                "head": [s[:120] for s in d["slides"][:3]]}
@@ -230,8 +315,18 @@ _S2 = """<?xml version="1.0" encoding="UTF-8"?>
 <row r="2"><c r="A2" t="inlineStr"><is><t>合计 2 人</t></is></c></row>
 </sheetData></worksheet>"""
 
+_STYLES = """<?xml version="1.0" encoding="UTF-8"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+<w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Title"/></w:style>
+<w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:pPr><w:outlineLvl w:val="0"/></w:pPr></w:style>
+<w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="标题 2"/><w:basedOn w:val="Heading1"/><w:pPr><w:outlineLvl w:val="1"/></w:pPr></w:style>
+</w:styles>"""
+
 _DOC = """<?xml version="1.0" encoding="UTF-8"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>
+<w:p><w:pPr><w:pStyle w:val="Title"/></w:pPr><w:r><w:t>项目周报</w:t></w:r></w:p>
+<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>一、项目背景</w:t></w:r></w:p>
+<w:p><w:pPr><w:pStyle w:val="Heading2"/></w:pPr><w:r><w:t>（一）背景</w:t></w:r></w:p>
 <w:p><w:r><w:t>第一段：云技术实施</w:t></w:r></w:p>
 <w:p><w:r><w:t>第二段：</w:t></w:r><w:r><w:tab/></w:r><w:r><w:t>成绩已汇总</w:t></w:r></w:p>
 </w:body></w:document>"""
@@ -253,6 +348,7 @@ def selftest():
         z.writestr("[Content_Types].xml", _CT)
         z.writestr("_rels/.rels", _RELS)
         z.writestr("word/document.xml", _DOC)
+        z.writestr("word/styles.xml", _STYLES)
 
     info = json.loads(cmd_info(x))
     assert [s["name"] for s in info["sheets"]] == ["成绩", "名单"], info
@@ -262,9 +358,12 @@ def selftest():
     ts = cmd_text(x)
     assert "张三\t91" in ts and "合计 2 人" in ts, ts
     di = json.loads(cmd_info(w))
-    assert di["paragraphs"] == 2 and di["chars"] > 10, di
+    assert di["paragraphs"] == 5 and di["chars"] > 10, di
+    assert di["outline"] == [{"level": 0, "text": "项目周报"},
+                             {"level": 1, "text": "一、项目背景"},
+                             {"level": 2, "text": "（一）背景"}], di
     assert "第一段：云技术实施" in cmd_text(w)
-    print("✅ selftest 通过：xlsx（2 表/共享串/内联串/数字）+ docx（段落/tab）都能正确读回")
+    print("✅ selftest 通过：xlsx（2 表/共享串/内联串/数字）+ docx（Title/Heading 大纲/tab）都能正确读回")
     print("   临时样例目录：%s" % d)
 
 

@@ -55,8 +55,17 @@ env -i \
   "$NODE" --expose-internals "$LIVE/lib/node_modules/@deepseek-ai/dsh/lib/bin.js" \
     web --host 127.0.0.1 --port $PORT --no-open >"$LOG" 2>&1 &
 PID=$!
-echo "  pid=$PID，等 25 秒…"
-sleep 25
+# 等 token 出现再往下走，别死等固定秒数：profile 里挂了 jadx 等 MCP server 时，
+# 它启动会把 INFO 日志灌进同一份 $LOG，引擎的 token 行会被推到 25 秒之后
+# （2026-10-19 这样假红过一次：端口都通了、token 还没打出来）。
+# 轮询上限 90 秒，超时照旧按"没 token"判红 —— 不掩盖真失败。
+echo "  pid=$PID，等引擎打出 token（最多 90 秒）…"
+I=0
+while [ $I -lt 90 ]; do
+  rg -q 'token=[A-Za-z0-9_-]+' "$LOG" 2>/dev/null && break
+  sleep 2; I=$((I+2))
+done
+echo "  等了 ${I}s"
 
 FAIL=0
 if rg -q "Failed plugins|startup failed|did not activate" "$LOG" 2>/dev/null; then
@@ -107,23 +116,27 @@ else
         }
       });' 2>/dev/null)
     if [ -n "$URL" ]; then
-      BODY=$("$CURL" -s -b "$CJ" --max-time 20 "http://127.0.0.1:$PORT/$URL" 2>/dev/null)
-      BC=$("$CURL" -s -o /dev/null -w '%{http_code}' -b "$CJ" --max-time 20 "http://127.0.0.1:$PORT/$URL" 2>/dev/null)
-      echo "  · 组合包 HTTP $BC，$(( ${#BODY} )) 字节"
+      # ⚠️ 正文必须**落盘再检**：373KB 的组合包先塞进 shell 变量、再 `printf '%s' "$BODY" |`
+      #    会直接 "Argument list too long"（ARG_MAX），于是下面三条断言全部假红 ——
+      #    2026-10-19 出 1.40.3 时栽过：包是好的，门禁自己判失败。
+      BODYF=$ISO/composed-client.js
+      BC=$("$CURL" -s -o "$BODYF" -w '%{http_code}' -b "$CJ" --max-time 20 "http://127.0.0.1:$PORT/$URL" 2>/dev/null)
+      BSZ=$(wc -c < "$BODYF" 2>/dev/null | tr -d ' ')
+      echo "  · 组合包 HTTP $BC，${BSZ:-0} 字节"
       if [ "$BC" = "200" ]; then echo "  ✅ client.js 可取"; else echo "  ❌ client.js HTTP $BC"; FAIL=1; fi
-      if printf '%s' "$BODY" | rg -q "android-console"; then
+      if rg -q "android-console" "$BODYF"; then
         echo "  ✅ 正文里有 section id android-console"
       else
         echo "  ❌ 正文里没有 android-console（不是我们的包？）"; FAIL=1
       fi
-      if printf '%s' "$BODY" | rg -q "dsh-client-ui-primitives"; then
+      if rg -q "dsh-client-ui-primitives" "$BODYF"; then
         echo "  ✅ 正文里保留了 primitives 的 require（靠共享模块表解析）"
       else
         echo "  ⚠️  正文里没看到 primitives 的 require（可能被压缩/改写）"
       fi
       # 分享到货横幅：只有**真进包**才有意义 —— 源码里改了、包里没带，正是 2026-10-15
       # 「分享卡片只在聊天框、停在设置页就看不见」那类事故的翻版。
-      if printf '%s' "$BODY" | rg -q "android-share-notice"; then
+      if rg -q "android-share-notice" "$BODYF"; then
         echo "  ✅ 正文里有分享到货横幅（shell.overlay / android-share-notice）"
       else
         echo "  ❌ 正文里没有 android-share-notice（分享到货提示没进包）"; FAIL=1

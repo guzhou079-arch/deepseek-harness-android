@@ -37,7 +37,9 @@ function extractCerts(file){
   return out;
 }
 const fp=c=>crypto.createHash('sha256').update(c).digest('hex').toUpperCase().match(/../g).join(':');
-const want='A4:F0:36:29:0C:90:F7:59:FA:44:79:C2:F0:7A:13:64:A1:B8:04:1E:43:64:7A:83:64:C2:BC:2D:C9:E2:F3:5D';
+// 默认期望「装机钥匙」（pkcs12，A4:F0:36:29…）。发行包用 dist.keystore 时，
+// 显式传 DSH_WANT_CERT=17:19:40:… 来断言发行指纹 —— 只换"期望值"，不放宽判定。
+const want=(process.env.DSH_WANT_CERT||'A4:F0:36:29:0C:90:F7:59:FA:44:79:C2:F0:7A:13:64:A1:B8:04:1E:43:64:7A:83:64:C2:BC:2D:C9:E2:F3:5D').toUpperCase();
 for(const f of process.argv.slice(2)){
   const name=f.split('/').pop();
   try{

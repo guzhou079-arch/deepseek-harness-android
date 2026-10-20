@@ -41,7 +41,7 @@ dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-update-c
 #      而 make-dist-apk.sh **不调用** selfbuild verify ⇒ 无影响。但若有人对 dist 包手跑 verify，
 #      这条会报「文件不存在」——那是预期，不是污染。
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/dsh-bg.svg|83e42b419ed900dcdcba7f1e6b9e1650|svg
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/dsh-bg-user.png|c4b5a66b33ea99892a76f2c485beed1d|-|local
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/dsh-bg-user.png|c4b5a66b33ea99892a76f2c485beed1d|-
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-open-in-app/lib/client.js|fb5cca87fab0b347b373a54509504f31|dsh-user-bg
 # ⑫ v1.32：局域网绑定需要 DSH_ALLOW_LAN=1（默认仍拒绝 0.0.0.0）
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-app/lib/startup.js|d43e847fd89abedb7b8bcfa2c50206b1|DSH_ALLOW_LAN
@@ -60,7 +60,13 @@ dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-fron
 #    注释还写明 "Register account UI in Desktop and plain Web clients"。
 #    ⇒ 本补丁**自然作废**，不再需要 patches/account-ui-enable 重打；
 #    关键字改成 `desktop`（该布尔量必须还在），防的是上游哪天又把门禁加回来。
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-settings-account/lib/client.js|0b2d35d54369b31a31532425a94e9e15|desktop
+#    ⚠ 2026-10-18 v1.39.8：overlay 里这份文件又故意改了两处（Web 壳没有 dshPlatform）——
+#    ① 4 个 `target: "_blank"` → `"_self"`（用量/充值/账号信息/授权链接）：
+#       否则 Android 壳的新窗口探针接不住，用户点了「没反应」；
+#    ② 登录流程不开弹窗：`window.open("about:blank")` → null，拿到授权地址后
+#       用 `window.location.assign()` 走主框架导航（App 的 shouldOverrideUrlLoading 交给系统浏览器）。
+#    关键字改成 `target: "_self"`：本补丁一旦丢就判失败，别让「没反应」再回来。
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-settings-account/lib/client.js|02254e4e1859643d5a5b94e096045c8c|target: "_self"
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/node-addon-require-builtin/lib/index.js|23c1201e436009f11de735dae37cd763|Android 适配
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/node-addon-system/lib/flock.js|03d8a933a6b2c34790539ca3fd1818b4|noopBinding
 # ⑮ v1.37（rc.2 修复·问题3）：bash-local 的 sandboxMode 覆盖必须进 overlay。
@@ -89,8 +95,8 @@ dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-fs-
 # ② 分享进来的可见性与落盘副本（2026-10-15 事故：两份副本里服务的是"瘦"的那份，
 #    且"到货卡片"只挂在会话页 → 用户分享进来的文件收下了却没人看见。
 #    这两条把「带 shell.overlay 到货横幅的那一份」钉死，两份副本都必须一致）
-dshhome/profiles/web/node_modules/dsh-android-console/lib/client.js|7a17ebdc0b777bd39c7f5db5a8ef500f|android-share-notice
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-android-console/lib/client.js|7a17ebdc0b777bd39c7f5db5a8ef500f|android-share-notice
+dshhome/profiles/web/node_modules/dsh-android-console/lib/client.js|339433ef5ad60be2c1d90d2e38f2cc1b|android-share-notice
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-android-console/lib/client.js|339433ef5ad60be2c1d90d2e38f2cc1b|android-share-notice
 # ⚠️ 2026-10-15 之前这条清单**没覆盖**这两个文件，于是"源码改了、包里带的还是旧的"
 #    能一路通过 verify。装 1.39 之前，patch-check 对这两条会报漂移（装机副本还是旧的）——那是**正确**的。
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-plugin-auto-summary-policy/lib/index.js|d0beb2db51a199d1d7b4a45b5cc74936|0.1.2-effective-policy
@@ -106,8 +112,16 @@ dshhome/profiles/web/node_modules/dsh-plugin-turn-notify/lib/index-v3.js|3e40e4c
 # 2026-10-18 更新 md5（be946ec→430d9fd）：本层新增 Codex 电源滑块注册
 # （dsh-codex-power-slider）+ 停用 ui-model-selection，让滑块接管 composer 模型槽。
 # 关键字沿用 modelPolicies：auto-summary-policy 的调优块仍在，没被这次追加挤掉。
-dshhome/cordis.patch.yml|b5b30cad6a67ddc49b77686794d5c3ef|modelPolicies
+dshhome/cordis.patch.yml|cce2ea514abadc74b6bd4b205d459084|dsh-session-delete
 
 # 2026-10-18 v1.39.5：文档预览引擎改为按需下载（不随包），插件提供
 # /dsh-office-kit/status 与 /install 两条路由；装了引擎才解析得到。
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-office-kit/lib/index.js|9c334d372670a245396bdb730b604c5a|office-kit: status route
+dshhome/profiles/web/node_modules/@deepseek-ai/dsh-office-kit/lib/index.js|9c334d372670a245396bdb730b604c5a|office-kit: status route
+# 2026-10-19 v1.40：删除会话（/delete-session + /dsh-session-admin/*）；内核无 delete 原语。
+dshhome/profiles/web/node_modules/@deepseek-ai/dsh-session-admin/lib/index.js|f942df5081c321e1b13e17b43285bc78|session-admin: /delete-session
+
+# 2026-10-19 v1.40.1：侧边栏会话列表长按（/ 右键）删除。纯客户端插件，不改内核前端。
+dshhome/profiles/web/node_modules/dsh-session-delete/package.json|3bdc3facb75ffa77bebae7e136e63431|dsh-session-delete
+dshhome/profiles/web/node_modules/dsh-session-delete/cordis.patch.yml|ab91020b5d7bc179e36fc143d93361a4|dsh-session-delete
+dshhome/profiles/web/node_modules/dsh-session-delete/lib/index.js|348f3274289ac550b7ab7a6226273a5b|dsh-session-delete
+dshhome/profiles/web/node_modules/dsh-session-delete/lib/client.js|4e5ba3c2bc40847171cbd06e2d312b10|data-dsd-confirm

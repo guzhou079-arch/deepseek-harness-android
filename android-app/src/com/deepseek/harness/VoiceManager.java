@@ -734,13 +734,15 @@ public class VoiceManager {
     private static String getErrorText(int errorCode) {
         switch (errorCode) {
             case SpeechRecognizer.ERROR_AUDIO: return "音频录制错误";
-            case SpeechRecognizer.ERROR_CLIENT: return "客户端错误";
+            case SpeechRecognizer.ERROR_CLIENT: return "手机没有可用的语音识别服务，长按暂时用不了";
             case SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS: return "未授予录音权限";
             case SpeechRecognizer.ERROR_NETWORK: return "网络连接异常";
             case SpeechRecognizer.ERROR_NETWORK_TIMEOUT: return "网络超时";
             case SpeechRecognizer.ERROR_NO_MATCH: return "未听清，请重试";
             case SpeechRecognizer.ERROR_RECOGNIZER_BUSY: return "识别引擎忙";
             case SpeechRecognizer.ERROR_SERVER: return "服务端错误";
+            case SpeechRecognizer.ERROR_TOO_MANY_REQUESTS: return "语音服务忙，稍后再试";
+            case SpeechRecognizer.ERROR_SERVER_DISCONNECTED: return "语音服务断开了，再长按一次试试";
             case SpeechRecognizer.ERROR_SPEECH_TIMEOUT: return "未检测到说话声音";
             default: return "识别错误 (" + errorCode + ")";
         }

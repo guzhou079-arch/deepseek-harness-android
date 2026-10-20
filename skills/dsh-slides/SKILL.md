@@ -26,7 +26,8 @@ whenToUse: 用户说「做个PPT / 生成演示文稿 / 做几页幻灯片 / 把
 通过本技能内置的 `scripts/make_pptx.py`（使用 Python 标准 zipfile + XML 生成标准 Office Open XML 格式，无需臃肿依赖）：
 
 ```bash
-python3 payload/dshhome/skills/ppt-design/scripts/make_pptx.py \
+# 在本技能目录下执行（脚本随技能走，目录已从 ppt-design 改名 dsh-slides）
+python3 scripts/make_pptx.py \
   --title "DeepSeek Harness 项目汇报" \
   --author "开发团队" \
   --output "/sdcard/DeepSeekHarness/demo.pptx" \

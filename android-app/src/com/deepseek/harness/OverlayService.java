@@ -94,6 +94,9 @@ public class OverlayService extends Service {
     /** 当前运行的 OverlayService 实例（供 MainActivity 前后台联动控制视图可见性）。 */
     private static OverlayService instance = null;
 
+    /** 桌面「召回桌宠」在服务还没建好时先记下，onCreate 后把整只鲸鱼摆出来。 */
+    private static volatile boolean pendingReveal = false;
+
     /** 是否正在运行（供 MainActivity / HTTP 端点查询） */
     public static volatile boolean isRunning = false;
     /** 最近一次引擎探测结果 */
@@ -104,7 +107,17 @@ public class OverlayService extends Service {
     private WindowManager.LayoutParams lp;
     private LinearLayout rootView;
     private ImageView iconView;
+    // v2.01：桌宠"生命感"—— iconView 外面套一层动画壳，呼吸/待机动作只动壳，
+    // 不碰 iconView 自己的旋转/缩放（wiggle、拖动缩小、点按回弹各自独立，互不打架）。
+    private android.widget.FrameLayout petAnimView;
+    private android.animation.ObjectAnimator petBreathAnimator;
+    private final java.util.Random petRandom = new java.util.Random();
+    private boolean petIdleScheduled = false;
+    private boolean petSleeping = false;
+    private long petLastInteractionAt = System.currentTimeMillis();
     private LinearLayout panelView;
+    /** v2.00：面板固定宽（px）。回复区、聊天行都按它夹宽，避免把面板顶出屏幕。 */
+    private int panelWidthPx = 0;
     private TextView statusText;
     private TextView aiText;
     private Button destroyBtn;
@@ -220,6 +233,17 @@ public class OverlayService extends Service {
         // 所以改成：服务一起来就显示；App 真的切到前台时，由 MainActivity.onStart 再隐藏。
         foregroundWantsHidden = false;
         applyVisibleNow();
+        if (pendingReveal) {
+            pendingReveal = false;
+            handler.post(new Runnable() { @Override public void run() {
+                try {
+                    ballTucked = false;   // 召回 = 整只露出来，不是贴在边上只露一截
+                    applyDockPos();
+                    applyVisibleNow();
+                    wiggle();
+                } catch (Throwable ignored) {}
+            }});
+        }
         handler.postDelayed(probeRunnable, 200);
         VoiceManager.get(this).addCallback(voiceCallback);
     }
@@ -239,7 +263,10 @@ public class OverlayService extends Service {
             s.handler.post(new Runnable() { @Override public void run() {
                 try {
                     s.setUserHidden(false);
+                    s.foregroundWantsHidden = false;   // 显式点开面板 = 现在就要看，不再等回桌面
+                    s.ballTucked = false;
                     s.applyVisibleNow();
+                    s.applyDockPos();
                     s.setPanelVisible(show, true);
                     if (show && refresh) s.refreshReply(false);
                 } catch (Throwable ignored) {}
@@ -304,6 +331,7 @@ public class OverlayService extends Service {
         if (instance == this) instance = null;
         VoiceManager.get(this).removeCallback(voiceCallback);
         stopVscreenPreview();
+        stopPetIdle();
         handler.removeCallbacksAndMessages(null);
         hideBubble();   // v1.71：气泡是第二个窗口，必须一起 remove
         hideCard();     // v1.77：回复卡是第三个窗口，同样要 remove
@@ -366,7 +394,10 @@ public class OverlayService extends Service {
             ch.setDescription("黑鲸鱼悬浮窗运行中（引擎状态指示）");
             nm.createNotificationChannel(ch);
         }
-        startForeground(NOTIF_ID, buildNotification());
+        Notification n = buildNotification();
+        // 悬浮窗服务不申请麦克风前台类型：这台机器的长按语音失败根因是
+        // 没有选中的系统语音识别服务，不是前台服务类型（见 PATCH-NOTES v2.02）。
+        startForeground(NOTIF_ID, n);
     }
 
     /** 常驻通知（内容随引擎状态更新；常驻「显示小鲸鱼」动作，拖底隐藏后靠它找回）。 */
@@ -520,6 +551,38 @@ public class OverlayService extends Service {
         }
     }
 
+    /**
+     * v1.90：全身桌宠形象 —— 透明底 PNG，按目标**高度**等比缩放，不裁切、不描边。
+     * 与 loadPetIcon() 的分工：这里只负责"整只人"，圆形头像仍是兜底。
+     * 目标高度最多取图片原高（小图不放大到糊），decode 时按目标高度降采样控内存。
+     * 任何一步失败返回 null。
+     */
+    private android.graphics.Bitmap loadPetBody(int targetH) {
+        try {
+            java.io.File pf = new java.io.File(getFilesDir(), "payload/pet/" + petBodyFile);
+            if (!pf.exists()) return null;
+            android.graphics.BitmapFactory.Options b = new android.graphics.BitmapFactory.Options();
+            b.inJustDecodeBounds = true;
+            android.graphics.BitmapFactory.decodeFile(pf.getAbsolutePath(), b);
+            if (b.outWidth <= 0 || b.outHeight <= 0) return null;
+            int sample = 1;
+            while (b.outHeight / (sample * 2) >= targetH) sample *= 2;
+            android.graphics.BitmapFactory.Options o = new android.graphics.BitmapFactory.Options();
+            o.inSampleSize = sample;
+            o.inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888;
+            android.graphics.Bitmap src = android.graphics.BitmapFactory.decodeFile(pf.getAbsolutePath(), o);
+            if (src == null) return null;
+            int h = Math.max(1, Math.min(targetH, src.getHeight()));
+            int w = Math.max(1, Math.round(src.getWidth() * (h / (float) src.getHeight())));
+            if (w == src.getWidth() && h == src.getHeight()) return src;
+            android.graphics.Bitmap out = android.graphics.Bitmap.createScaledBitmap(src, w, h, true);
+            if (out != src) src.recycle();
+            return out;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
     // ===================== v1.71 桌宠：pet.json 驱动 + 台词气泡 =====================
     //
     // 设计与决策（2026-09-30 拍板，本版首次实现）见 notes/桌宠加功能-设计与决策-20260930.md：
@@ -535,9 +598,17 @@ public class OverlayService extends Service {
     private int petSample = 4;
     private float petCropX = 0.45f, petCropY = 0.34f;
     private float petStrokeRatio = 0.045f;
+    // v1.90：全身桌宠形象（透明底 PNG，同目录）。找到就用整只（不裁圆、不描边），
+    // 找不到/解码失败才退回上面的「圆形头像」。高度/文件名都从 pet.json 读，换图不用出包。
+    private int petBodyDp = 72;
+    private String petBodyFile = "pet-body.png";
     private volatile String[] petLines = {};
     private int petLineIdx = 0;
-    private int petAutoHideMs = 3000;   // v1.72（用户指定）：3 秒没有下一步动作 → 气泡自动消失；另一点是「点气泡与球以外」
+    // v2.01：面板标题/身份标签从 pet.json 读。默认仍是分发包的「大肥鱼/桌宠」，
+    // 本机 pet.json 写 "name":"鲸鱼男孩","tag":"本机" 就只改本机，不影响分发包。
+    private volatile String petDisplayName = "大肥鱼";
+    private volatile String petDisplayTag = "桌宠";
+    private int petAutoHideMs = 6000;   // v2.00：3 秒太短，台词还没读/点就没了；改成 6 秒（pet.json 也能调）
     private float petMaxWidthFrac = 0.72f;
     private int petBgColor = 0xE6101A2B, petTextColor = 0xFFFFFFFF;
     private int petRadiusDp = 12, petPadHdp = 10, petPadVdp = 7, petGapDp = 8;
@@ -559,6 +630,10 @@ public class OverlayService extends Service {
             java.io.File f = new java.io.File(getFilesDir(), "payload/pet/pet.json");
             if (!f.exists()) return;
             JSONObject o = new JSONObject(readFileUtf8(f));
+            String nm = o.optString("name", "");
+            if (nm != null && nm.length() > 0 && nm.length() <= 24) petDisplayName = nm;
+            String tg = o.optString("tag", "");
+            if (tg != null && tg.length() > 0 && tg.length() <= 12) petDisplayTag = tg;
             JSONObject ap = o.optJSONObject("appearance");
             if (ap != null) {
                 petBallDp = Math.max(24, ap.optInt("ballDp", petBallDp));
@@ -566,6 +641,11 @@ public class OverlayService extends Service {
                 petCropX = (float) ap.optDouble("cropCenterX", petCropX);
                 petCropY = (float) ap.optDouble("cropCenterY", petCropY);
                 petStrokeRatio = (float) ap.optDouble("strokeRatio", petStrokeRatio);
+                // v1.90：全身形象。bodyDp 是**高度**，宽度按图片比例算。
+                petBodyDp = Math.max(40, Math.min(200, ap.optInt("bodyDp", petBodyDp)));
+                String bf = ap.optString("body", petBodyFile);
+                // 只接受纯文件名，挡住 ../ 之类的路径穿越
+                if (bf != null && bf.matches("[A-Za-z0-9._-]{1,64}")) petBodyFile = bf;
             }
             JSONObject tp = o.optJSONObject("tap");
             if (tp != null) {
@@ -678,20 +758,25 @@ public class OverlayService extends Service {
     }
 
     /**
-     * 单击悬浮球：
-     * 面板开着 → 收起面板并贴边半藏；
-     * 面板没开 → 展开面板（露出快捷聊天、剪贴板卡片、控制按钮）。
+     * 单击悬浮球（v2.00 恢复 2026-09-30 拍板的三段式交互）：
+     *   点一下桌宠 → 吐一句台词；
+     *   点那句台词 → 才展开面板（对话框）；
+     *   面板开着时点桌宠 → 收起面板并贴边半藏。
+     *
+     * ⛔ 不要退化成「点一下直接开面板」：那就是 v1.9x 的 bug ——
+     *   用户看到的是“台词没了、点一下就弹面板”。
      */
     private void onBallTap() {
         try {
+            notePetInteraction();
+            petTapBounce();
             if (panelVisible) {
                 ballTucked = true;
                 setPanelVisible(false, true);
-            } else {
-                hideBubble();
-                ballTucked = false;
-                setPanelVisible(true, true);
+                return;
             }
+            ballTucked = false;
+            showBubble(nextBubbleText());
         } catch (Throwable ignored) {}
     }
 
@@ -1589,7 +1674,9 @@ public class OverlayService extends Service {
                 bubbleView.setMaxLines(3);
                 bubbleView.setOnClickListener(new View.OnClickListener() {
                     @Override public void onClick(View v) {
+                        // 三段式第二段：点台词 → 开面板。先收气泡，再展开，避免两个窗叠着。
                         hideBubble();
+                        ballTucked = false;
                         setPanelVisible(true, true);
                     }
                 });
@@ -1715,6 +1802,28 @@ public class OverlayService extends Service {
             rootView.getLocationOnScreen(loc);
             int w = rootView.getWidth(), h = rootView.getHeight();
             return rawX >= loc[0] && rawX <= loc[0] + w && rawY >= loc[1] && rawY <= loc[1] + h;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /**
+     * v2.00：触点是否落在台词气泡内。
+     * 球窗开着 FLAG_WATCH_OUTSIDE_TOUCH，手指点气泡时球会先收到 ACTION_OUTSIDE；
+     * 必须在这里认出来，否则气泡会在 DOWN 时被 remove，点击台词永远打不开面板。
+     * 坐标 (0,0) 是部分机型 ACTION_OUTSIDE 的“未知坐标”，不能当成命中。
+     */
+    private boolean insideBubble(float rawX, float rawY) {
+        try {
+            if (!bubbleVisible || bubbleView == null) return false;
+            if (rawX == 0f && rawY == 0f) return false;
+            int[] loc = new int[2];
+            bubbleView.getLocationOnScreen(loc);
+            int w = bubbleView.getWidth(), h = bubbleView.getHeight();
+            if (w <= 0 || h <= 0) return false;
+            int pad = dp(4);
+            return rawX >= loc[0] - pad && rawX <= loc[0] + w + pad
+                    && rawY >= loc[1] - pad && rawY <= loc[1] + h + pad;
         } catch (Throwable t) {
             return false;
         }
@@ -2310,15 +2419,27 @@ public class OverlayService extends Service {
         iconView = new ImageView(this);
         // v1.24：悬浮球图标从「黑鲸鱼剪影」换成桌宠形象（whale-shota），圆形裁剪 + 白描边。
         // 原图标 R.drawable.ic_whale_black 保留未删，想换回只需改这一处。
-        android.graphics.Bitmap petIcon = loadPetIcon(dp(petBallDp));   // v1.71：大小来自 pet.json
-        if (petIcon != null) {
-            iconView.setImageBitmap(petIcon);
+        // v1.90：优先用**全身形象**（payload/pet/pet-body.png，透明底整只），有就显示整只、
+        // 按图片比例给窗口；没有才走原来的圆形头像。两者都不行 → 黑鲸鱼剪影。
+        // 窗口尺寸 = 图片像素尺寸（dp 已换算）；拖动/吸附/面板都按 rootView 实测尺寸走，
+        // 换成多大都不用改别处。
+        android.graphics.Bitmap petBody = loadPetBody(dp(petBodyDp));
+        if (petBody != null) {
+            iconView.setImageBitmap(petBody);
+            iconView.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            iconView.setLayoutParams(new LinearLayout.LayoutParams(petBody.getWidth(), petBody.getHeight()));
             iconIsPet = true;                      // v1.67 诊断：/overlay 里报 iconSrc
         } else {
-            iconView.setImageResource(R.drawable.ic_whale_black); // 兜底：解码失败仍用原图标
-            iconIsPet = false;
+            android.graphics.Bitmap petIcon = loadPetIcon(dp(petBallDp));   // v1.71：大小来自 pet.json
+            if (petIcon != null) {
+                iconView.setImageBitmap(petIcon);
+                iconIsPet = true;
+            } else {
+                iconView.setImageResource(R.drawable.ic_whale_black); // 兜底：解码失败仍用原图标
+                iconIsPet = false;
+            }
+            iconView.setLayoutParams(new LinearLayout.LayoutParams(dp(petBallDp), dp(petBallDp)));
         }
-        iconView.setLayoutParams(new LinearLayout.LayoutParams(dp(petBallDp), dp(petBallDp)));
         // ⛔ v1.60 根因修复：**不要再给 iconView 挂 OnLongClickListener / OnClickListener**。
         // 它是"点不中悬浮球"的真正原因（v1.24 可点、v1.37 起只能点最底部）：
         //   挂上长按监听后 iconView 变成 clickable，落在图标范围内的触摸被**图标自己消费**，
@@ -2328,22 +2449,73 @@ public class OverlayService extends Service {
         // 手动刷回复现在有两个不冲突的入口：面板里的「刷新」按钮、通知栏「开关面板」。
         // 想再加长按刷新，必须挂在**不被触摸消费**的位置（例如给 rootView 的 onTouch
         // 自己实现长按判定），而不是给 iconView 挂监听。
-        iconRow.addView(iconView);
+        // v2.01：动画壳。iconView 仍是实际图片/尺寸；壳只负责呼吸、摆身等整体变换，
+        // 这样"呼吸"不会覆盖拖动缩小、点按回弹、wiggle 旋转（它们动的是 iconView）。
+        petAnimView = new android.widget.FrameLayout(this);
+        petAnimView.setClipChildren(false);
+        petAnimView.setClipToPadding(false);
+        android.widget.FrameLayout.LayoutParams petFlp =
+                new android.widget.FrameLayout.LayoutParams(iconView.getLayoutParams());
+        petFlp.gravity = Gravity.CENTER;
+        petAnimView.addView(iconView, petFlp);
+        iconRow.addView(petAnimView, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
         rootView.addView(iconRow);
 
-        // ===== 状态面板（紧凑版，默认隐藏）=====
+        // ===== 状态面板（v2.00 重排：固定宽、标题行、输入行、两级按钮）=====
+        // 旧版是 WRAP_CONTENT + 六个胶囊挤一行，6000 多个字的长状态会把面板撑得很宽，
+        // 「开虚拟屏/销毁屏/刷新/收起/流体云/隐藏」的字全被压成省略号。
+        // 现在：面板固定宽（最大 304dp，窄屏留 20dp 边），按钮分「常用」「高级」两行。
         panelView = new LinearLayout(this);
         panelView.setOrientation(LinearLayout.VERTICAL);
-        panelView.setPadding(dp(10), dp(8), dp(10), dp(8));
+        panelView.setPadding(dp(12), dp(10), dp(12), dp(10));
+        int screenWPx = getResources().getDisplayMetrics().widthPixels;
+        panelWidthPx = Math.min(dp(304), screenWPx - dp(40));
+        if (panelWidthPx < dp(200)) panelWidthPx = Math.max(dp(160), screenWPx - dp(24));
+        panelView.setLayoutParams(new LinearLayout.LayoutParams(
+                panelWidthPx, LinearLayout.LayoutParams.WRAP_CONTENT));
         GradientDrawable pbg = new GradientDrawable();
         pbg.setColor(getColor(R.color.panel_bg));              // 深蓝半透明（统一配色资源）
-        pbg.setCornerRadius(dp(12));
+        pbg.setCornerRadius(dp(16));
+        pbg.setStroke(dp(1), 0x26FFFFFF);                      // 细描边，深色背景上更立体
         panelView.setBackground(pbg);
+
+        // 标题行：名字 + 身份标签。默认「大肥鱼/桌宠」（分发包），本机 pet.json 可覆盖。
+        LinearLayout headRow = new LinearLayout(this);
+        headRow.setOrientation(LinearLayout.HORIZONTAL);
+        headRow.setGravity(Gravity.CENTER_VERTICAL);
+        TextView petName = new TextView(this);
+        petName.setText(petDisplayName);
+        petName.setTextColor(getColor(R.color.accent_brand));
+        petName.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        petName.setTypeface(null, Typeface.BOLD);
+        headRow.addView(petName);
+        TextView petTag = new TextView(this);
+        petTag.setText(petDisplayTag);
+        petTag.setTextColor(getColor(R.color.panel_text_dim));
+        petTag.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
+        GradientDrawable tagBg = new GradientDrawable();
+        tagBg.setColor(0x1FFFFFFF);
+        tagBg.setCornerRadius(dp(7));
+        petTag.setBackground(tagBg);
+        petTag.setPadding(dp(6), dp(2), dp(6), dp(2));
+        LinearLayout.LayoutParams tagLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        tagLp.leftMargin = dp(7);
+        petTag.setLayoutParams(tagLp);
+        headRow.addView(petTag);
+        panelView.addView(headRow);
 
         statusText = new TextView(this);
         statusText.setText("状态：检测中…");
         statusText.setTextColor(getColor(R.color.panel_text_bright));
         statusText.setTextSize(TypedValue.COMPLEX_UNIT_PX, getResources().getDimension(R.dimen.text_caption));
+        statusText.setSingleLine(true);
+        statusText.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        LinearLayout.LayoutParams stlp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        stlp.topMargin = dp(5);
+        statusText.setLayoutParams(stlp);
         panelView.addView(statusText);
 
         // AI 会话状态（/proc 会话写入器扫描，每 ~6 秒刷新；v1.13.12 起不再是永远"空闲"）
@@ -2351,7 +2523,22 @@ public class OverlayService extends Service {
         aiText.setText("AI：—");
         aiText.setTextColor(getColor(R.color.panel_text_dim));
         aiText.setTextSize(TypedValue.COMPLEX_UNIT_PX, getResources().getDimension(R.dimen.text_caption));
+        aiText.setSingleLine(true);
+        aiText.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        LinearLayout.LayoutParams ailp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        ailp.topMargin = dp(1);
+        aiText.setLayoutParams(ailp);
         panelView.addView(aiText);
+
+        // 细分隔线：状态区 / 对话区
+        View topSep = new View(this);
+        topSep.setBackgroundColor(0x1FFFFFFF);
+        LinearLayout.LayoutParams topSepLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(1));
+        topSepLp.topMargin = dp(9);
+        topSep.setLayoutParams(topSepLp);
+        panelView.addView(topSep);
 
         // v1.9 虚拟屏预览（默认隐藏）：悬浮窗实时显示虚拟屏画面
         vscreenImageView = new ImageView(this);
@@ -2387,20 +2574,23 @@ public class OverlayService extends Service {
         ibg.setColor(0x33FFFFFF);
         ibg.setCornerRadius(dp(9));
         chatInput.setBackground(ibg);
-        chatInput.setPadding(dp(8), dp(5), dp(8), dp(5));
-        chatInput.setLayoutParams(new LinearLayout.LayoutParams(0,
-                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        chatInput.setPadding(dp(8), 0, dp(8), 0);
+        // v2.00：输入框和发送按钮同高（38dp），不再用 WRAP_CONTENT 让行高被发送按钮拽高
+        chatInput.setLayoutParams(new LinearLayout.LayoutParams(0, dp(38), 1f));
         chatRow.addView(chatInput);
         chatInputView = chatInput;   // v1.67：收起面板时要用它还焦点（原来拿不到，只能靠失焦回调）
 
+        // 发送状态放到输入行**下面**：原来塞在输入框和发送键中间，一出现
+        // 「已发送 ✓」就把输入框挤窄，长句子只剩几个字的宽度。
         final TextView chatStatus = new TextView(this);
         chatStatus.setTextColor(getColor(R.color.panel_text_dim));
         chatStatus.setTextSize(TypedValue.COMPLEX_UNIT_PX, getResources().getDimension(R.dimen.text_caption));
+        chatStatus.setSingleLine(true);
         LinearLayout.LayoutParams cslp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        cslp.leftMargin = dp(6);
+        cslp.topMargin = dp(4);
         chatStatus.setLayoutParams(cslp);
-        chatRow.addView(chatStatus);
+        chatStatus.setVisibility(View.GONE);
 
         // 输入框聚焦时解除 NOT_FOCUSABLE，失焦恢复 —— 否则点不出输入法
         chatInput.setOnFocusChangeListener(new View.OnFocusChangeListener() {
@@ -2427,15 +2617,15 @@ public class OverlayService extends Service {
             final String txt = chatInput.getText().toString().trim();
             if (txt.isEmpty()) return;
             chatInput.setText("");
-            chatStatus.setText("发送中…");
+            setChatStatus(chatStatus, "发送中…");
             new Thread(new Runnable() { @Override public void run() {
                 final SendResult res = sendPrompt(txt); // error==null = 成功
                 rootView.post(new Runnable() { @Override public void run() {
                     final String shown = res.error == null ? "已发送 ✓" : "✗ " + res.error;
-                    chatStatus.setText(shown);
+                    setChatStatus(chatStatus, shown);
                     // 3.5 秒后自动清掉；若期间又发了一条（文案已变）就不清，避免擦掉新状态
                     rootView.postDelayed(new Runnable() { @Override public void run() {
-                        if (shown.contentEquals(chatStatus.getText())) chatStatus.setText("");
+                        if (shown.contentEquals(chatStatus.getText())) setChatStatus(chatStatus, "");
                     }}, 3500);
                     if (res.error == null) {
                         // v1.25：发完自动刷回复 —— 立刻把刚发出的这句话显示出来（不用等引擎），
@@ -2458,8 +2648,33 @@ public class OverlayService extends Service {
                 return false;
             }
         });
-        chatRow.addView(pillButton("发送", doSend));
+        // v2.00：发送键固定 56×38，主色实心。旧版是 weight=1 的胶囊，
+        // 和输入框各占一半宽 —— 输入框被压到一百多 dp，是面板里最明显的一处拥挤。
+        Button sendBtn = new Button(this);
+        sendBtn.setText("发送");
+        sendBtn.setAllCaps(false);
+        sendBtn.setTextSize(TypedValue.COMPLEX_UNIT_PX, getResources().getDimension(R.dimen.text_caption));
+        sendBtn.setTextColor(0xFFFFFFFF);
+        sendBtn.setTypeface(null, Typeface.BOLD);
+        GradientDrawable sendBg = new GradientDrawable();
+        sendBg.setColor(getColor(R.color.accent_brand));
+        sendBg.setCornerRadius(dp(10));
+        sendBtn.setBackground(sendBg);
+        sendBtn.setPadding(0, 0, 0, 0);
+        sendBtn.setMinHeight(0);
+        sendBtn.setMinWidth(0);
+        sendBtn.setMinimumHeight(0);
+        sendBtn.setMinimumWidth(0);
+        LinearLayout.LayoutParams sendLp = new LinearLayout.LayoutParams(dp(56), dp(38));
+        sendLp.leftMargin = dp(6);
+        sendBtn.setLayoutParams(sendLp);
+        sendBtn.setOnClickListener(new View.OnClickListener() { @Override public void onClick(View v) {
+            try { doSend.run(); } catch (Throwable ignored) {}
+        }});
+        addNativePressFeedback(sendBtn);
+        chatRow.addView(sendBtn);
         panelView.addView(chatRow);
+        panelView.addView(chatStatus);
 
         // ===== v1.25：回复区（可滚动，显示会话里最后一条用户发言 + 最后一条助手回复）=====
         // 为什么需要它：引擎没有"读消息"的 RPC（session/* 全是写操作），
@@ -2499,36 +2714,23 @@ public class OverlayService extends Service {
         replyScroll.addView(replyText);
         panelView.addView(replyScroll);
 
-        // v1.24：原来的「打开应用 / 虚拟屏」两个按钮已移除（面板太挤）。
-        // 回 App 走通知栏或桌面图标；虚拟屏预览仍可由其他入口唤起。
-        LinearLayout btnRow2 = new LinearLayout(this);
-        btnRow2.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout.LayoutParams r2p = new LinearLayout.LayoutParams(
+        // v2.00：按钮分两行 —— 第一行常用（刷新/收起/隐藏），第二行场景（虚拟屏/销毁屏/流体云）。
+        // 旧版六个 weight=1 挤一行，在 268dp 宽的面板里每个只剩 40dp，字全被截。
+        LinearLayout primaryRow = new LinearLayout(this);
+        primaryRow.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams prp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        r2p.topMargin = dp(5);
-        btnRow2.setLayoutParams(r2p);
-        // 销毁屏：替代旧预览窗上的 ✕（销毁功能收进小鲸鱼面板）
-        // v1.37：面板里给出「开/关虚拟屏」——一个按钮，文字随状态变
-        vscreenBtn = pillButton("开虚拟屏", new Runnable() { @Override public void run() {
-            try { VsreenBridgeService.toggleFromUi(); } catch (Throwable ignored) {}
-            setPanelVisible(false, true);
-        }});
-        btnRow2.addView(vscreenBtn);
-        destroyBtn = pillButton("销毁屏", new Runnable() { @Override public void run() {
-            try { VsreenBridgeService.destroyVscreenFromWhale(); } catch (Throwable ignored) {}
-            setPanelVisible(false, true);
-        }});
-        destroyBtn.setVisibility(View.GONE);
-        btnRow2.addView(destroyBtn);
+        prp.topMargin = dp(9);
+        primaryRow.setLayoutParams(prp);
         // v1.38：回复区平时是收着的，所以「刷新」要能**把它拉出来**，不能只读不显示。
-        btnRow2.addView(pillButton("刷新", new Runnable() { @Override public void run() {
+        primaryRow.addView(pillButton("刷新", new Runnable() { @Override public void run() {
             refreshReply(true);   // sessionId=null → 脚本自己挑最新会话；不强求匹配某条发言
         }}));
         // v1.70（用户用截图纠正了我的误解）：
         //   「收起」= 把**那块长的对话/回复区**收起来、回到紧凑面板（面板本身留着）；
         //             ⛔ 不是关掉整个面板（v1.69 我做成关面板了，用户明确否掉）。
         //   「隐藏」= 球收回**半隐藏**（面板一起收起）。
-        btnRow2.addView(pillButton("收起", new Runnable() { @Override public void run() {
+        primaryRow.addView(pillButton("收起", new Runnable() { @Override public void run() {
             setReplyShown(false);
             // 顺手把"有内容"标记清掉：否则下次再打开面板时 setPanelVisible(true) 会按
             // hasReplyContent() 又把它自动铺开 —— 用户会觉得"收起没生效"。
@@ -2543,17 +2745,38 @@ public class OverlayService extends Service {
             } catch (Throwable ignored) {}
             settleAfterLayout();
         }}));
-        // v1.83（可自行开关）：面板上一个开关，选择记进 prefs
-        fluidBtn = pillButton(fluidLabel(), new Runnable() { @Override public void run() {
-            setFluid(!cardAutoShow);
-        }});
-        btnRow2.addView(fluidBtn);
-        btnRow2.addView(pillButton("隐藏", new Runnable() { @Override public void run() {
+        primaryRow.addView(pillButton("隐藏", new Runnable() { @Override public void run() {
             ballTucked = true;           // 半隐藏（静置态）
             setPanelVisible(false, true);
         }}));
+        panelView.addView(primaryRow);
 
-        panelView.addView(btnRow2);
+        LinearLayout secondaryRow = new LinearLayout(this);
+        secondaryRow.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams srp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        srp.topMargin = dp(3);
+        secondaryRow.setLayoutParams(srp);
+        // 销毁屏：替代旧预览窗上的 ✕（销毁功能收进小鲸鱼面板）
+        // v1.37：面板里给出「开/关虚拟屏」——一个按钮，文字随状态变
+        vscreenBtn = pillButton("开虚拟屏", new Runnable() { @Override public void run() {
+            try { VsreenBridgeService.toggleFromUi(); } catch (Throwable ignored) {}
+            setPanelVisible(false, true);
+        }}, true);
+        secondaryRow.addView(vscreenBtn);
+        destroyBtn = pillButton("销毁屏", new Runnable() { @Override public void run() {
+            try { VsreenBridgeService.destroyVscreenFromWhale(); } catch (Throwable ignored) {}
+            setPanelVisible(false, true);
+        }}, true);
+        destroyBtn.setVisibility(View.GONE);
+        secondaryRow.addView(destroyBtn);
+        // v1.83（可自行开关）：面板上一个开关，选择记进 prefs
+        fluidBtn = pillButton(fluidLabel(), new Runnable() { @Override public void run() {
+            setFluid(!cardAutoShow);
+        }}, true);
+        secondaryRow.addView(fluidBtn);
+
+        panelView.addView(secondaryRow);
         rootView.addView(panelView);
         setPanelVisible(false, false);
 
@@ -2566,6 +2789,8 @@ public class OverlayService extends Service {
                 public void run() {
                     if (!dragging) {
                         longPressFired = true;
+                        notePetInteraction();
+                        petLongPressPulse();
                         VoiceManager.get(OverlayService.this).triggerVoiceInteraction();
                     }
                 }
@@ -2574,6 +2799,7 @@ public class OverlayService extends Service {
             @Override public boolean onTouch(View v, MotionEvent ev) {
                 switch (ev.getAction()) {
                     case MotionEvent.ACTION_DOWN:
+                        notePetInteraction();
                         downAt = System.currentTimeMillis();
                         touchX = ev.getRawX(); touchY = ev.getRawY();
                         startX = lp.x; startY = lp.y;
@@ -2587,6 +2813,7 @@ public class OverlayService extends Service {
                             handler.removeCallbacks(longPressRunnable);
                         }
                         if (dragging) {
+                            petDragTilt(ev.getRawX() - touchX);
                             lp.x = (int) (startX + (ev.getRawX() - touchX));
                             lp.y = (int) (startY + (ev.getRawY() - touchY));
                             try { wm.updateViewLayout(rootView, lp); } catch (Throwable ignored) {}
@@ -2596,6 +2823,7 @@ public class OverlayService extends Service {
                         return true;
                     case MotionEvent.ACTION_UP:
                         handler.removeCallbacks(longPressRunnable);
+                        resetPetTilt();
                         boolean onRoot = true;
                         if (longPressFired) {
                             // 已经触发长按语音唤醒，松手不再处理点击
@@ -2613,6 +2841,7 @@ public class OverlayService extends Service {
                         return true;
                     case MotionEvent.ACTION_CANCEL:
                         handler.removeCallbacks(longPressRunnable);
+                        resetPetTilt();
                         logDrag("cancel", ev, v, false);
                         setDismissHintInternal(false);
                         return true;
@@ -2624,7 +2853,16 @@ public class OverlayService extends Service {
                         // （键盘前台 = com.sohu.inputmethod.sogouoem）—— 键盘的每一次按键都会把它关掉。
                         // 这也顺带解释了老报障"输入以后对话框收不回去/一闪"：面板在跟键盘抢同一个事件流。
                         // v1.72：顺手补旧欠账 —— outside 事件一直没记坐标，没法判「是不是点在面板下半部分」。
-                        logVis("ball outside-tap at(" + (int) ev.getRawX() + "," + (int) ev.getRawY() + ")");
+                        // v2.00 关键修复：**点在台词气泡上也属于"窗口外"**（气泡是第二个悬浮窗）。
+                        // 原来这里无条件 hideBubble()，于是手指刚碰到台词、气泡就在 DOWN 时被 remove，
+                        // 气泡自己的 OnClick 根本等不到 UP —— 用户看到的就是“点台词，台词直接消失”。
+                        // 现在先判气泡矩形：落在气泡上就完全不动，让气泡自己处理点击。
+                        float ox = ev.getRawX(), oy = ev.getRawY();
+                        logVis("ball outside-tap at(" + (int) ox + "," + (int) oy + ")");
+                        if (insideBubble(ox, oy)) {
+                            logVis("outside-ignored: on bubble");
+                            return true;
+                        }
                         hideBubble();   // 点别处 → 气泡消失（用户指定的唯一途径）
                         if (panelVisible) {
                             if (inputHasFocus()) {
@@ -2641,16 +2879,52 @@ public class OverlayService extends Service {
         });
     }
 
+    /**
+     * v2.01：原生面板按钮的按压反馈。这些按钮是代码画的 GradientDrawable，
+     * 没有系统 ripple；只换背景不换动画时，用户会觉得"点了没反应"。
+     * 按下缩到 .94 并压暗，松手/取消用 Overshoot 回弹；返回 false 不抢 OnClick。
+     */
+    private void addNativePressFeedback(final View v) {
+        if (v == null) return;
+        v.setOnTouchListener(new View.OnTouchListener() {
+            @Override public boolean onTouch(View view, android.view.MotionEvent e) {
+                try {
+                    int a = e.getActionMasked();
+                    if (a == android.view.MotionEvent.ACTION_DOWN) {
+                        view.animate().cancel();
+                        view.animate().scaleX(0.94f).scaleY(0.94f).alpha(0.82f)
+                                .setDuration(70).start();
+                    } else if (a == android.view.MotionEvent.ACTION_UP
+                            || a == android.view.MotionEvent.ACTION_CANCEL) {
+                        view.animate().cancel();
+                        view.animate().scaleX(1f).scaleY(1f).alpha(1f)
+                                .setDuration(170)
+                                .setInterpolator(new OvershootInterpolator(1.6f)).start();
+                    }
+                } catch (Throwable ignored) {}
+                return false;
+            }
+        });
+    }
+
     /** 面板里的小胶囊按钮（v1.13.12 重做：小、轻、不抢眼）。 */
     private Button pillButton(String text, final Runnable action) {
+        return pillButton(text, action, false);
+    }
+
+    /**
+     * v2.00：两档胶囊 —— 实心白（常用操作）/ 半透明（次要操作）。
+     * 只改颜色不改尺寸，避免六个按钮挤在一行时又回到“字被压成省略号”。
+     */
+    private Button pillButton(String text, final Runnable action, final boolean quiet) {
         Button b = new Button(this);
         b.setText(text);
         b.setAllCaps(false);
         b.setTextSize(TypedValue.COMPLEX_UNIT_PX, getResources().getDimension(R.dimen.text_caption));
-        b.setTextColor(getColor(R.color.accent_brand));
+        b.setTextColor(quiet ? getColor(R.color.panel_text_bright) : getColor(R.color.accent_brand));
         b.setTypeface(null, Typeface.BOLD);
         GradientDrawable bg = new GradientDrawable();
-        bg.setColor(0xFFFFFFFF);
+        bg.setColor(quiet ? 0x22FFFFFF : 0xFFFFFFFF);
         bg.setCornerRadius(dp(11));
         b.setBackground(bg);
         b.setSingleLine(true);
@@ -2667,7 +2941,16 @@ public class OverlayService extends Service {
         b.setOnClickListener(new View.OnClickListener() { @Override public void onClick(View v) {
             try { action.run(); } catch (Throwable ignored) {}
         }});
+        addNativePressFeedback(b);
         return b;
+    }
+
+    /** v2.00：聊天发送状态（“发送中…”/“已发送 ✓”）显示在输入行下方，空串自动隐藏。 */
+    private void setChatStatus(TextView v, String s) {
+        if (v == null) return;
+        boolean has = s != null && !s.isEmpty();
+        v.setText(has ? s : "");
+        v.setVisibility(has ? View.VISIBLE : View.GONE);
     }
 
     // ==================== 可见性 / 贴边 / 动画 ====================
@@ -2891,6 +3174,39 @@ public class OverlayService extends Service {
         } catch (Throwable ignored) {}
     }
 
+    // ==================== v1.41 设置页桥接口（网页「桌宠」页直接控制悬浮窗） ====================
+    // 只有服务在跑时才有意义：开关状态本身存于 SharedPreferences（dsh_prefs/ovl_fluid），
+    // 服务没跑时由 MainActivity 直接读偏好展示，避免"页面显示关着、其实下次启动会开"的错觉。
+
+    /** 流体云（回复卡片自动浮出）当前是否开启。 */
+    public static boolean fluidOn() {
+        OverlayService s = instance;
+        return s != null && s.cardAutoShow;
+    }
+
+    /** 设置页开/关流体云；返回落定后的实际状态。 */
+    public static boolean setFluidFromBridge(boolean on) {
+        OverlayService s = instance;
+        if (s == null) return false;
+        s.setFluid(on);
+        return s.cardAutoShow == on;
+    }
+
+    /** 悬浮屏（虚拟屏预览）当前是否在小鲸鱼上实时拉帧。 */
+    public static boolean vscreenOn() {
+        OverlayService s = instance;
+        return s != null && s.vscreenPreviewRunning;
+    }
+
+    /** 设置页开/关悬浮屏预览；返回落定后的实际状态。 */
+    public static boolean setVscreenFromBridge(boolean on) {
+        OverlayService s = instance;
+        if (s == null) return false;
+        if (on) s.startVscreenPreview();
+        else s.stopVscreenPreview();
+        return s.vscreenPreviewRunning == on;
+    }
+
     /**
      * 实际可见性。v1.13.12 起规则只有两条：
      * ① App 在前台（foregroundWantsHidden）→ 隐藏，无论虚拟屏是否钉住；
@@ -2905,6 +3221,7 @@ public class OverlayService extends Service {
                             + " fgHidden=" + foregroundWantsHidden + " userHidden=" + userHidden);
                 }
                 rootView.setVisibility(show ? View.VISIBLE : View.GONE);
+                if (!show) stopPetIdle();
                 // v1.79：球藏起来时收气泡，但**不收卡片** —— 卡片是"流体云"，本来就要能浮在
                 // App 自己的界面上（用户选 A：GUI 里聊天也要看得到）。它由生成结束/服务销毁来收。
                 if (!show) hideBubble();
@@ -2927,6 +3244,7 @@ public class OverlayService extends Service {
                     }
                     rootView.requestLayout();
                     settleAfterLayout();
+                    startPetIdle();
                 }
             }
         } catch (Throwable ignored) {}
@@ -3157,12 +3475,19 @@ public class OverlayService extends Service {
      */
     public static String reshowFromBridge() {
         final OverlayService s = instance;
-        if (s == null) return "{\"ok\":false,\"error\":\"overlay not running\"}";
+        if (s == null) {
+            // 服务正在拉起：onCreate 里把整只鲸鱼摆出来（含取消贴边半藏）。
+            pendingReveal = true;
+            return "{\"ok\":true,\"queued\":true,\"starting\":true}";
+        }
         try {
             s.handler.post(new Runnable() { @Override public void run() {
                 try {
                     s.setUserHidden(false);   // v1.88：也落盘（控制台点「显示悬浮球」= 用户要它）
+                    s.foregroundWantsHidden = false;   // 召回 = 现在露脸，不等回桌面
+                    s.ballTucked = false;   // 贴边半藏时只露一截，召回要整只
                     s.applyVisibleNow();   // 里面已含缩放/尺寸复位（v1.64）
+                    s.applyDockPos();
                     s.wiggle();
                 } catch (Throwable ignored) {}
             }});
@@ -3247,10 +3572,13 @@ public class OverlayService extends Service {
     /** 面板每次展开时刷新"看场景才该出现"的行（如销毁屏按钮）。 */
     private void refreshPanelDynamicRows() {
         try {
+            boolean vs = VsreenBridgeService.sVscreenRunning;
             if (destroyBtn != null) {
-                destroyBtn.setVisibility(VsreenBridgeService.sVscreenRunning
-                        ? View.VISIBLE : View.GONE);
+                destroyBtn.setVisibility(vs ? View.VISIBLE : View.GONE);
             }
+            // v2.00：按钮文字跟状态走（原来永远写「开虚拟屏」，运行中也显示“开”）
+            if (vscreenBtn != null) vscreenBtn.setText(vs ? "关虚拟屏" : "开虚拟屏");
+            if (fluidBtn != null) fluidBtn.setText(fluidLabel());
         } catch (Throwable ignored) {}
     }
 
@@ -3277,7 +3605,12 @@ public class OverlayService extends Service {
         try {
             if (replyScroll == null) return;
             int screenW = getResources().getDisplayMetrics().widthPixels;
-            int max = Math.max(dp(150), Math.min((int) (screenW * 0.78f), dp(260)));
+            // v2.00：面板已经固定宽，回复区必须跟着面板内宽，不能再按屏宽 78% 算 ——
+            // 否则在窄屏上回复区比面板还宽，又把窗口顶出屏幕。
+            int max = panelWidthPx > 0
+                    ? panelWidthPx - dp(24)
+                    : Math.min((int) (screenW * 0.78f), dp(260));
+            max = Math.max(dp(150), max);
             android.view.ViewGroup.LayoutParams lp2 = replyScroll.getLayoutParams();
             if (lp2 != null && lp2.width != max) {
                 lp2.width = max;
@@ -3347,6 +3680,211 @@ public class OverlayService extends Service {
                 }
             });
             va.start();
+        } catch (Throwable ignored) {}
+    }
+
+    // ===================== v2.01 桌宠"生命感" =====================
+    // 目标：别像一张贴图。分三层，互不抢属性：
+    //   ① petAnimView（壳）：呼吸 = scaleX/scaleY/translationY；待机摆身 = rotation
+    //   ② iconView（图）：点按回弹 / 长按脉冲 / 待机压扁 = scale；wiggle = rotation
+    //   ③ 睡眠：90 秒没互动 → 呼吸变慢、整体变暗；一碰就醒
+    // 全部是 View 属性动画，不增加帧图、不改包体大小；低端机也不至于掉帧。
+
+    private boolean petAnimReady() {
+        return petAnimView != null && iconView != null;
+    }
+
+    /** 记一次"用户在碰桌宠"：重置睡眠计时；如果正在睡，先醒。 */
+    private void notePetInteraction() {
+        petLastInteractionAt = System.currentTimeMillis();
+        if (petSleeping) wakePet();
+    }
+
+    private void startPetIdle() {
+        if (!petAnimReady()) return;
+        petLastInteractionAt = System.currentTimeMillis();
+        if (petBreathAnimator == null) {
+            try {
+                petBreathAnimator = android.animation.ObjectAnimator.ofPropertyValuesHolder(
+                        petAnimView,
+                        android.animation.PropertyValuesHolder.ofFloat(View.SCALE_X, 1f, 1.018f),
+                        android.animation.PropertyValuesHolder.ofFloat(View.SCALE_Y, 1f, 1.026f),
+                        android.animation.PropertyValuesHolder.ofFloat(View.TRANSLATION_Y, 0f, -dp(2)));
+                petBreathAnimator.setDuration(2600);
+                petBreathAnimator.setRepeatCount(android.animation.ValueAnimator.INFINITE);
+                petBreathAnimator.setRepeatMode(android.animation.ValueAnimator.REVERSE);
+                petBreathAnimator.setInterpolator(
+                        new android.view.animation.AccelerateDecelerateInterpolator());
+                petBreathAnimator.start();
+            } catch (Throwable ignored) {}
+        }
+        if (!petIdleScheduled) {
+            petIdleScheduled = true;
+            handler.postDelayed(petIdleRunnable, 3500);
+        }
+    }
+
+    private void stopPetIdle() {
+        petIdleScheduled = false;
+        try { handler.removeCallbacks(petIdleRunnable); } catch (Throwable ignored) {}
+        if (petBreathAnimator != null) {
+            try { petBreathAnimator.cancel(); } catch (Throwable ignored) {}
+            petBreathAnimator = null;
+        }
+        try {
+            if (petAnimView != null) {
+                petAnimView.animate().cancel();
+                petAnimView.setScaleX(1f);
+                petAnimView.setScaleY(1f);
+                petAnimView.setTranslationX(0f);
+                petAnimView.setTranslationY(0f);
+                petAnimView.setRotation(0f);
+                petAnimView.setAlpha(1f);
+            }
+            if (iconView != null) {
+                iconView.animate().cancel();
+                iconView.setScaleX(1f);
+                iconView.setScaleY(1f);
+                iconView.setRotation(0f);
+                iconView.setAlpha(1f);
+            }
+        } catch (Throwable ignored) {}
+        petSleeping = false;
+    }
+
+    private final Runnable petIdleRunnable = new Runnable() {
+        @Override public void run() {
+            petIdleScheduled = false;
+            try {
+                boolean canAnimate = petAnimReady()
+                        && rootView != null
+                        && rootView.getVisibility() == View.VISIBLE
+                        && !userHidden && !foregroundWantsHidden && !dragging;
+                if (!canAnimate) {
+                    // 还应该显示就稍后再来（例如暂时在前台被隐藏）；真隐藏了就不重排。
+                    if (petAnimReady() && rootView != null
+                            && rootView.getVisibility() == View.VISIBLE) {
+                        petIdleScheduled = true;
+                        handler.postDelayed(this, 5000);
+                    }
+                    return;
+                }
+                long idleMs = System.currentTimeMillis() - petLastInteractionAt;
+                if (idleMs > 90000L) {
+                    enterPetSleep();
+                } else if (!petSleeping) {
+                    int r = petRandom.nextInt(100);
+                    if (r < 55) petIdleSway();
+                    else if (r < 80) petIdleSquash();
+                }
+                petIdleScheduled = true;
+                handler.postDelayed(this, petSleeping ? 12000 : (6500 + petRandom.nextInt(6000)));
+            } catch (Throwable ignored) {}
+        }
+    };
+
+    /** 待机左右晃一下（只转壳，呼吸还在继续）。 */
+    private void petIdleSway() {
+        try {
+            if (petAnimView == null || petSleeping || dragging) return;
+            float deg = (petRandom.nextBoolean() ? 1f : -1f) * (2.5f + petRandom.nextFloat() * 2.5f);
+            petAnimView.animate().rotation(deg).setDuration(850)
+                    .setInterpolator(new android.view.animation.AccelerateDecelerateInterpolator())
+                    .withEndAction(new Runnable() { @Override public void run() {
+                        try {
+                            if (petAnimView == null || dragging) return;
+                            petAnimView.animate().rotation(0f).setDuration(1050)
+                                    .setInterpolator(new android.view.animation.AccelerateDecelerateInterpolator())
+                                    .start();
+                        } catch (Throwable ignored) {}
+                    }}).start();
+        } catch (Throwable ignored) {}
+    }
+
+    /** 待机轻轻压扁再回弹（动内层图，不碰壳的呼吸缩放）。 */
+    private void petIdleSquash() {
+        try {
+            if (iconView == null || petSleeping || dragging) return;
+            iconView.animate().cancel();
+            iconView.animate().scaleX(1.055f).scaleY(0.945f).setDuration(130)
+                    .withEndAction(new Runnable() { @Override public void run() {
+                        try {
+                            if (iconView == null) return;
+                            iconView.animate().scaleX(1f).scaleY(1f).setDuration(330)
+                                    .setInterpolator(new OvershootInterpolator(1.4f)).start();
+                        } catch (Throwable ignored) {}
+                    }}).start();
+        } catch (Throwable ignored) {}
+    }
+
+    /** 90 秒没互动 → 睡：呼吸变慢、整体暗一点、头微微歪。 */
+    private void enterPetSleep() {
+        if (petSleeping || !petAnimReady()) return;
+        petSleeping = true;
+        try {
+            if (petBreathAnimator != null) petBreathAnimator.setDuration(4800);
+            petAnimView.animate().alpha(0.84f).setDuration(650).start();
+            iconView.animate().rotation(-4f).setDuration(650)
+                    .setInterpolator(new android.view.animation.AccelerateDecelerateInterpolator())
+                    .start();
+        } catch (Throwable ignored) {}
+    }
+
+    /** 碰一下 → 醒。 */
+    private void wakePet() {
+        if (!petSleeping) return;
+        petSleeping = false;
+        try {
+            if (petBreathAnimator != null) petBreathAnimator.setDuration(2600);
+            if (petAnimView != null) petAnimView.animate().alpha(1f).setDuration(220).start();
+            if (iconView != null) iconView.animate().rotation(0f).setDuration(220).start();
+        } catch (Throwable ignored) {}
+    }
+
+    /** 点一下：先压扁再回弹（"Q 弹"的触摸反馈）。 */
+    private void petTapBounce() {
+        if (iconView == null) return;
+        try {
+            iconView.animate().cancel();
+            iconView.setScaleX(1.13f);
+            iconView.setScaleY(0.87f);
+            iconView.animate().scaleX(1f).scaleY(1f).setDuration(330)
+                    .setInterpolator(new OvershootInterpolator(1.8f)).start();
+        } catch (Throwable ignored) {}
+    }
+
+    /** 长按：先鼓一下，告诉用户"按到了"，再去说话。 */
+    private void petLongPressPulse() {
+        if (iconView == null) return;
+        try {
+            iconView.animate().cancel();
+            iconView.animate().scaleX(1.1f).scaleY(1.1f).setDuration(150)
+                    .withEndAction(new Runnable() { @Override public void run() {
+                        try {
+                            if (iconView == null) return;
+                            iconView.animate().scaleX(1f).scaleY(1f).setDuration(240)
+                                    .setInterpolator(new OvershootInterpolator(1.5f)).start();
+                        } catch (Throwable ignored) {}
+                    }}).start();
+        } catch (Throwable ignored) {}
+    }
+
+    /** 拖动时身体向拖动方向倾一点，像被拎着走；松手回正。 */
+    private void petDragTilt(float dxPx) {
+        if (petAnimView == null) return;
+        try {
+            petAnimView.animate().cancel();
+            float deg = Math.max(-9f, Math.min(9f, dxPx * 0.07f));
+            petAnimView.setRotation(deg);
+        } catch (Throwable ignored) {}
+    }
+
+    private void resetPetTilt() {
+        if (petAnimView == null) return;
+        try {
+            petAnimView.animate().rotation(0f).setDuration(200)
+                    .setInterpolator(new android.view.animation.AccelerateDecelerateInterpolator())
+                    .start();
         } catch (Throwable ignored) {}
     }
 

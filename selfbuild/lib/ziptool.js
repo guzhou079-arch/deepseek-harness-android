@@ -65,7 +65,13 @@ function writeZip(entries, out, when = new Date()) {
   try {
     for (const e of entries) {
       const name = Buffer.from(e.name, 'utf8'); let { method, crc, csize, usize, raw } = e;
-      if (!raw) {
+      // 2026-10-19：rawFile —— 大条目（如 155MB 的 payload.zip）分块从文件写，
+      // 不整份读进堆。调用方必须给 crc 与 usize；本模式只能 STORE。
+      if (!raw && e.rawFile) {
+        if (typeof e.crc !== 'number' || typeof e.usize !== 'number') throw new Error('rawFile 需要调用方提供 crc/usize: ' + e.name);
+        method = 0; crc = e.crc; usize = e.usize; csize = usize;
+      }
+      if (!raw && !e.rawFile) {
         const data = Buffer.isBuffer(e.data) ? e.data : Buffer.from(e.data, 'utf8');
         crc = crc32(data); usize = data.length; const def = e.store ? null : zlib.deflateRawSync(data, { level: 9 });
         if (e.store || def.length >= data.length) { method = 0; raw = data; } else { method = 8; raw = def; }
@@ -84,13 +90,20 @@ function writeZip(entries, out, when = new Date()) {
       const lh = Buffer.alloc(30);
       lh.writeUInt32LE(0x04034b50, 0); lh.writeUInt16LE(20, 4); lh.writeUInt16LE(flags, 6); lh.writeUInt16LE(method, 8);
       lh.writeUInt16LE(time, 10); lh.writeUInt16LE(date, 12); lh.writeUInt32LE(crc, 14); lh.writeUInt32LE(csize, 18); lh.writeUInt32LE(usize, 22);
-      lh.writeUInt16LE(name.length, 26); lh.writeUInt16LE(extra.length, 28); put(lh); put(name); put(extra); put(raw);
+      lh.writeUInt16LE(name.length, 26); lh.writeUInt16LE(extra.length, 28); put(lh); put(name); put(extra);
+      if (e.rawFile) {
+        const rfd = fs.openSync(e.rawFile, 'r');
+        const CH = 4 << 20;
+        try {
+          for (let off = 0; off < csize; off += CH) put(readAt(rfd, Math.min(CH, csize - off), off));
+        } finally { fs.closeSync(rfd); }
+      } else put(raw);
       const ch = Buffer.alloc(46);
       ch.writeUInt32LE(0x02014b50, 0); ch.writeUInt16LE(e.madeBy || 20, 4); ch.writeUInt16LE(20, 6); ch.writeUInt16LE(flags, 8); ch.writeUInt16LE(method, 10);
       ch.writeUInt16LE(time, 12); ch.writeUInt16LE(date, 14); ch.writeUInt32LE(crc, 16); ch.writeUInt32LE(csize, 20); ch.writeUInt32LE(usize, 24);
       ch.writeUInt16LE(name.length, 28); ch.writeUInt16LE(ce.length, 30); ch.writeUInt16LE(comment.length, 32);
       ch.writeUInt16LE(e.internalAttrs || 0, 36); ch.writeUInt32LE(e.externalAttrs || 0, 38); ch.writeUInt32LE(offset, 42);
-      central.push(ch, name, ce, comment); offset += 30 + name.length + extra.length + raw.length;
+      central.push(ch, name, ce, comment); offset += 30 + name.length + extra.length + (raw ? raw.length : csize);
       if (++written >= 65535) throw new Error('ZIP64 required');
     }
     const cd = Buffer.concat(central), end = Buffer.alloc(22);

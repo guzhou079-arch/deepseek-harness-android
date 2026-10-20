@@ -69,7 +69,7 @@ fi
 # 防止把开发机上的用户插件 .pnpm / 个人状态打进发行包 —— 多一个条目就失败退出。
 PROF_MOD="$OVL/dshhome/profiles/web/node_modules"
 if [ -d "$PROF_MOD" ]; then
-  PROF_ALLOW="dsh-android-console dsh-plugin-auto-summary-policy dsh-plugin-session-rewind dsh-plugin-turn-notify"
+  PROF_ALLOW="dsh-android-console dsh-plugin-auto-summary-policy dsh-plugin-session-rewind dsh-plugin-turn-notify @deepseek-ai"
   for child in "$PROF_MOD"/* "$PROF_MOD"/.[!.]* "$PROF_MOD"/..?*; do
     [ -e "$child" ] || continue
     pname=$(basename "$child")
