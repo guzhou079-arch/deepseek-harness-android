@@ -3,13 +3,13 @@
    ------------------------------------------------------------
    是谁加载它的：@deepseek-ai/dsh-client-ui-open-in-app/lib/client.js 的
    factory 顶部有一段 deepdive 注入（ensure <link id="dsh-user-bg"
-   href="/dsh-bg.css?rev=…">）。选它是因为：不在 APK 白名单里（重启不被覆盖）、
-   不是 bootstrap 模块（client-hmr 能真热替换 → 改完约 1 秒就生效，不必刷新页面）、
+   href="/dsh-bg.css?rev=…">）。选它是因为：不是 bootstrap 模块
+   （client-hmr 能真热替换 → 改完约 1 秒就生效，不必刷新页面）、
    且本机不渲染任何 UI（热替换不会动界面）。细节见 bg-patch/README.md。
-   为什么不放进 mobile.css：mobile.css / mobile.js / index.html 在 APK 的
-   FORCE_OVERWRITE_PREFIXES 白名单里，App 每次启动都会被 payload 覆盖；
-   dist/dsh-bg.css + dist/dsh-bg.svg + open-in-app 里那几行注入都不在白名单里，
-   所以**重启 App 也还在**。
+   ⚠️ 自 v1.31 起，本文件（连同 dsh-bg.svg / dsh-bg-user.png / 注入所在
+   open-in-app/lib/client.js）**已列入** APK 的 FORCE_OVERWRITE_PREFIXES：
+   App 每次冷启动都会用包内副本覆盖运行副本（此前"重启也还在"的说法已过期）。
+   ⇒ 改这里必须同步改 bg-patch/ 源并重新出包；只改运行副本会在下次启动被打回。
    ⚠️ 但它**换内核大版本后会静默失效**（2026-10-03 rc.1→rc.2 实测）：文件还在、md5 也没变，
    坏的是下面那些选择器 —— 它们绑的是**前端构建的 CSS 模块哈希类名**
    （rc.1 是 .D_tfqW_*，rc.2 变成 .wSkVaW_*）。前端 build 一换哈希就整批变，
@@ -113,14 +113,19 @@ body[data-ds-dark-theme] {
   background: transparent !important;
 }
 
-/* ---------- 输入栏底部渐隐别糊一条实色 ----------
-   原规则把底部渐变收到实色 bg-base（36px 以下全不透明）→ 图片在底部被切断。
-   改成半透明，既保住输入栏上的文字可读性，也不切断背景。 */
+/* ---------- 输入栏周围彻底不留底 ----------
+   2026-10-20 两轮：
+   ① 原规则 `linear-gradient(180deg, transparent 0, var(--dsw-alias-bg-base) 36px)`
+      → 深色主题 36px 以下一整块 #151517，用户：「黑色不透明的，去掉」。
+   ② 先改成 60% 半透明 + 16px 毛玻璃，用户回：「一个长方形不透明」——
+      模糊把壁纸抹平了，看着还是一块颜色不同的实心长方形。
+   ⇒ 用户要的是这里什么都没有：不铺底色、不做模糊，壁纸原样透出。
+   （代价：消息滚到输入栏后面时，会从统计栏底下穿过去。） */
 .wSkVaW_root[data-phase="active"] .wSkVaW_composerSeat,
 .wSkVaW_embeddedBody[data-content-phase="active"] .wSkVaW_composerSeat {
-  background: linear-gradient(180deg,
-    transparent 0px,
-    color-mix(in srgb, var(--dsw-alias-bg-base, #0b0f1a) 84%, transparent) 36px) !important;
+  background: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
 }
 
 /* ---------- 空会话/新会话页的卡片别整块盖住图 ---------- */

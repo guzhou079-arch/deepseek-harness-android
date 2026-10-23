@@ -184,7 +184,13 @@ verify)
   echo '— 包内 payload 必须通过清单 —'
   "$NODE" "$SB/lib/selfbuild.js" payload-extract "$APK" "$WORK/payload-check.zip" >/dev/null
   set +e
-  "$NODE" "$SB/lib/selfbuild.js" check "$WORK/payload-check.zip" "$SB/checks.manifest"
+  # 发行包（DSH_DIST=1）跳过清单里 policy=local 的行（例如只属于本机自建包的个人壁纸）；
+  # 本机自建包仍全量校验，隐私资产缺失不会被悄悄放过。
+  if [ "${DSH_DIST:-0}" = "1" ]; then
+    "$NODE" "$SB/lib/selfbuild.js" check "$WORK/payload-check.zip" "$SB/checks.manifest" --dist
+  else
+    "$NODE" "$SB/lib/selfbuild.js" check "$WORK/payload-check.zip" "$SB/checks.manifest"
+  fi
   CHK=$?
   set -e
   [ "$(realpath "$WORK/payload-check.zip")" = "$(realpath "$WORK")/payload-check.zip" ] || exit 1

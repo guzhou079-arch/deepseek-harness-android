@@ -3,7 +3,10 @@
 # 换内核/故意改补丁后: sh patch-check.sh --regen
 #
 # ① 特权通道：android_* 结构化工具必须走 App 内嵌桥（v1.14.2 的修复，v1.20 丢过一次）
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-android/lib/index.js|b5485483c7cb28bd3f382b40192c8bbb|appShellCmd
+# 2026-10-21 更新 md5（b5485483→0c9acbad）：android_overlay 的 output schema 补上
+# App /overlay 实际返回的 visible/appForeground/fluid/vscreen/debug 五个字段 ——
+# 此前 additionalProperties:false 导致每次调用都被输出校验打回（工具必报错）。
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-android/lib/index.js|0c9acbadc34adbf62bf090330c49b6ad|appShellCmd
 # ⚠️ 2026-10-15 更新 md5：该插件在 overlay 里故意加了「定时任务查看/取消走 3081 桥」
 #    与 schedule 回传 taskId/triggerAt（+80 行，df53d58a→0ec8ea14）。不是随机漂移：
 #    同一批未发布功能，Java 侧有 ScheduleBridge/ScheduleAlarms/ScheduledTaskStore。
@@ -26,7 +29,7 @@ dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-u
 # 当前 md5 = APK payload 里的上游原版（实测与 payload 逐字节一致）。
 # 结论：漂移源于清单过期，文件本身健康。只做漂移检测。
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-cordis/lib/client.js|499056c4a724adb85ea47b4a664faffc|-
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/mobile.css|3f7c22944d1ec95fb20252c35abf6c03|role="tooltip"
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/mobile.css|04d3fa17942558e0ea74581f752b3917|role="tooltip"
 # ⑦ v1.24：静态资源门禁（非 index 资产也要过围栏+cookie 鉴权，堵住用户背景图等无鉴权可读面）
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-host-frontend-static/lib/index.js|562f5de090f0923bbbb9d5925b75d272|guardAsset
 # ⑧ v1.28：两条客户端路由加鉴权 —— **那一版已作废并隔离**（改 inject 把引擎装到起不来，
@@ -37,11 +40,10 @@ dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-h
 # ⑩ v1.31：update-check 状态路由加懒门禁
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-update-check/lib/index.js|1ee407849236643b41ab354e3ff8b02e|__verdict.rejection
 # ⑪ v1.31：背景图资产进 payload（重装/重解压不再丢）
-#    ⚠ dsh-bg-user.png 只存在于**本机自建包**；发行包里它被 strip-dist-payload.js 主动剔除（隐私）。
-#      而 make-dist-apk.sh **不调用** selfbuild verify ⇒ 无影响。但若有人对 dist 包手跑 verify，
-#      这条会报「文件不存在」——那是预期，不是污染。
+#    ⚠ dsh-bg-user.png 只存在于**本机自建包**；发行包由 strip-dist-payload.js 主动剔除（隐私），
+#      所以这一行标 local —— 发行校验跳过它，本机自建包仍照常校验。
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/dsh-bg.svg|83e42b419ed900dcdcba7f1e6b9e1650|svg
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/dsh-bg-user.png|c4b5a66b33ea99892a76f2c485beed1d|-
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/dsh-bg-user.png|c4b5a66b33ea99892a76f2c485beed1d|-|local
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-open-in-app/lib/client.js|fb5cca87fab0b347b373a54509504f31|dsh-user-bg
 # ⑫ v1.32：局域网绑定需要 DSH_ALLOW_LAN=1（默认仍拒绝 0.0.0.0）
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-app/lib/startup.js|d43e847fd89abedb7b8bcfa2c50206b1|DSH_ALLOW_LAN
@@ -81,7 +83,7 @@ dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-bash-loc
 #    改为引擎直接调 App 特权桥执行 am start（shell uid 2000）。
 #    补丁脚本：selfbuild/scripts/patch-bring-to-front.js
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-deepseek-account-platform/lib/index.js|c83acb5ad065aa1e80ecd651731a64bb|dsh-android-patch v4 (bring-to-front)
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/index.html|ba5378fbdb5e680d07348e025c81a027|/mobile.css
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/index.html|3c56a8f6f72fa1a122970536353f20ce|/mobile.css
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/mobile.js|ad907fd1fc84e4da84501e45c7eb2f50|dsh-update-banner
 # ④ Android 运行环境适配（2026-10-03 rc.2 事故后补录：这 6 个文件的补丁原先只手工塞在 payload 里，
 #    换内核时随上游改动一起被覆盖 → 每轮 EACCES。纳入清单后，装机前的 verify 就能拦住）
@@ -95,7 +97,7 @@ dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-fs-
 # ② 分享进来的可见性与落盘副本（2026-10-15 事故：两份副本里服务的是"瘦"的那份，
 #    且"到货卡片"只挂在会话页 → 用户分享进来的文件收下了却没人看见。
 #    这两条把「带 shell.overlay 到货横幅的那一份」钉死，两份副本都必须一致）
-dshhome/profiles/web/node_modules/dsh-android-console/lib/client.js|339433ef5ad60be2c1d90d2e38f2cc1b|android-share-notice
+dshhome/profiles/web/node_modules/dsh-android-console/lib/client.js|a31a96a3cbaeddb1312fb6b816b885d2|android-share-notice
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-android-console/lib/client.js|339433ef5ad60be2c1d90d2e38f2cc1b|android-share-notice
 # ⚠️ 2026-10-15 之前这条清单**没覆盖**这两个文件，于是"源码改了、包里带的还是旧的"
 #    能一路通过 verify。装 1.39 之前，patch-check 对这两条会报漂移（装机副本还是旧的）——那是**正确**的。
@@ -112,16 +114,26 @@ dshhome/profiles/web/node_modules/dsh-plugin-turn-notify/lib/index-v3.js|3e40e4c
 # 2026-10-18 更新 md5（be946ec→430d9fd）：本层新增 Codex 电源滑块注册
 # （dsh-codex-power-slider）+ 停用 ui-model-selection，让滑块接管 composer 模型槽。
 # 关键字沿用 modelPolicies：auto-summary-policy 的调优块仍在，没被这次追加挤掉。
-dshhome/cordis.patch.yml|cce2ea514abadc74b6bd4b205d459084|dsh-session-delete
+dshhome/cordis.patch.yml|539e4f426b884994d479e5461e8fde18|dsh-doc-media
+
+# 2026-10-21 v1.42：文件预览视频播放 + 安卓文件动作。两个都是纯客户端插件，
+# Node 半边（lib/index.js）只为让 Loader 能解析包入口，必须随包，否则启动日志报
+# ERR_PACKAGE_PATH_NOT_EXPORTED（17:11 那版就漏了这两个文件）。
+dshhome/profiles/web/node_modules/dsh-doc-media/package.json|14da7cd85a49a158016c945f2a168748|dsh-doc-media
+dshhome/profiles/web/node_modules/dsh-doc-media/lib/index.js|7dbb4a8f650d34075f653ff92d706dcf|dsh-doc-media
+dshhome/profiles/web/node_modules/dsh-doc-media/lib/client.js|4ea81d80c519c8c1939d8f028272f2f5|<video
+dshhome/profiles/web/node_modules/dsh-doc-actions/package.json|89feeb75fd4b64772ff5fd04904da3c2|dsh-doc-actions
+dshhome/profiles/web/node_modules/dsh-doc-actions/lib/index.js|f8a9ae506cc5c1318f3098ce42d3ad0c|dsh-doc-actions
+dshhome/profiles/web/node_modules/dsh-doc-actions/lib/client.js|f2824720b87c167d5ce66e22bf9184fa|127.0.0.1:3081/open
 
 # 2026-10-18 v1.39.5：文档预览引擎改为按需下载（不随包），插件提供
 # /dsh-office-kit/status 与 /install 两条路由；装了引擎才解析得到。
 dshhome/profiles/web/node_modules/@deepseek-ai/dsh-office-kit/lib/index.js|9c334d372670a245396bdb730b604c5a|office-kit: status route
 # 2026-10-19 v1.40：删除会话（/delete-session + /dsh-session-admin/*）；内核无 delete 原语。
-dshhome/profiles/web/node_modules/@deepseek-ai/dsh-session-admin/lib/index.js|f942df5081c321e1b13e17b43285bc78|session-admin: /delete-session
+dshhome/profiles/web/node_modules/@deepseek-ai/dsh-session-admin/lib/index.js|74dc064fb265805dcc1b4fcc5a95315b|session-admin: /delete-session
 
 # 2026-10-19 v1.40.1：侧边栏会话列表长按（/ 右键）删除。纯客户端插件，不改内核前端。
 dshhome/profiles/web/node_modules/dsh-session-delete/package.json|3bdc3facb75ffa77bebae7e136e63431|dsh-session-delete
 dshhome/profiles/web/node_modules/dsh-session-delete/cordis.patch.yml|ab91020b5d7bc179e36fc143d93361a4|dsh-session-delete
 dshhome/profiles/web/node_modules/dsh-session-delete/lib/index.js|348f3274289ac550b7ab7a6226273a5b|dsh-session-delete
-dshhome/profiles/web/node_modules/dsh-session-delete/lib/client.js|4e5ba3c2bc40847171cbd06e2d312b10|data-dsd-confirm
+dshhome/profiles/web/node_modules/dsh-session-delete/lib/client.js|2025320c13b37025ed13a7fe7e53d47d|data-dsd-confirm

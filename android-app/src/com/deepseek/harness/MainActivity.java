@@ -4085,6 +4085,8 @@ public class MainActivity extends Activity {
                         respBody = handleVoiceRequest(fullPath, body.toString());
                     } else if (path.startsWith("/tts")) {         // 语音播报 (TTS)
                         respBody = handleTtsRequest(fullPath, body.toString());
+                    } else if (path.startsWith("/open")) {     // v1.42：用系统应用打开文件 / 定位所在目录
+                        respBody = handleOpenRequest(body.toString());
                     } else if (path.startsWith("/notify")) {   // 发送通知
                         respBody = handleNotifyRequest(body.toString());
                     } else {
@@ -4622,9 +4624,11 @@ public class MainActivity extends Activity {
             }
             // v1.41：设置页「桌宠」里的流体云 / 悬浮屏预览开关（不依赖长按菜单或面板按钮）。
             if (action.equals("fluid") || action.equals("vscreen")) {
-                String sv = jsonField(raw, "on");
-                if (sv.isEmpty()) sv = queryField(path, "on");
-                boolean on = !("0".equals(sv) || "false".equalsIgnoreCase(sv));
+                // v2.12：这三句原来有两个坑 ——
+                // ① 设置页发 JSON 布尔 "on":false，jsonField 只认带引号的字符串 → 取不到 → 默认 true；
+                // ② query 那条又把 "action=" 里的 "on=" 当字段 → 取到 "fluid" → 还是 true。
+                // 两个开关于是只能开、不能关。改用 boolParam（认布尔字面量 + 边界匹配）。
+                boolean on = boolParam(raw, path, "on", true);
                 if (!OverlayService.isRunning) {
                     // 服务没跑时开关没有落点：明说，别让页面显示"开了"其实什么都没发生。
                     return "{\"ok\":false,\"error\":\"悬浮球没开，先打开「显示桌宠」\"}";
@@ -4816,6 +4820,119 @@ public class MainActivity extends Activity {
             return "{\"ok\":true}";
         }
         return "{\"ok\":false,\"error\":\"通知权限未授予，无法发送通知\"}";
+    }
+
+    /**
+     * v1.42：处理 /open —— 把共享存储里的文件交给系统（打开 / 定位 / 分享）。
+     *
+     * 为什么要在 App 里做：内核 @deepseek-ai/dsh-host-open-in-app 的 OPEN_IN_APP_CATALOG
+     * 只声明了 darwin / win32 / linux 三套平台，**没有 android** —— 文件预览上的
+     * 「显示文件位置」在手机上结构性不可用（点了永远失败，不是配置问题）。
+     * WebView 侧也只有 ctlState / ctlAct 两个窄接口，且 ctlAct 的动作表里只有
+     * open.url（只收 http/https）。所以安卓的文件动作原本无路可走，只能由壳补。
+     *
+     * 实现取巧处：不新建 FileProvider、不动 Manifest —— 直接用系统自带的
+     * com.android.externalstorage.documents 这个 DocumentsProvider 构造 content:// URI，
+     * 配 FLAG_GRANT_READ_URI_PERMISSION 交给目标应用，读权限是临时授予的。
+     *
+     * 参数：{"path":"/sdcard/Download/x.apk", "action":"view|reveal|share"}（也接受 query 串）
+     *   view   = 用系统默认应用打开（apk → 安装器，视频 → 播放器）
+     *   reveal = 打开文件所在的文件夹（DocumentsUI）
+     *   share  = 抛系统分享面板
+     */
+    private String handleOpenRequest(String raw) {
+        String path = jsonField(raw, "path");
+        String action = jsonField(raw, "action");
+        if (path.isEmpty()) {
+            path = queryField(raw, "path");
+            action = queryField(raw, "action");
+        }
+        if (action.isEmpty()) action = "view";
+        if (path.isEmpty()) return "{\"ok\":false,\"error\":\"缺少 path 参数\"}";
+        String full = normalizeSharedPath(path);
+        if (full == null) return "{\"ok\":false,\"error\":\"只支持共享存储 (/sdcard) 下的路径\"}";
+        File file = new File(full);
+        if (!file.exists()) return "{\"ok\":false,\"error\":\"文件不存在: " + jesc(full) + "\"}";
+
+        String root = Environment.getExternalStorageDirectory().getAbsolutePath();
+        String rel = full.equals(root) ? "" : full.substring(root.length() + 1);
+        String mime = mimeOf(rel);
+        String authority = "com.android.externalstorage.documents";
+        Intent intent = null;
+        String fallback = "";
+        try {
+            if ("reveal".equals(action)) {
+                int cut = rel.lastIndexOf('/');
+                String dirRel = cut > 0 ? rel.substring(0, cut) : "";
+                Uri dir = DocumentsContract.buildDocumentUri(authority, "primary:" + dirRel);
+                intent = new Intent(Intent.ACTION_VIEW);
+                intent.setDataAndType(dir, "vnd.android.document/directory");
+                fallback = "view";   // 有些 ROM 的文件管理器不认目录 URI，退回直接打开文件
+            } else if ("share".equals(action)) {
+                Uri doc = DocumentsContract.buildDocumentUri(authority, "primary:" + rel);
+                intent = new Intent(Intent.ACTION_SEND);
+                intent.setType(mime);
+                intent.putExtra(Intent.EXTRA_STREAM, doc);
+            } else {
+                Uri doc = DocumentsContract.buildDocumentUri(authority, "primary:" + rel);
+                intent = new Intent(Intent.ACTION_VIEW);
+                intent.setDataAndType(doc, mime);
+            }
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(intent);
+            return "{\"ok\":true,\"action\":\"" + action + "\",\"path\":\"" + jesc(full)
+                    + "\",\"mime\":\"" + jesc(mime) + "\"}";
+        } catch (Throwable t) {
+            Log.w(TAG, "open " + action + " failed: " + full, t);
+            // reveal 失败时退回直接打开文件本身，至少比什么都不发生强。
+            if (!fallback.isEmpty()) {
+                try {
+                    Uri doc = DocumentsContract.buildDocumentUri(authority, "primary:" + rel);
+                    Intent again = new Intent(Intent.ACTION_VIEW);
+                    again.setDataAndType(doc, mime);
+                    again.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+                    startActivity(again);
+                    return "{\"ok\":true,\"action\":\"view\",\"fallback\":true,\"path\":\"" + jesc(full) + "\"}";
+                } catch (Throwable ignored) {}
+            }
+            return "{\"ok\":false,\"error\":\"" + jesc(String.valueOf(t.getMessage())) + "\"}";
+        }
+    }
+
+    /** 把 /sdcard、/storage/self/primary、file:// 统一成 /storage/emulated/0/…；越界返回 null。 */
+    private String normalizeSharedPath(String raw) {
+        String p = raw == null ? "" : raw.trim();
+        if (p.isEmpty()) return null;
+        if (p.startsWith("file://")) {
+            try { p = Uri.parse(p).getPath(); } catch (Throwable ignored) {}
+            if (p == null) return null;
+        }
+        String root = Environment.getExternalStorageDirectory().getAbsolutePath();
+        if (p.equals("/sdcard")) p = root;
+        else if (p.startsWith("/sdcard/")) p = root + p.substring(7);
+        else if (p.equals("/storage/self/primary")) p = root;
+        else if (p.startsWith("/storage/self/primary/")) p = root + p.substring(21);
+        if (!p.equals(root) && !p.startsWith(root + "/")) return null;
+        // 拒绝 ".." 穿越（normalize 后仍含 ".." 说明是可疑构造）
+        if (p.contains("/../") || p.endsWith("/..")) return null;
+        return p;
+    }
+
+    /** 按后缀给系统一个像样的 MIME；给不准时退 * / * 让系统自己挑（比硬编码错的好）。 */
+    private String mimeOf(String name) {
+        String n = name == null ? "" : name.toLowerCase(java.util.Locale.US);
+        if (n.endsWith(".apk")) return "application/vnd.android.package-archive";
+        if (n.endsWith(".mp4") || n.endsWith(".m4v") || n.endsWith(".mkv") || n.endsWith(".mov")
+                || n.endsWith(".webm") || n.endsWith(".3gp") || n.endsWith(".avi")) return "video/*";
+        if (n.endsWith(".mp3") || n.endsWith(".m4a") || n.endsWith(".wav") || n.endsWith(".flac")
+                || n.endsWith(".ogg") || n.endsWith(".aac") || n.endsWith(".opus")) return "audio/*";
+        if (n.endsWith(".jpg") || n.endsWith(".jpeg") || n.endsWith(".png") || n.endsWith(".gif")
+                || n.endsWith(".webp") || n.endsWith(".bmp") || n.endsWith(".heic")) return "image/*";
+        if (n.endsWith(".pdf")) return "application/pdf";
+        if (n.endsWith(".txt") || n.endsWith(".md") || n.endsWith(".log") || n.endsWith(".csv")) return "text/plain";
+        if (n.endsWith(".json")) return "application/json";
+        if (n.endsWith(".zip")) return "application/zip";
+        return "*/*";
     }
 
     /** 处理 /setting：改系统设置（⑤，走 App 的 WRITE_SETTINGS 权限，仅限 System 命名空间，免 Shizuku）。
@@ -5107,7 +5224,18 @@ public class MainActivity extends Activity {
     private String queryField(String q, String key) {
         try {
             String k = key + "=";
-            int i = q.indexOf(k);
+            int i = -1;
+            // v2.12：必须落在字段边界上（`?key=` 或 `&key=`）。
+            // 原来直接 indexOf(key+"=") —— "action=fluid&on=0" 里 "action=" 本身**就含 "on="**，
+            // 取 on 会取到 "fluid"，任何布尔解析都落到默认值 true：表现就是「开了就关不掉」
+            // （2026-10-21 用户报障，实测复现）。
+            int from = 0;
+            while (true) {
+                int p = q.indexOf(k, from);
+                if (p < 0) break;
+                if (p == 0 || q.charAt(p - 1) == '?' || q.charAt(p - 1) == '&') { i = p; break; }
+                from = p + k.length();
+            }
             if (i < 0) return "";
             int e = q.indexOf('&', i + k.length());
             if (e < 0) e = q.length();
@@ -5115,6 +5243,46 @@ public class MainActivity extends Activity {
         } catch (Throwable t) {
             return "";
         }
+    }
+
+    /**
+     * v2.12：取布尔参数（JSON 主体和 query 串两处都认）。
+     *
+     * 为什么不能直接用 jsonField：它只解析**带引号的字符串值**（"on":"1"），
+     * 而设置页发来的是 JSON 布尔（"on": false）—— jsonField 找不到引号就返回空，
+     * 调用方于是落到"默认 true"，结果只能开、不能关。
+     * 这里先认 JSON 布尔字面量，再退回字符串/数字，最后退回 query 串。
+     */
+    private boolean boolParam(String raw, String query, String key, boolean fallback) {
+        try {
+            String k = "\"" + key + "\"";
+            int i = (raw == null) ? -1 : raw.indexOf(k);
+            if (i >= 0) {
+                int c = raw.indexOf(':', i + k.length());
+                if (c >= 0) {
+                    String rest = raw.substring(c + 1).trim();
+                    if (rest.startsWith("true")) return true;
+                    if (rest.startsWith("false")) return false;
+                    if (rest.startsWith("1")) return true;
+                    if (rest.startsWith("0")) return false;
+                    String sv = jsonField(raw, key);
+                    if (!sv.isEmpty()) return parseBool(sv, fallback);
+                }
+            }
+            if (query != null && !query.isEmpty()) {
+                String qv = queryField(query, key);
+                if (!qv.isEmpty()) return parseBool(qv, fallback);
+            }
+        } catch (Throwable ignored) {}
+        return fallback;
+    }
+
+    private boolean parseBool(String v, boolean fallback) {
+        if (v == null) return fallback;
+        String s = v.trim().toLowerCase();
+        if (s.equals("1") || s.equals("true") || s.equals("on") || s.equals("yes")) return true;
+        if (s.equals("0") || s.equals("false") || s.equals("off") || s.equals("no")) return false;
+        return fallback;
     }
 
     /**
@@ -5222,7 +5390,7 @@ public class MainActivity extends Activity {
             Notification n = b.setContentTitle(title)
                     .setContentText(text)
                     .setStyle(new Notification.BigTextStyle().bigText(text))
-                    .setSmallIcon(R.drawable.ic_launcher)
+                    .setSmallIcon(R.drawable.ic_whale_black)
                     .setContentIntent(pi)
                     .setAutoCancel(true)
                     .build();

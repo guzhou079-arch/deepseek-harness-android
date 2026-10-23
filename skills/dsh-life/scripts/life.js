@@ -114,15 +114,21 @@ function openDB() {
 
 // ==================== 2. HTTP 桥接请求辅助 ====================
 
-function httpGetJson(url) {
+function httpGetJson(url, timeoutMs) {
   return new Promise((resolve) => {
-    http.get(url, (res) => {
+    const req = http.get(url, (res) => {
       let data = '';
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
         try { resolve(JSON.parse(data)); } catch (e) { resolve({ ok: false, error: data || e.message }); }
       });
     }).on('error', (e) => resolve({ ok: false, error: e.message }));
+    // ⚠️ 2026-10-20：手机进 doze / App 被冻结时，桥会「接上但永不回包」。
+    //    没有超时的话守护进程就永久卡在 await 里 —— 日志无报错、心跳停摆、通知全丢，
+    //    表现就是「生活助理好像死了」。所有轮询都加硬超时，超时按失败重试。
+    if (timeoutMs && timeoutMs > 0) {
+      req.setTimeout(timeoutMs, () => req.destroy(new Error(`timeout ${timeoutMs}ms`)));
+    }
   });
 }
 
@@ -202,6 +208,14 @@ function textAlreadyStored(db, table, fullText) {
   if (!fullText) return false;
   try { return !!db.prepare(`SELECT 1 FROM ${table} WHERE full_text = ? LIMIT 1`).get(fullText); } catch (_) { return false; }
 }
+// 推送/短信正文里都带「10月20日10:43」这样的动账时刻（是交易时刻，不是收通知的时刻）。
+// 两条原文时刻不同 ⇒ 是两笔在不同分钟发生的动账，哪怕金额一样、都在 3 分钟窗里。
+// 这条判据专治「小额（<¥10）两条推送都不带余额」—— 那时没有余额可比，只剩这个硬判据。
+function txnTimeOf(text) {
+  const m = /(\d{1,2})月(\d{1,2})日\s*(\d{1,2}):(\d{2})/.exec(String(text || ''));
+  if (!m) return null;
+  return ((Number(m[1]) * 31 + Number(m[2])) * 1440) + Number(m[3]) * 60 + Number(m[4]);
+}
 function insertTransactionDedup(db, txInfo, seq, createdAt) {
   const at = createdAt || Date.now();
   try {
@@ -220,24 +234,58 @@ function insertTransactionDedup(db, txInfo, seq, createdAt) {
     }
     const norm = normalizeAccount(txInfo.account);
     const rows = db.prepare(`
-      SELECT id, merchant, account, created_at FROM transactions
+      SELECT id, merchant, account, created_at, full_text FROM transactions
       WHERE type = ? AND abs(amount - ?) < 0.005 AND abs(created_at - ?) <= 180000
     `).all(txInfo.type, txInfo.amount, at);
     for (const r of rows) {
       const ra = normalizeAccount(r.account);
       if (ra !== norm && !ra.startsWith(norm) && !norm.startsWith(ra)) continue;
+      // ⚠️ 2026-10-20：「同金额 + 3 分钟内」不足以判重 —— 两笔真动账也可能金额相同
+      //    （食堂连刷两次 10 元、公交连刷两次 2 元）。更硬的判据是余额：两条都带余额
+      //    且数值不同 ⇒ 余额真的变了 ⇒ 是两笔独立动账，吞掉后一笔会让余额链少一段，
+      //    表现就是用户看到的「少记几块」。余额相同 = 同一条通知的重放，照旧判重。
+      const newBal = EXTRACTOR.extractBalance(txInfo.fullText || '');
+      if (newBal !== null) {
+        const oldBal = EXTRACTOR.extractBalance(r.full_text || '');
+        if (oldBal !== null && Math.abs(oldBal - newBal) >= 0.005) continue;
+      }
+      // 两条都不带余额时，余额判据是空的 ⇒ 再看正文里的动账时刻。
+      // 同一分钟 = 同一条通知的两种渠道；不同分钟 = 两笔真动账（2026-10-20 漏的 ¥5 就是这种）。
+      const newT = txnTimeOf(txInfo.fullText), oldT = txnTimeOf(r.full_text);
+      if (newT !== null && oldT !== null && Math.abs(newT - oldT) >= 1) continue;
       if (isNeutralMerchant(r.merchant) && !isNeutralMerchant(txInfo.merchant)) {
         db.prepare(`UPDATE transactions SET merchant = ?, category = ?, account = ?, full_text = ? WHERE id = ?`)
           .run(txInfo.merchant, txInfo.category, txInfo.account, txInfo.fullText, r.id);
         return { ok: true, upgraded: true };
       }
+      // ⚠️ 2026-10-20：同一笔动账会来两条通知 —— 先「掌银推送」(只有金额、中性商户)，
+      //    几秒后「银行短信」(带商户 + **余额**)。老逻辑把短信当重复直接丢掉 →
+      //    余额锚点丢失，「最近余额」只能靠推算越走越偏（当天差 ¥14.90，用户以为漏账）。
+      //    ⇒ 重复时若新原文带余额而旧行没有，把原文并进旧行。幂等键仍是原文，重放安全。
+      if (txInfo.fullText && EXTRACTOR.extractBalance(txInfo.fullText) !== null &&
+          EXTRACTOR.extractBalance(r.full_text || '') === null) {
+        db.prepare(`UPDATE transactions SET full_text = ?, account = ? WHERE id = ?`)
+          .run(txInfo.fullText, txInfo.account, r.id);
+        return { ok: true, mergedBalance: true };
+      }
       return { ok: true, duplicate: true };
     }
-    db.prepare(`
+    const insSql = `
       INSERT INTO transactions (type, amount, merchant, category, account, full_text, created_at, seq)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(txInfo.type, txInfo.amount, txInfo.merchant, txInfo.category, txInfo.account, txInfo.fullText, at, seq == null ? null : seq);
-    return { ok: true, inserted: true };
+    `;
+    const insArgs = [txInfo.type, txInfo.amount, txInfo.merchant, txInfo.category, txInfo.account, txInfo.fullText, at];
+    let _ins;
+    try {
+      _ins = db.prepare(insSql).run(...insArgs, seq == null ? null : seq);
+    } catch (e) {
+      // ⚠️ 2026-10-19：bridge seq 在 App 重启后归零重放，而 transactions.seq 是 UNIQUE，
+      // 新通知的 seq 会撞上历史行 → 整条 INSERT 抛错。老代码把这个错误吞掉，日志却已经
+      // 打出「💰 记账」，表现为「明明记了却没入账」（支付宝 3 元那次）。撞库就退化成 seq=NULL。
+      if (!/UNIQUE/i.test(String(e && e.message))) throw e;
+      _ins = db.prepare(insSql).run(...insArgs, null);
+    }
+    return { ok: true, inserted: true, id: _ins && _ins.lastInsertRowid != null ? Number(_ins.lastInsertRowid) : null };
   } catch (e) {
     return { ok: false, error: e.message };
   }
@@ -630,6 +678,9 @@ function isExcludedCode(str) {
 function guessCategory(merchant = '', fullText = '') {
   const s = `${merchant} ${fullText}`.toLowerCase();
   if (/(退款)/.test(s)) return '退款';
+  // 2026-10-20：AI 订阅/按量付费以前一律落到「其他消费」，月度统计看不出 AI 花多少。
+  // 手工补录那批用的分类是「AI」，新的归一到这里，别再分叉成两个名字。
+  if (/(深度求索|deepseek|雪球数智|openai|anthropic|claude|gemini|chatgpt|api费用|koishi)/.test(s)) return 'AI';
   if (/(外卖|美团|饿了么|麦当劳|肯德基|必胜客|瑞幸|星巴克|喜茶|奈雪|霸王茶姬|茶百道|蜜雪冰城|奶茶|餐饮|饭店|面馆|小吃|食堂|伙食|咖啡|超市|便利店|烘焙|火锅|海底捞|烧烤|烤肉|汉堡|披萨|全家|罗森|7-11|7-eleven|美宜佳)/.test(s)) return '餐饮';
   if (/(淘宝|京东|拼多多|天猫|得物|唯品会|服装|数码|商场|购物|超市|便利店)/.test(s)) return '购物';
   if (/(滴滴|高德|花小猪|t3|打车|出租车|地铁|公交|火车|机票|12306|铁路|加油|中石化|中石油|停车|etc|出行)/.test(s)) return '交通';
@@ -747,11 +798,40 @@ class CronScheduler {
     } else if (action === 'weekly_backup' || action === 'backup') {
       // 时光机备份
       try {
-        execSync('node /sdcard/DeepSeekHarness/tools/backup.mjs', { stdio: 'ignore', shell: '/system/bin/sh' });
-        logMessage('[Cron] 时光机全站备份完成 (backup.mjs)');
-        await sendNotification('💾 时光机备份完成', '已完成每周全站自动快照备份');
+        // 必须带 create 子命令：不带时 backup.mjs 只会打印用法并 exit 0，
+        // 被这里当成"备份完成"（2026-10-21 修：静默假成功）
+        const out = execSync('node /sdcard/DeepSeekHarness/tools/backup.mjs create --name WeeklyAutoBackup',
+          { encoding: 'utf8', shell: '/system/bin/sh', timeout: 10 * 60 * 1000 });
+        const sizeLine = (out.match(/快照大小:.*/) || [''])[0].trim();
+        logMessage(`[Cron] 时光机全站备份完成 ${sizeLine}`);
+        await sendNotification('💾 时光机备份完成', sizeLine || '已完成每周全站自动快照备份');
       } catch (err) {
         logMessage(`[Cron] 自动备份失败: ${err.message}`);
+        await sendNotification('⚠️ 时光机备份失败', String(err.message || err).slice(0, 200));
+      }
+    } else if (action === 'doctor') {
+      // 每日体检（2026-10-21 加）：只报问题，全绿零输出。
+      // 目的是消灭「坏了没人知道」——备份连崩三天、无障碍崩了、定时任务失败，都是这么漏掉的。
+      try {
+        let out = '';
+        let hasFail = false;
+        try {
+          out = execSync('node /sdcard/DeepSeekHarness/tools/doctor.mjs --quiet',
+            { encoding: 'utf8', shell: '/system/bin/sh', timeout: 120000 });
+        } catch (e) {
+          // doctor 有 fail 项时退出码为 1，此时输出仍在 stdout 上，别丢掉
+          out = String(e.stdout || '') + String(e.stderr || '');
+          hasFail = true;
+        }
+        const txt = String(out || '').trim();
+        if (!txt) {
+          logMessage('[Cron] 体检全绿');
+        } else {
+          logMessage(`[Cron] 体检有问题${hasFail ? '（含不可用项）' : '（仅告警）'}`);
+          await sendNotification(hasFail ? '❌ DSH 体检：有项不可用' : '⚠️ DSH 体检：有告警', txt.slice(0, 800));
+        }
+      } catch (err) {
+        logMessage(`[Cron] 体检自身失败: ${err.message}`);
       }
     }
   }
@@ -1009,12 +1089,45 @@ function computeNextRun(expr, now = Date.now()) {
       return now + step * 60 * 1000;
     }
     if (!isNaN(minStr) && !isNaN(hourStr)) {
-      const target = new Date(d);
-      target.setHours(Number(hourStr), Number(minStr), 0, 0);
-      if (target.getTime() <= now) {
-        target.setDate(target.getDate() + 1);
+      const [, , domStr, monStr, dowStr] = parts;
+      // 展开 "1,3-5" 这类写法；'*' 或认不出的写法 → null（不限制，宁可多跑也别永不跑）
+      const expand = (s) => {
+        if (!s || s === '*') return null;
+        const out = new Set();
+        for (const seg of s.split(',')) {
+          const m = seg.match(/^(\d+)(?:-(\d+))?$/);
+          if (!m) return null;
+          const a = Number(m[1]);
+          const b = m[2] !== undefined ? Number(m[2]) : a;
+          for (let i = a; i <= b; i++) out.add(i);
+        }
+        return out.size ? out : null;
+      };
+      const doms = expand(domStr); // 1-31
+      const mons = expand(monStr); // 1-12
+      const dows = expand(dowStr); // 0-6，0=周日
+
+      const cand = new Date(d);
+      cand.setHours(Number(hourStr), Number(minStr), 0, 0);
+      if (cand.getTime() <= now) cand.setDate(cand.getDate() + 1);
+
+      // cron 语义：日、周同时被限制时取「或」，只限制其一则取「与」
+      const dayHit = (dt) => {
+        const domOk = doms === null ? null : doms.has(dt.getDate());
+        const dowOk = dows === null ? null : dows.has(dt.getDay());
+        if (domOk === null && dowOk === null) return true;
+        if (domOk === null) return dowOk;
+        if (dowOk === null) return domOk;
+        return domOk || dowOk;
+      };
+
+      for (let i = 0; i < 400; i++) {
+        if ((mons === null || mons.has(cand.getMonth() + 1)) && dayHit(cand)) {
+          return cand.getTime();
+        }
+        cand.setDate(cand.getDate() + 1);
       }
-      return target.getTime();
+      return null;
     }
   }
 
@@ -1081,22 +1194,28 @@ async function runDaemon() {
 
   // 恢复上次处理的通知 seq
   let lastSeq = 0;
+  let lastCount = 0;   // 上次看到的桥缓冲条数（用来识别「桥重启过」，见循环里的体检）
   try {
     const row = db.prepare(`SELECT value FROM daemon_state WHERE key = 'last_seq'`).get();
     if (row && row.value) lastSeq = parseInt(row.value, 10) || 0;
   } catch (_) {}
 
-  // 首次拉取先对齐当前最大 seq，避免处理历史重复通知
+  // 启动基线（2026-10-21 改）：**一律回放桥内整段缓冲**，不拿任何高水位当界。
+  // 老逻辑是 `lastSeq = status.seq`（或旧高水位）：桥的 seq 只在 App 进程内单调，
+  // App 重启后从 1 重来，与库里的高水位**撞号**时（相等），用 since=N 去要，
+  // 编号正好是 N 的那条永远要不回来 —— 当天 16:36 的 ¥9.80 农行推送（seq=4）
+  // 就是被 16:37 重启的守护这样静默跳过的（这也是 10-15「seq 归零让守护永久瞎掉」的同族问题）。
+  // 重放安全：记账按 full_text 原文去重（见 insertTransactionDedup），
+  // 验证码/包裹同样 textAlreadyStored 拦一遍，重放不会刷脏。
   const status = await httpGetJson(`${BRIDGE_3181}/notifications-status`);
-  if (status.ok && status.seq) {
-    if (lastSeq === 0) lastSeq = status.seq;
-    else if (status.seq < lastSeq) {
-      // App 重启后桥的 seq 计数器从 1 重来（内存缓冲也清空），旧高水位会让监听**永久瞎掉**：
-      // 用 since=903 去要，而新通知编号只有 1..N，永远要不回任何东西。
-      // 2026-10-15 实测踩到：守护记到 903、桥已归零到 9 → 记账/验证码/快递全停。
-      logMessage(`[Notification] 桥的 seq 归零（App 重启过）：高水位 ${lastSeq} → ${status.seq}，重置为 0 重放缓冲`);
-      lastSeq = 0;
+  let replayFrom = lastSeq;
+  if (status.ok) {
+    // 桥最多保留 50 条 → 从 seq-50 起覆盖整段缓冲，不会把久远历史反复重放。
+    replayFrom = Math.max(0, (status.seq || 0) - 50);
+    if (lastSeq !== replayFrom) {
+      logMessage(`[Notification] 启动回放缓冲：高水位 ${lastSeq} → ${replayFrom}（桥 seq ${status.seq || 0}，最多回放 50 条，重复按原文去重）`);
     }
+    lastSeq = replayFrom;
   }
 
   logMessage(`[Notification] 正在监听系统通知流 (起始 seq: ${lastSeq})...`);
@@ -1116,15 +1235,29 @@ async function runDaemon() {
           db.prepare(`INSERT OR REPLACE INTO daemon_state (key, value) VALUES ('last_beat', ?)`).run(String(nowMs));
         } catch (_) {}
       }
-      // 阻塞等待新通知（超时 15 秒返回）
-      const res = await httpGetJson(`${BRIDGE_3181}/notifications-wait?since=${lastSeq}&timeout=15`);
+      // 阻塞等待新通知（超时 15 秒返回；客户端再兜一层 35s 硬超时，防桥假死卡死守护）
+      const res = await httpGetJson(`${BRIDGE_3181}/notifications-wait?since=${lastSeq}&timeout=15`, 35000);
       // 长轮询空转时体检一次：高水位可能因为这次循环期间 App 重启而变成黑洞
       if (lastSeq > 0 && (!res.items || res.items.length === 0)) {
-        const st = await httpGetJson(`${BRIDGE_3181}/notifications-status`);
+        const st = await httpGetJson(`${BRIDGE_3181}/notifications-status`, 10000);
         if (st.ok && typeof st.seq === 'number' && st.seq < lastSeq) {
           logMessage(`[Notification] 桥的 seq 归零（App 重启过）：高水位 ${lastSeq} → ${st.seq}，重置为 0 重放缓冲`);
+          logMessage(`[Notification] ⚠️ 这次 App 重启期间到达的通知已随内存缓冲丢失，可能漏账；看 bill today 余额是否对得上`);
           lastSeq = 0;
           continue;
+        }
+        // 2026-10-21 补：桥重启后 seq 从 1 重来，一旦**涨到与高水位相等**，
+        // `st.seq < lastSeq` 就再也判不出来 —— 缓冲里 seq == 高水位 的那条永远拿不到
+        // （当天 ¥9.80 就是这么丢的：桥 seq=4，守护高水位也=4，since=4 要不到 4）。
+        // 缓冲只会被清空/重建，存活期间 count 单调不减 ⇒ count 变小同样是「桥重启过」的硬信号。
+        if (st.ok && typeof st.count === 'number') {
+          if (lastCount > 0 && st.count < lastCount && st.seq <= lastSeq) {
+            logMessage(`[Notification] 桥缓冲变短（${lastCount} → ${st.count}，seq ${st.seq} ≤ 高水位 ${lastSeq}）＝桥重启过，重置为 0 重放缓冲`);
+            lastSeq = 0;
+            lastCount = st.count;
+            continue;
+          }
+          lastCount = st.count;
         }
       }
       if (res.ok && res.items && res.items.length > 0) {
@@ -1152,10 +1285,25 @@ async function runDaemon() {
           // 2. 动账记账检测
           const txInfo = EXTRACTOR.extractTransaction(bodyText, item.title, item.package);
           if (txInfo) {
-            logMessage(`[Bill] 💰 记账: [${txInfo.type === 'expense' ? '支出' : '收入'}] ¥${txInfo.amount.toFixed(2)} (${txInfo.merchant} · ${txInfo.category})`);
             const _r = insertTransactionDedup(db, txInfo, item.seq, Date.now());
-            if (_r.duplicate) logMessage(`[Bill] ⏭️ 跳过重复记账: ¥${txInfo.amount.toFixed(2)} (${txInfo.merchant})`);
-            if (_r.upgraded) logMessage(`[Bill] ⬆️ 合并同笔记账: 补上商户 ${txInfo.merchant}`);
+            const _am = `¥${txInfo.amount.toFixed(2)} (${txInfo.merchant} · ${txInfo.category})`;
+            // ⚠️ 2026-10-20：老代码在 insert 之前就打「💰 记账」，于是被去重跳过、甚至 INSERT
+            //    撞 seq 失败的通知，日志里也写着「已记账」→ 排查「少记」时日志根本不可信。
+            //    现在一律按 insert 的真实结果分别打，日志与账本一一对应。
+            if (_r && _r.error) logMessage(`[Bill] ❌ 记账失败: ${_am} — ${_r.error}`);
+            else if (_r.duplicate) logMessage(`[Bill] ⏭️ 跳过重复记账: ${_am}`);
+            else if (_r.mergedBalance) logMessage(`[Bill] ⬆️ 合并同笔记账: 补上余额原文 ${_am}`);
+            else if (_r.upgraded) logMessage(`[Bill] ⬆️ 合并同笔记账: 补上商户 ${_am}`);
+            else logMessage(`[Bill] 💰 记账: [${txInfo.type === 'expense' ? '支出' : '收入'}] ${_am}`);
+            // 退款常常只推一句「发生一笔收入 X 元」，全文里没有「退款」二字 → 会被当成收入。
+            // 同额支出在近 7 天内的话给个提示：一笔就能改过来（life bill tag <id> 退款），
+            // 分类改成退款后，bill month 会从支出和收入两边同时扣掉，支出不再虚高。
+            if (!_r.error && !_r.duplicate && !_r.mergedBalance && !_r.upgraded && txInfo.type === 'income' && !/退款/.test(txInfo.category)) {
+              try {
+                const hit = db.prepare(`SELECT id, created_at, merchant FROM transactions WHERE type='expense' AND abs(amount - ?) < 0.005 AND created_at >= ? ORDER BY created_at DESC LIMIT 1`).get(txInfo.amount, Date.now() - 7 * 86400000);
+                if (hit && _r.id) logMessage(`[Bill] 💡 ¥${txInfo.amount.toFixed(2)} 与 ${new Date(hit.created_at).toLocaleDateString('zh-CN')} 的支出「${hit.merchant}」同额，可能是退款 —— 是就跑: life bill tag ${_r.id} 退款`);
+              } catch (_) {}
+            }
           }
 
           // 3. 快递取件码检测
@@ -1372,10 +1520,82 @@ async function handleCLI() {
           console.log(`${sign} ¥${item.amount.toFixed(2).padStart(7)}  [${item.category}] ${item.merchant} (${item.account})`);
         }
         console.log(`-----------------------------------`);
-        console.log(`今日支出合计: ¥${total.toFixed(2)}`);
+        // 退款：钱原路退回，不算消费也不算收入 —— 冲减支出，否则「本月支出」会比真实花销高。
+        const rfDay = db.prepare(`SELECT COALESCE(SUM(amount),0) s, COUNT(*) n FROM transactions WHERE created_at >= ? AND type='income' AND category LIKE '%退款%'`).get(start);
+        console.log(`今日支出合计: ¥${(total - (rfDay.s || 0)).toFixed(2)}${rfDay.n ? `（已冲减退款 ¥${rfDay.s.toFixed(2)}）` : ''}`);
         const bals = readLatestBalances(db, 1);
         if (bals.length) console.log(`最近余额: ¥${bals[0].amount.toFixed(2)}  (${bals[0].account}${bals[0].at ? ' · ' + new Date(bals[0].at).toLocaleString('zh-CN') : ''})`);
+        // 余额链自检一行：验收标准就是「余额对得上」，日常看一眼就够，
+        // 有差直接给出可执行的修法，不用用户自己去翻流水找漏了哪笔。
+        try {
+          const { segs } = balanceChainSegments(db, 30);
+          const last = segs[segs.length - 1];
+          if (last) {
+            const f = t => new Date(t).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+            const span = `${f(last.a.created_at)} → ${f(last.b.created_at)}`;
+            if (Math.abs(last.diff) < 0.005) console.log(`余额链:  锚点间对得上 ✅ (${span})`);
+            else console.log(`余额链:  ⚠️ 差 ${last.diff.toFixed(2)} (${span})，跑 life bill audit --fix 补上`);
+          }
+        } catch (_) {}
+        // ⚠️ 2026-10-20：最新一条银行回执之后的行全是「推算」，小额推送（<¥10）不带余额，
+        //    没有回执就无从校验；当天这里对推算行也打了 ✅，结果 10:43 后漏的 ¥5 无人发现。
+        //    有回执的段归「锚点间」；没回执的尾巴单独说清楚，别冒充已核对。
+        try {
+          const la = db.prepare("SELECT MAX(created_at) t FROM transactions WHERE full_text LIKE '%余额%'").get();
+          if (la && la.t) {
+            const tail = db.prepare("SELECT COUNT(*) n, SUM(CASE WHEN type='expense' THEN amount ELSE -amount END) s FROM transactions WHERE created_at > ?").get(la.t);
+            if (tail && tail.n > 0) {
+              const f0 = new Date(la.t).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+              console.log(`          其后 ${tail.n} 笔为推算（无银行回执，未核验）`);
+            }
+          }
+        } catch (_) {}
         console.log('');
+      } else if (sub === 'audit') {
+        // life bill audit [--days 30] [--fix]：余额链审计 —— 逐段核对「上一锚点余额 + 区间动账 = 下一锚点余额」。
+        // 这是判断「有没有漏账」唯一硬的判据：漏了就会在对应区间显出差额，不用去翻历史短信。
+        // 验收标准是「余额对得上就行」⇒ --fix 直接把每段差额补成一行「漏账补记」，让余额链闭合。
+        // 补记行只写差额、不猜商户，正文也不带「余额」字样（否则它自己会变成下一个假锚点）。
+        let days = 30, fix = false;
+        for (let i = 2; i < args.length; i++) {
+          if (args[i] === '--days') days = parseInt(args[++i], 10) || 30;
+          else if (args[i] === '--fix') fix = true;
+        }
+        const { segs, anchors } = balanceChainSegments(db, days);
+        const ts = t => new Date(t).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+        console.log(`\n=== 🧾 余额链审计（近 ${days} 天 · 余额锚点 ${anchors.length} 个）===`);
+        if (anchors.length < 2) {
+          console.log('余额锚点不足 2 个，无法核对（锚点 = 正文带「余额」的银行通知）。\n');
+        } else {
+          let bad = 0, fixed = 0;
+          const insFix = fix ? db.prepare(`INSERT INTO transactions (type, amount, merchant, category, account, full_text, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`) : null;
+          for (const s of segs) {
+            const head = `${ts(s.a.created_at)} ¥${s.a.bal.toFixed(2)} → ${ts(s.b.created_at)} ¥${s.b.bal.toFixed(2)}  (${s.between.length} 笔 ${s.delta.toFixed(2)})`;
+            if (Math.abs(s.diff) < 0.005) { console.log('✅ ' + head); continue; }
+            bad++;
+            if (!fix) { console.log('❌ ' + head + `  推算 ${s.expect.toFixed(2)}，差 ${s.diff.toFixed(2)}`); continue; }
+            const amount = Math.abs(s.diff);
+            // 补在区间中点：既不落在今天（避免把旧漏账算进今日流水），也保证落在同一段的
+            //「(a, b]」区间里 —— 补完再跑一遍审计，这段必须是 ✅。
+            const at = Math.round((s.a.created_at + s.b.created_at) / 2);
+            const note = `[差额补记] ${s.diff < 0 ? '支出' : '收入'} ¥${amount.toFixed(2)}；锚点 ${s.a.bal.toFixed(2)} → ${s.b.bal.toFixed(2)}，区间动账 ${s.delta.toFixed(2)}（${ts(s.a.created_at)} ~ ${ts(s.b.created_at)}）`;
+            insFix.run(s.diff < 0 ? 'expense' : 'income', amount, '差额补记(漏账)', '漏账补记', '银行', note, at);
+            fixed++;
+            console.log('🔧 ' + head + `  差 ${s.diff.toFixed(2)} → 已补记 ¥${amount.toFixed(2)}`);
+          }
+          console.log('-----------------------------------');
+          if (bad === 0) console.log('全部对上 ✅\n');
+          else if (fixed === bad) console.log(`已补记 ${fixed} 段差额，余额链闭合 ✅（补记行分类=漏账补记，life bill month 可单独看到）\n`);
+          else if (fixed > 0) console.log(`已补记 ${fixed} 段，仍有 ${bad - fixed} 段没闭合（重跑一次 audit 确认）\n`);
+          else console.log(`${bad} 段对不上 = 该区间有没捕获到的动账（多为无障碍掉线/App 重启期间的推送丢失）；\n跑 life bill audit --fix 可按余额链自动补记差额，余额仍以最新锚点为准。\n`);
+          // 最新回执之后的行全是推算：小额推送（<¥10）不带余额，没有回执就没法核验。
+          // 2026-10-20 就是这里睁眼瞎：审计全绿，10:43 之后却漏了一笔 ¥5。
+          try {
+            const lastAt = anchors[anchors.length - 1].created_at;
+            const tail = db.prepare(`SELECT COUNT(*) n, SUM(CASE WHEN type='expense' THEN amount ELSE -amount END) s FROM transactions WHERE created_at > ?`).get(lastAt);
+            if (tail && tail.n > 0) console.log(`⚠️ 最新回执 ${ts(lastAt)} 之后还有 ${tail.n} 笔（净 ${tail.s > 0 ? '-' : '+'}¥${Math.abs(tail.s).toFixed(2)}）没有银行回执，这段核验不了 —— 小额（<¥10）推送不带余额，只能靠通知确实收到。\n`);
+          } catch (_) {}
+        }
       } else if (sub === 'month') {
         const start = new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime();
         const cats = db.prepare(`
@@ -1392,7 +1612,12 @@ async function handleCLI() {
         }
         console.log(`-----------------------------------`);
         const inc = db.prepare(`SELECT COALESCE(SUM(amount), 0) AS s FROM transactions WHERE created_at >= ? AND type = 'income'`).get(start).s || 0;
-        console.log(`本月支出总额: ¥${total.toFixed(2)}  收入 ¥${inc.toFixed(2)}  结余 ¥${(inc - total).toFixed(2)}\n`);
+        // 退款既不是收入也不是消费：两边同时扣掉，结余不变，但「花了多少」不再虚高。
+        const rf = db.prepare(`SELECT COALESCE(SUM(amount),0) s, COUNT(*) n FROM transactions WHERE created_at >= ? AND type='income' AND category LIKE '%退款%'`).get(start);
+        const rAmt = rf.s || 0, netTotal = total - rAmt, netInc = inc - rAmt;
+        console.log(`本月支出总额: ¥${netTotal.toFixed(2)}  收入 ¥${netInc.toFixed(2)}  结余 ¥${(netInc - netTotal).toFixed(2)}`);
+        if (rf.n) console.log(`（其中退款冲减 ¥${rAmt.toFixed(2)} · ${rf.n} 笔：退款不算收入、也不算支出，两边都扣掉）\n`);
+        else console.log('');
       } else if (sub === 'all' || sub === 'list') {
         // life bill all --limit 30 --offset 0 [--days 7]
         let limit = 30;
@@ -1435,6 +1660,16 @@ async function handleCLI() {
         } else {
           console.log('请提供正确的 --amount 金额参数');
         }
+      } else if (sub === 'tag') {
+        // life bill tag <id> <分类> —— 只改分类，不动金额、时间与原文（原文是余额锚点，不能碰）
+        const id = parseInt(args[2], 10);
+        const cat = String(args[3] || '').trim();
+        if (!id || !cat) { console.log('用法: life bill tag <id> <分类>     例: life bill tag 2286 退款'); break; }
+        const row = db.prepare('SELECT id, type, amount, merchant, category FROM transactions WHERE id = ?').get(id);
+        if (!row) { console.log(`没有 id=${id} 的账目`); break; }
+        db.prepare('UPDATE transactions SET category = ? WHERE id = ?').run(cat, id);
+        console.log(`✅ #${row.id} ${row.type === 'expense' ? '-' : '+'}¥${row.amount.toFixed(2)} ${row.merchant}：${row.category} → ${cat}`);
+        if (/退款/.test(cat) && row.type === 'income') console.log('   统计口径已按退款处理：life bill month 的支出与收入都会扣掉这笔，余额不受影响。');
       }
       break;
     }
@@ -1597,9 +1832,14 @@ async function handleCLI() {
  */
 function bankKeyOf(account, fullText) {
   const s = String(account || '') + ' ' + String(fullText || '');
-  const bank = (s.match(/(中国农业银行|农业银行|中国建设银行|建设银行|中国工商银行|工商银行|中国银行|招商银行|交通银行|邮储银行|邮政储蓄银行|中信银行|浦发银行|兴业银行|民生银行|光大银行|华夏银行|广发银行|平安银行|云闪付|银联)/) || [])[1] || String(account || '账户');
+  // ⚠️ 必须认「农行/建行/工行」这类简称：掌银通知正文写「农行借记卡」，
+  //    account 字段却可能被上游识别成「支付宝」→ 同一张卡被拆成两个键，
+  //    推算余额时漏掉那几笔（2026-10-19 因此差 ¥3.00）。
+  const bank = (s.match(/(中国农业银行|农业银行|农行|中国建设银行|建设银行|建行|中国工商银行|工商银行|工行|中国银行|中行|招商银行|招行|交通银行|交行|邮储银行|邮政储蓄银行|中信银行|浦发银行|兴业银行|民生银行|光大银行|华夏银行|广发银行|平安银行|云闪付|银联)/) || [])[1] || String(account || '账户');
   const tail = (s.match(/尾号(?:为)?\s*(\d{4})/) || s.match(/\((\d{4})\)/) || [])[1] || '';
-  return bank.replace(/^中国/, '') + ':' + tail;
+  return bank.replace(/^中国/, '').replace(/^农行$/, '农业银行').replace(/^建行$/, '建设银行')
+    .replace(/^工行$/, '工商银行').replace(/^招行$/, '招商银行').replace(/^交行$/, '交通银行')
+    .replace(/^邮储(银行)?$/, '邮政储蓄银行') + ':' + tail;
 }
 
 /**
@@ -1663,6 +1903,34 @@ function readLatestBalances(db, limit = 3) {
     }
   } catch (_) {}
   return out;
+}
+
+/**
+ * 余额链分段核对：把「正文带余额的银行通知」当锚点，逐段验算
+ *   上一锚点余额 + 区间动账 = 下一锚点余额
+ * 返回 [{ a, b, between, delta, expect, diff }]，diff≠0 就是该段有没捕到的动账。
+ * 供 `bill audit`（全量）和 `bill today`（只看最近一段）共用 —— 两处口径必须一致，
+ * 否则「今日说对得上、audit 说差 5 块」会让人更不信账本。
+ */
+function balanceChainSegments(db, days = 30) {
+  const from = Date.now() - days * 86400000;
+  const rows = db.prepare(`SELECT id, type, amount, full_text, created_at FROM transactions WHERE created_at >= ? ORDER BY created_at, id`).all(from);
+  const anchors = [];
+  for (const r of rows) {
+    const b = EXTRACTOR.extractBalance(r.full_text || '');
+    if (b !== null) anchors.push(Object.assign({}, r, { bal: b }));
+  }
+  const segs = [];
+  for (let i = 1; i < anchors.length; i++) {
+    const a = anchors[i - 1], b = anchors[i];
+    // 区间动账要含 b 自己那笔（b 的余额是那笔之后的值），只排除 a 自己
+    const between = rows.filter(r => r.created_at > a.created_at && r.created_at <= b.created_at && r.id !== a.id);
+    const delta = between.reduce((s, r) => s + (r.type === 'expense' ? -r.amount : r.amount), 0);
+    const expect = +(a.bal + delta).toFixed(2);
+    const diff = +(b.bal - expect).toFixed(2);
+    segs.push({ a, b, between, delta, expect, diff });
+  }
+  return { segs, anchors };
 }
 
 /** App 侧闹钟任务注册表（纯文本，一行一条：id|triggerAt|repeat|intervalMin|text）。 */

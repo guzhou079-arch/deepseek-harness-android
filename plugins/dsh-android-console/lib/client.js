@@ -1875,7 +1875,7 @@ window.__ModuleLoader__.load({
         alive.current = true;
         const poll = () => {
           if (!nativeInput()) return;
-          try { setShare(nativeJson('shareState')); } catch (e) { setMessage(e.message); }
+          try { setShare(nativeJson('shareState')); } catch (e) { /* 分享桥异常不挤占输入栏下方那行 */ }
           const current = active.current;
           if (!current) return;
           try {
@@ -1908,11 +1908,10 @@ window.__ModuleLoader__.load({
         autoTried.current = pending.id; autoBusy.current = true;
         const target = sessionId;
         const current = () => alive.current && sessionRef.current === target;
-        setMessage('正在挂载分享…');
         (async () => {
           try {
             await autoPutShareInDraft(pending, target, inputActions, draftConversation, nativeJson, current);
-            if (current()) { setShare(nativeJson('shareState')); setMessage('已挂到输入栏'); }
+            if (current()) { try { setShare(nativeJson('shareState')); } catch (_) {} }
           } catch (e) {
             if (alive.current) {
               setAutoFailed(pending.id);
@@ -1952,7 +1951,7 @@ window.__ModuleLoader__.load({
           }
           if (!current()) return;
           nativeJson('shareAck', batch.id);
-          if (current()) { setShare(nativeJson('shareState')); setMessage('分享已加入草稿，请检查后发送'); }
+          if (current()) { try { setShare(nativeJson('shareState')); } catch (_) {} }
         } catch (e) { if (alive.current) setMessage(e.message); }
         finally { if (alive.current) setImporting(false); }
       };
@@ -1980,6 +1979,44 @@ window.__ModuleLoader__.load({
           ] }),
         ] }) : null,
       ] });
+    }
+
+    // 分享挂进输入栏的那一步：聊天框卡片和 overlay 自动挂载共用，按批次去重，
+    // 避免两边同时看到同一批内容时插两次。
+    let shareMounting = '';
+    async function mountShareOnce(batch, sessionId, inputActions, conversation, current = () => true) {
+      if (!batch || !batch.id || !sessionId || !inputActions || !conversation) return false;
+      if (shareMounting === batch.id) return false;
+      shareMounting = batch.id;
+      try {
+        await putShareInDraft(batch, sessionId, inputActions, conversation, nativeJson, current);
+        if (!current()) throw new Error('聊天已切换，分享仍保留在收件箱');
+        nativeJson('shareAck', batch.id);
+        return true;
+      } finally {
+        if (shareMounting === batch.id) shareMounting = '';
+      }
+    }
+
+    // 新会话（hero 形态）不渲染 conversation.composer.dock，分享就没地方挂；
+    // input.overlay 只要会话存在就渲染，所以这里补一个纯逻辑挂载点：不出任何 UI，
+    // 也不往输入栏下方那行写字。挂载失败时内容留在收件箱，聊天框卡片仍可手动处理。
+    function ShareAutoMount({ sessionId, inputActions, draftConversation }) {
+      react.useEffect(() => {
+        if (!nativeInput() || !sessionId || !inputActions || !draftConversation) return;
+        let alive = true, last = '', tries = 0;
+        const poll = async () => {
+          let state;
+          try { state = nativeJson('shareState'); } catch (e) { return; }
+          if (!alive || !state || !state.batch || state.batch.id === last) return;
+          const batch = state.batch; last = batch.id;
+          try { await mountShareOnce(batch, sessionId, inputActions, draftConversation, () => alive); }
+          catch (e) { if (alive && ++tries < 3) last = ''; }
+        };
+        poll(); const timer = setInterval(poll, 600);
+        return () => { alive = false; clearInterval(timer); };
+      }, [sessionId, inputActions, draftConversation]);
+      return null;
     }
 
     /** 到货横幅的文案（纯函数，方便隔离测试）：说清"是什么 / 多大 / 副本在哪"。 */
@@ -2665,6 +2702,17 @@ const PET_SVG = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 322 335
           inject: () => ({ draftConversation: scope.conversation }),
         }, AndroidDraftInput); });
       });
+      // 分享自动挂载：新会话还没发第一句时（hero 形态）dock 不渲染，
+      // 这里挂在只要会话存在就渲染的 input.overlay 上，保证分享能直接落到输入栏。
+      // 用 try 包住：老内核没有这个槽时最多少了这条路径，不能让整个插件回滚。
+      try {
+        ctx.slots.inject('conversation.input.overlay', () => {
+          ctx.inject(['conversation'], scope => { scope.slots.register({
+            name: 'conversation.input.overlay', id: 'android-share-automount', order: 10,
+            inject: () => ({ draftConversation: scope.conversation }),
+          }, ShareAutoMount); });
+        });
+      } catch (e) { /* 槽不存在就退回 dock 原有的自动挂载 */ }
       ctx.slots.inject('settings.section', () => ctx.slots.register({
         name: 'settings.section',
         id: 'android-console',

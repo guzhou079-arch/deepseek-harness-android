@@ -451,7 +451,7 @@ public class OverlayService extends Service {
         catch (Throwable ignored) {}
         return b.setContentTitle("DeepSeek Harness")
                 .setContentText(engineUp ? "引擎运行中 · 点按回到应用" : "引擎未运行 · 点按回到应用")
-                .setSmallIcon(R.drawable.ic_launcher)
+                .setSmallIcon(R.drawable.ic_whale_black)
                 .setContentIntent(pi)
                 .setOngoing(true)
                 .build();
@@ -1562,7 +1562,9 @@ public class OverlayService extends Service {
                 streamSessionId = null;
                 maybeStreamCard();              // 立刻试一次（有内容就飘）
             }
-            try { if (fluidBtn != null) fluidBtn.setText(fluidLabel()); } catch (Throwable ignored) {}
+            try {
+                if (fluidBtn != null) { fluidBtn.setText(fluidLabel()); paintToggle(fluidBtn, cardAutoShow); }
+            } catch (Throwable ignored) {}
         } catch (Throwable ignored) {}
     }
 
@@ -2468,10 +2470,11 @@ public class OverlayService extends Service {
         // 现在：面板固定宽（最大 304dp，窄屏留 20dp 边），按钮分「常用」「高级」两行。
         panelView = new LinearLayout(this);
         panelView.setOrientation(LinearLayout.VERTICAL);
-        panelView.setPadding(dp(12), dp(10), dp(12), dp(10));
+        panelView.setPadding(dp(11), dp(9), dp(11), dp(9));
         int screenWPx = getResources().getDisplayMetrics().widthPixels;
-        panelWidthPx = Math.min(dp(304), screenWPx - dp(40));
-        if (panelWidthPx < dp(200)) panelWidthPx = Math.max(dp(160), screenWPx - dp(24));
+        // v2.11：304dp 在 371dp 宽的屏上占到 82%，用户嫌"快铺满全屏" → 收到 272dp（约 73%）。
+        panelWidthPx = Math.min(dp(272), screenWPx - dp(36));
+        if (panelWidthPx < dp(190)) panelWidthPx = Math.max(dp(150), screenWPx - dp(24));
         panelView.setLayoutParams(new LinearLayout.LayoutParams(
                 panelWidthPx, LinearLayout.LayoutParams.WRAP_CONTENT));
         GradientDrawable pbg = new GradientDrawable();
@@ -2540,6 +2543,32 @@ public class OverlayService extends Service {
         topSep.setLayoutParams(topSepLp);
         panelView.addView(topSep);
 
+        // ===== v2.10 能力面板：六个看得见、点得动的入口 =====
+        // 位置刻意摆在状态区正下方：这是面板里唯一「图标 + 一句话就懂」的一块，
+        // 其余都是文字胶囊，混在一起会被淹没。
+        String[][] caps = {
+                {"截图",   "camera",          "截一张当前屏幕的图，然后把图发给我"},
+                {"翻译",   "languages",       "读一下我的剪贴板，把里面的内容翻译成中文给我"},
+                {"朗读",   "volume-2",        "读一下我的剪贴板，用语音把内容朗读出来"},
+                {"剪贴板", "clipboard",       "看看我剪贴板里现在是什么内容"},
+                {"备份",   "database-backup", "帮我做一次全站备份"},
+                {"体检",   "stethoscope",     "跑一次 dsh doctor，把体检结果告诉我"},
+        };
+        // 一行六个，不是两行三列：面板宽度固定 304dp，两行要吃掉约 145dp，
+        // 整块面板会从 ~280dp 涨到 ~424dp —— 在 443dp 宽的屏上几乎盖住半屏。
+        // 挤成一行后图标 18dp + 9sp 标签，总高约 45dp，代价是小字，换来面板矮回去。
+        LinearLayout capRow = new LinearLayout(this);
+        capRow.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams crlp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        crlp.topMargin = dp(6);
+        capRow.setLayoutParams(crlp);
+        for (int ccol = 0; ccol < caps.length; ccol++) {
+            String[] c = caps[ccol];
+            capRow.addView(capCard(c[0], c[1], c[2]));
+        }
+        panelView.addView(capRow);
+
         // v1.9 虚拟屏预览（默认隐藏）：悬浮窗实时显示虚拟屏画面
         vscreenImageView = new ImageView(this);
         LinearLayout.LayoutParams vsp = new LinearLayout.LayoutParams(dp(176), dp(298));
@@ -2560,7 +2589,7 @@ public class OverlayService extends Service {
         chatRow.setGravity(Gravity.CENTER_VERTICAL);
         LinearLayout.LayoutParams crp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        crp.topMargin = dp(8);
+        crp.topMargin = dp(6);
         chatRow.setLayoutParams(crp);
 
         final android.widget.EditText chatInput = new android.widget.EditText(this);
@@ -2576,7 +2605,7 @@ public class OverlayService extends Service {
         chatInput.setBackground(ibg);
         chatInput.setPadding(dp(8), 0, dp(8), 0);
         // v2.00：输入框和发送按钮同高（38dp），不再用 WRAP_CONTENT 让行高被发送按钮拽高
-        chatInput.setLayoutParams(new LinearLayout.LayoutParams(0, dp(38), 1f));
+        chatInput.setLayoutParams(new LinearLayout.LayoutParams(0, dp(34), 1f));
         chatRow.addView(chatInput);
         chatInputView = chatInput;   // v1.67：收起面板时要用它还焦点（原来拿不到，只能靠失焦回调）
 
@@ -2665,7 +2694,7 @@ public class OverlayService extends Service {
         sendBtn.setMinWidth(0);
         sendBtn.setMinimumHeight(0);
         sendBtn.setMinimumWidth(0);
-        LinearLayout.LayoutParams sendLp = new LinearLayout.LayoutParams(dp(56), dp(38));
+        LinearLayout.LayoutParams sendLp = new LinearLayout.LayoutParams(dp(50), dp(34));
         sendLp.leftMargin = dp(6);
         sendBtn.setLayoutParams(sendLp);
         sendBtn.setOnClickListener(new View.OnClickListener() { @Override public void onClick(View v) {
@@ -2720,7 +2749,7 @@ public class OverlayService extends Service {
         primaryRow.setOrientation(LinearLayout.HORIZONTAL);
         LinearLayout.LayoutParams prp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        prp.topMargin = dp(9);
+        prp.topMargin = dp(7);
         primaryRow.setLayoutParams(prp);
         // v1.38：回复区平时是收着的，所以「刷新」要能**把它拉出来**，不能只读不显示。
         primaryRow.addView(pillButton("刷新", new Runnable() { @Override public void run() {
@@ -2921,11 +2950,14 @@ public class OverlayService extends Service {
         b.setText(text);
         b.setAllCaps(false);
         b.setTextSize(TypedValue.COMPLEX_UNIT_PX, getResources().getDimension(R.dimen.text_caption));
-        b.setTextColor(quiet ? getColor(R.color.panel_text_bright) : getColor(R.color.accent_brand));
+        // v2.11：原来常用键是「纯白底 + 主色字」，一屏里三个白块全像主按钮，喧宾夺主。
+        // 改成玻璃档：常用 0x24FFFFFF 淡底亮字，次要 0x14FFFFFF 更淡更暗；
+        // 整个面板只留「发送」一个主色实心键，开关态另用 paintToggle() 上主色。
+        b.setTextColor(quiet ? getColor(R.color.panel_text_dim) : getColor(R.color.panel_text_bright));
         b.setTypeface(null, Typeface.BOLD);
         GradientDrawable bg = new GradientDrawable();
-        bg.setColor(quiet ? 0x22FFFFFF : 0xFFFFFFFF);
-        bg.setCornerRadius(dp(11));
+        bg.setColor(quiet ? 0x14FFFFFF : 0x24FFFFFF);
+        bg.setCornerRadius(dp(10));
         b.setBackground(bg);
         b.setSingleLine(true);
         b.setPadding(dp(4), 0, dp(4), 0);
@@ -2933,8 +2965,8 @@ public class OverlayService extends Service {
         b.setMinWidth(0);
         b.setMinimumHeight(0);
         b.setMinimumWidth(0);
-        b.setHeight(dp(25));
-        LinearLayout.LayoutParams lp2 = new LinearLayout.LayoutParams(0, dp(25), 1f);
+        b.setHeight(dp(22));
+        LinearLayout.LayoutParams lp2 = new LinearLayout.LayoutParams(0, dp(22), 1f);
         lp2.leftMargin = dp(3);
         lp2.rightMargin = dp(3);
         b.setLayoutParams(lp2);
@@ -2943,6 +2975,110 @@ public class OverlayService extends Service {
         }});
         addNativePressFeedback(b);
         return b;
+    }
+
+    /**
+     * v2.11：开关型胶囊的「开 / 关」两种外观。
+     *
+     * 用户原话：「按钮的开启和关闭效果，你没做好」。原来开关只换文字不换样子 ——
+     * 开着和关着一个长相，光看面板根本不知道虚拟屏/流体云现在是什么状态。
+     *   ON  = 主色实心 + 白字
+     *   OFF = 玻璃淡底 + 暗字
+     * 文字仍然写「点下去会发生什么」（开虚拟屏 / 关虚拟屏），颜色负责表达"现在是什么态"。
+     */
+    private void paintToggle(Button b, boolean on) {
+        if (b == null) return;
+        try {
+            GradientDrawable bg = new GradientDrawable();
+            bg.setCornerRadius(dp(10));
+            if (on) {
+                bg.setColor(getColor(R.color.accent_brand));
+                b.setTextColor(0xFFFFFFFF);
+            } else {
+                bg.setColor(0x1AFFFFFF);
+                b.setTextColor(getColor(R.color.panel_text_dim));
+            }
+            b.setBackground(bg);
+        } catch (Throwable ignored) {}
+    }
+
+    /**
+     * v2.10 能力面板：图标 + 文字的小卡片。
+     *
+     * 为什么是卡片而不是再加一排胶囊：这六件事是「点一下就让 AI 干活」，靠图标一眼认出来，
+     * 纯文字胶囊只能靠读字。图标是 Lucide（ISC 协议）转的 PNG，放在 assets/icons/。
+     *
+     * 为什么不放 res/drawable：新增一个 drawable 要改 resources.arsc，得要 aapt2；
+     * 这台机器只有 javac + d8，没有 aapt2。assets 不受 arsc 约束，可以随便加，
+     * 代价是只能运行时装（BitmapFactory）——不能写 R.drawable.xxx。
+     */
+    private LinearLayout capCard(final String label, String iconAsset, final String prompt) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setGravity(Gravity.CENTER);
+        GradientDrawable cbg = new GradientDrawable();
+        cbg.setColor(0x1FFFFFFF);
+        cbg.setCornerRadius(dp(11));
+        card.setBackground(cbg);
+        card.setPadding(dp(1), dp(4), dp(1), dp(4));
+
+        ImageView iv = new ImageView(this);
+        java.io.InputStream in = null;
+        try {
+            in = getAssets().open("icons/" + iconAsset + ".png");
+            iv.setImageBitmap(android.graphics.BitmapFactory.decodeStream(in));
+        } catch (Throwable ignored) {
+            // 图标缺了不影响功能：卡片退化成纯文字入口
+        } finally {
+            if (in != null) try { in.close(); } catch (Throwable ignored) {}
+        }
+        card.addView(iv, new LinearLayout.LayoutParams(dp(17), dp(17)));
+
+        TextView tv = new TextView(this);
+        tv.setText(label);
+        tv.setTextColor(getColor(R.color.panel_text_bright));
+        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 9);
+        tv.setGravity(Gravity.CENTER);
+        tv.setSingleLine(true);
+        LinearLayout.LayoutParams tvlp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        tvlp.topMargin = dp(2);
+        card.addView(tv, tvlp);
+
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        lp.leftMargin = dp(2);
+        lp.rightMargin = dp(2);
+        card.setLayoutParams(lp);
+        card.setOnClickListener(new View.OnClickListener() { @Override public void onClick(View v) {
+            submitCapability(label, prompt);
+        }});
+        addNativePressFeedback(card);
+        return card;
+    }
+
+    /**
+     * 能力卡片的提交路径：和聊天输入框**走同一条链**（排队进当前会话 → 自动等回复）。
+     * 区别只在文案是预设的。所以这里刻意复用 doSend 的那套动作，别另写一份。
+     */
+    private void submitCapability(final String label, final String prompt) {
+        if (rootView == null) return;
+        new Thread(new Runnable() { @Override public void run() {
+            final SendResult res = sendPrompt(prompt);
+            rootView.post(new Runnable() { @Override public void run() {
+                if (res.error != null) {
+                    android.widget.Toast.makeText(OverlayService.this,
+                            label + "：✗ " + res.error, android.widget.Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                android.widget.Toast.makeText(OverlayService.this,
+                        label + " 已提交", android.widget.Toast.LENGTH_SHORT).show();
+                markTurnStart();
+                showCard("正在生成…");
+                showSentEcho(prompt);
+                startReplyWait(res.sessionId, prompt);
+            }});
+        }}, "ovl-cap").start();
     }
 
     /** v2.00：聊天发送状态（“发送中…”/“已发送 ✓”）显示在输入行下方，空串自动隐藏。 */
@@ -3189,7 +3325,9 @@ public class OverlayService extends Service {
         OverlayService s = instance;
         if (s == null) return false;
         s.setFluid(on);
-        return s.cardAutoShow == on;
+        // v2.12：原来写 `s.cardAutoShow == on` —— 关掉时是 false==false → 返回 true，
+        // 页面把"已关"读成"已开"，于是显示成关不掉。返回**真实状态**。
+        return s.cardAutoShow;
     }
 
     /** 悬浮屏（虚拟屏预览）当前是否在小鲸鱼上实时拉帧。 */
@@ -3204,7 +3342,8 @@ public class OverlayService extends Service {
         if (s == null) return false;
         if (on) s.startVscreenPreview();
         else s.stopVscreenPreview();
-        return s.vscreenPreviewRunning == on;
+        // v2.12：同 setFluidFromBridge，返回真实状态。
+        return s.vscreenPreviewRunning;
     }
 
     /**
@@ -3577,8 +3716,15 @@ public class OverlayService extends Service {
                 destroyBtn.setVisibility(vs ? View.VISIBLE : View.GONE);
             }
             // v2.00：按钮文字跟状态走（原来永远写「开虚拟屏」，运行中也显示“开”）
-            if (vscreenBtn != null) vscreenBtn.setText(vs ? "关虚拟屏" : "开虚拟屏");
-            if (fluidBtn != null) fluidBtn.setText(fluidLabel());
+            // v2.11：再加颜色 —— 文字说明"点了会怎样"，颜色说明"现在是什么态"
+            if (vscreenBtn != null) {
+                vscreenBtn.setText(vs ? "关虚拟屏" : "开虚拟屏");
+                paintToggle(vscreenBtn, vs);
+            }
+            if (fluidBtn != null) {
+                fluidBtn.setText(fluidLabel());
+                paintToggle(fluidBtn, cardAutoShow);
+            }
         } catch (Throwable ignored) {}
     }
 

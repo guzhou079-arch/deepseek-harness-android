@@ -72,7 +72,7 @@ public class AlarmReceiver extends BroadcastReceiver {
             Intent open = new Intent(ctx, MainActivity.class).setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_NEW_TASK);
             PendingIntent pi = PendingIntent.getActivity(ctx, 0, open, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
             Notification.Builder b = Build.VERSION.SDK_INT >= 26 ? new Notification.Builder(ctx, channel) : new Notification.Builder(ctx);
-            nm.notify(9001, b.setContentTitle("⏰ 定时任务").setContentText(text).setSmallIcon(R.drawable.ic_launcher)
+            nm.notify(9001, b.setContentTitle("⏰ 定时任务").setContentText(text).setSmallIcon(R.drawable.ic_whale_black)
                     .setContentIntent(pi).setAutoCancel(true).build());
         } catch (Throwable t) { ScheduleExecutor.log(ctx, "任务通知失败: " + t.toString()); }
     }

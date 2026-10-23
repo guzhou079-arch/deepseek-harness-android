@@ -136,7 +136,7 @@ public class EngineService extends Service {
         }
         return b.setContentTitle(title)
                 .setContentText(text)
-                .setSmallIcon(R.drawable.ic_launcher)
+                .setSmallIcon(R.drawable.ic_whale_black)
                 .setContentIntent(pi)
                 .setOngoing(true)   // 常驻不可滑动删除
                 .setPriority(Notification.PRIORITY_LOW)

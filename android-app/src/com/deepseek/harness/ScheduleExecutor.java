@@ -161,7 +161,7 @@ public final class ScheduleExecutor {
             String text = summary != null && summary.length() > 200 ? summary.substring(0, 200) : summary;
             android.app.Notification n = b.setContentTitle(title)
                     .setContentText(text)
-                    .setSmallIcon(R.drawable.ic_launcher)
+                    .setSmallIcon(R.drawable.ic_whale_black)
                     .setContentIntent(pi)
                     .setAutoCancel(true)
                     .build();
