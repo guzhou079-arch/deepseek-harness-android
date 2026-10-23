@@ -13,21 +13,21 @@
 
 </div>
 
-**DeepSeek Harness**, packaged as a ready-to-install **Android APK** — one that **builds itself**:
-edit the code on the phone, then `javac → dex → package → sign → release`, with no computer in the loop.
+**DeepSeek Harness, installable as an Android APK — no Termux, no root, no computer.**
 
-**No Termux, no root, no setup** — the terminal, file access and command execution all run inside the app,
-and 21 skills come bundled.
+Screen reading, taps, typing, a virtual display and scheduled tasks all run inside the app; 21 skills ship bundled; paste your own model API key and go.
+**What sets it apart: the app builds itself** — edit code on the phone and run `javac → dex → repackage → sign → release` without a PC.
 
-| What you get | Detail |
+**[⬇ Download the latest APK](https://github.com/guzhou079-arch/deepseek-harness-android/releases/latest)** (~95 MB, Android 8.0+) · [Install & requirements](docs/en/install.md) · [FAQ](docs/en/faq.md) · [Upgrade & rescue](docs/en/upgrade-and-rescue.md)
+
+| Highlight | Detail |
 |---|---|
-| 🐳 **Floating ball / desktop pet** | Tap the ball and it "speaks": lines, account balance, usage today, last-turn cost, peak/off-peak hints |
-| ☁️ **Fluid notification card** | While the AI is writing, a capsule appears under the status bar; tap to expand into a card you can scroll by hand |
-| 🎛️ **Console inside settings** | The native console and the web settings page are fused: engine control, rescue mode, permission overview, plugin switches, time-machine backup |
-| 📱 **Phone automation** | Screen reading, tapping, text input, notification access, scheduled tasks, virtual display |
-| 🔧 **Self-building on the phone** | javac → dex → package → sign → release, all on-device (the build environment is downloaded on demand) |
-| 🧩 **21 bundled skills** | Ready out of the box — no plugin hunting: diagrams, slide decks, storyboards, memory hub, Office batch processing, Word/公文 publishing, Excel multi-sheet alignment, meeting notes, business mail, local RAG search, full-site backup, phone automation, cross-vendor review, effort tiering, web crawling, code craft, data insight, deep research, scrum planning, life hub, voice |
-| ⬇️ **Quick install** | Download the APK → allow installing unknown apps → open it, follow the permission guide → paste your own model API key |
+| 📱 **Phone automation** | Accessibility screen reading, taps, typing, notification access, scheduled tasks, and a virtual display so the AI works while your own screen stays yours |
+| 🐳 **Floating ball / desktop pet** | Tap the ball and it "speaks": lines, balance, usage today, last-turn cost, peak/off-peak hints |
+| ☁️ **Reply capsule** | While the AI writes, a capsule appears under the status bar; tap it for a scrollable card |
+| 🎛️ **Console inside settings** | Engine control, rescue mode, permission overview, plugin switches, time-machine backup |
+| 🧩 **21 bundled skills** | Diagrams · slide decks · storyboards · memory hub · Office batch · Word/公文 · Excel · meeting notes · business mail · local RAG · full-site backup · cross-vendor review · web crawling · code craft · data insight · deep research · scrum planning · life hub · voice |
+| 🔧 **Builds itself on the phone** | `javac → d8 → repackage → sign → release`; the build environment is downloaded on demand (~193 MB) |
 
 ## Install in three steps
 
@@ -36,6 +36,9 @@ and 21 skills come bundled.
 3. Paste your own model API key in the settings page and start talking to it. No Termux, no root, no computer.
 
 Each release note carries the APK's **SHA-256**, so you can verify the file before installing it.
+
+> ⭐ If this saves you time, a star is the best way to say thanks — it also tells me the maintenance is worth it.
+> Install / usage / upgrade problems → [Discussions](https://github.com/guzhou079-arch/deepseek-harness-android/discussions); bugs and ideas → [Issues](https://github.com/guzhou079-arch/deepseek-harness-android/issues).
 
 > **In mainland China, where `github.com` often will not open?** The first line of every release note is an
 > accelerator link (`ghproxy`-style prefix + the official URL). You can also prefix the official URL yourself:

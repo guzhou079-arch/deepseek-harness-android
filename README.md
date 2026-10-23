@@ -16,30 +16,25 @@
 </div>
 
 
-把 **DeepSeek Harness**（DeepSeek 的 AI Agent）打包成**装个 APK 就能用**的安卓版。
+**把 DeepSeek Harness 装进安卓：一个 APK，不用 Termux、不用 root、不用电脑。**
 
-**它最不一样的地方：能在手机上给自己出包** —— 改完代码直接在手机里 `javac → dex → 打包 → 签名 → 发版`，
-不需要电脑；**也不用 Termux、不用 root、不用配环境**，终端、文件访问、命令执行全部在 App 内运行，
-21 款技能随包开箱即用。
+读屏、点击、输入、虚拟屏、定时任务都在 App 内跑，21 款技能随包，装上填个 API Key 就能用。
+**最不一样的地方：它能在手机上给自己出包** —— 改完代码直接在手机里 `javac → dex → 重打包 → 签名 → 发版`。
 
-> **English** — DeepSeek Harness packaged as a ready-to-install Android APK, no Termux / no root / no setup:
-> the terminal, file access and command execution all run inside the app, with 21 skills bundled.
-> **What sets it apart: it builds, packages, signs and releases itself on the phone — no computer needed.**
+**[⬇ 下载最新 APK](https://github.com/guzhou079-arch/deepseek-harness-android/releases/latest)**（约 95 MB，Android 8.0+） · [安装与要求](docs/安装与要求.md) · [常见问题](docs/常见问题.md) · [升级与救援](docs/升级与救援.md)
 
-| 能干什么 | 说明 |
+| 亮点 | 说明 |
 |---|---|
-| 🐳 **悬浮球 / 桌宠** | 单击球就"说话"：台词 / 账户余额 / 今日已用 / 上一轮消耗 / 峰谷与预算提醒 |
-| ☁️ **流体云回复卡** | AI 正在写的时候，屏幕顶部浮出胶囊；点开成卡片看正文，可手动上下翻 |
-| 🎛️ **设置页内置控制台** | 原生控制台与网页设置页深度融合：引擎管理、救援模式、权限总览、插件开关、时光机备份 |
-| 📱 **手机自动化** | 读屏、点击、输入、通知读取、定时任务、虚拟屏 |
-| 🔧 **手机自己出包** | javac → dex → 打包 → 签名 → 发版，全程不需要电脑（构建环境 App 内按需下载） |
-| 🧩 **随包技能 21 款** | 开箱即用，不用自己装插件：架构图 `dsh-diagram` · 演示稿 `dsh-slides` · 短视频分镜 `dsh-storyboard` · 记忆中枢 `dsh-memory-sync` · Office 批处理 `dsh-doc-tidy` · Word/公文出版 `dsh-doc-publisher` · Excel 多表对齐 `dsh-excel-copilot` · 会议纪要 `dsh-meeting-copilot` · 邮件公函 `dsh-mail-craft` · 本地 RAG 检索 `dsh-doc-search` · 时光机备份 `dsh-backup` · 手机自动化 `dsh-mobile` · 跨厂商会审 `dsh-review` · 智力分档 `dsh-tier` · 网页抓取 `dsh-web-crawler` · 代码工程 `dsh-code-craft` · 数据洞察 `dsh-data-craft` · 深度调研 `dsh-deep-research` · 敏捷排期 `dsh-scrum-master` · 生活中枢 `dsh-life` · 语音交互 `dsh-voice` |
+| 📱 **手机自动化** | 无障碍读屏 / 点击 / 输入、虚拟屏、通知读取、定时任务；AI 在虚拟屏里干活，你的主屏照常用 |
+| 🐳 **悬浮球 / 桌宠** | 单击即"说话"：台词、账户余额、今日已用、上一轮消耗、峰谷提醒 |
+| ☁️ **流体云回复卡** | AI 写作时顶部浮出胶囊，点开成可上下翻的卡片 |
+| 🎛️ **内置控制台** | 引擎管理、救援模式、权限总览、插件开关、时光机备份 |
+| 🧩 **21 款技能随包** | 架构图 · 演示稿 · 短视频分镜 · 记忆中枢 · Office 批处理 · Word/公文 · Excel 多表 · 会议纪要 · 邮件公函 · 本地 RAG · 全站备份 · 跨厂商会审 · 网页抓取 · 代码工程 · 数据洞察 · 深度调研 · 敏捷排期 · 生活中枢 · 语音交互 |
+| 🔧 **手机上自己出包** | `javac → d8 → 重打包 → 签名 → 发版`，构建环境按需下载（约 193MB） |
 
-> ⭐ **如果它帮你省了时间，给个 Star 是最好的反馈** —— 也让我知道继续维护值不值得。
-> **装不上 / 怎么用 / 升级出问题** → 到 [提问与交流（Discussions）](https://github.com/guzhou079-arch/deepseek-harness-android/discussions) 发帖；
-> **Bug 与功能建议** → 开 [Issue](https://github.com/guzhou079-arch/deepseek-harness-android/issues)。
+> **English** — DeepSeek Harness as an installable Android APK: no Termux, no root, no PC. Screen reading, taps, typing, virtual display and scheduled tasks all run inside the app; 21 skills are bundled; and the app **builds, signs and releases its own APK on the phone**.
 
-### 下载安装（三步）
+### 三步装好
 
 1. 打开 **[Releases](https://github.com/guzhou079-arch/deepseek-harness-android/releases/latest)**，下载最新的 `DeepSeekHarness-vX.Y-dist.apk`（约 95 MB，Android 8.0 及以上）；
 2. 安装后按首次引导给权限（无障碍、通知、悬浮窗等，可随时在系统设置里收回）；
@@ -50,6 +45,9 @@
 > `https://ghproxy.net/` 、 `https://ghfast.top/` 、 `https://gh-proxy.com/`。
 
 每个 Release 的说明里带该 APK 的 **SHA-256**，装前可以核对。
+
+> ⭐ 如果它帮你省了时间，给个 Star 是最好的反馈 —— 也让我知道继续维护值不值得。
+> 装不上 / 怎么用 / 升级出问题 → [Discussions](https://github.com/guzhou079-arch/deepseek-harness-android/discussions)；Bug 与建议 → [Issue](https://github.com/guzhou079-arch/deepseek-harness-android/issues)。
 
 **文档**：[安装与系统要求](docs/安装与要求.md) · [权限与隐私](docs/权限与隐私.md) · [常见问题](docs/常见问题.md) · [升级与救援](docs/升级与救援.md) · [自建环境与出包](docs/自建环境与出包.md)
 
