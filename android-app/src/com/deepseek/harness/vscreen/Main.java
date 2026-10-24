@@ -20,6 +20,7 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
@@ -174,8 +175,12 @@ public class Main {
         final Object frameLock = new Object();
         Bitmap frame;             // 最新一帧（复用，读取方必须持锁拷贝）
         long frameTs;
+        long lastInputTs;         // 最近一次注入触摸/按键的时间（判「点了却没出帧」的冻屏）
         volatile boolean pumping = true;
         volatile boolean sawFrame = false;
+        // 息屏后系统进 doze、CPU 会睡 —— 虚拟屏里的 App 就不再出帧、也不处理输入。
+        // 只要这块屏还在，就持一个 PARTIAL_WAKE_LOCK 把 CPU 顶住；关屏时一起放掉。
+        android.os.PowerManager.WakeLock wakeLock;
 
         Session(int displayId, int width, int height, VirtualDisplay vd, ImageReader reader) {
             this.displayId = displayId;
@@ -187,6 +192,14 @@ public class Main {
 
         void release() {
             pumping = false;
+            try {
+                if (wakeLock != null) {
+                    wakeLock.release();
+                    wakeLock = null;
+                }
+            } catch (Throwable t) {
+                log("wakeLock.release 失败: " + t.getMessage(), null);
+            }
             synchronized (frameLock) {
                 if (frame != null) {
                     frame.recycle();
@@ -207,10 +220,81 @@ public class Main {
     }
 
     /**
+     * 持一个 PARTIAL_WAKE_LOCK：息屏后 CPU 不睡，虚拟屏里的 App 才能继续出帧、继续吃输入。
+     * shell 身份带 WAKE_LOCK 权限；拿不到只是回到旧行为，必须 log 留痕。
+     */
+    private static android.os.PowerManager.WakeLock acquireCpuWakeLock(String tag) {
+        try {
+            android.os.PowerManager pm =
+                    (android.os.PowerManager) sContext.getSystemService(Context.POWER_SERVICE);
+            if (pm == null) {
+                log("wakeLock 跳过：拿不到 PowerManager", null);
+                return null;
+            }
+            android.os.PowerManager.WakeLock wl =
+                    pm.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, tag);
+            wl.setReferenceCounted(false);
+            wl.acquire();
+            log("wakeLock 已持有: " + tag, null);
+            return wl;
+        } catch (Throwable t) {
+            log("wakeLock 获取失败（息屏后 CPU 可能被挂起）: " + t.getMessage(), null);
+            return null;
+        }
+    }
+
+    /**
      * 帧泵：持续 acquireLatestImage 并保存最新帧。
      * ImageReader 只有在被 acquire 后才会继续交付新帧，所以必须常驻消费；
      * 屏幕静止时没有新帧，靠缓存的最后一帧对外服务。
      */
+    /**
+     * 把该 display 的输入法策略设为 LOCAL（ImePolicy.LOCAL = 0）。
+     *
+     * 为什么：虚拟屏默认沿用主屏的输入法策略，焦点一进输入框，系统就把 IME 窗口
+     * 放到**主屏**（用户正在用的那块屏）上 —— 键盘突然弹出又突然收回，正是这个。
+     * Operit 的 shower 服务端在建屏后立刻调 setDisplayImePolicy(displayId, LOCAL)。
+     *
+     * 反射而非直接调用：该 API 是 30+ 的隐藏接口（WindowManager 实现类上），
+     * 失败不致命 —— 退回旧行为，但必须留痕，否则以后排查会当成"没生效"。
+     */
+    private static void applyImePolicyLocal(int displayId) {
+        if (Build.VERSION.SDK_INT < 30) {
+            log("setDisplayImePolicy 跳过：SDK " + Build.VERSION.SDK_INT + " < 30", null);
+            return;
+        }
+        try {
+            Object wm = sContext.getSystemService(Context.WINDOW_SERVICE);
+            if (wm == null) {
+                log("setDisplayImePolicy 跳过：拿不到 WindowManager", null);
+                return;
+            }
+            Method m = wm.getClass().getMethod("setDisplayImePolicy", int.class, int.class);
+            m.invoke(wm, displayId, 0 /* ImePolicy.LOCAL */);
+            log("setDisplayImePolicy LOCAL display=" + displayId, null);
+        } catch (Throwable t) {
+            log("setDisplayImePolicy 失败（键盘仍会落到主屏）: " + t, null);
+        }
+    }
+
+    /** 距最新一帧的毫秒数（还没有帧时返回 -1）。 */
+    private static long frameAgeMs(Session s) {
+        long ts = s.frameTs;
+        return ts <= 0 ? -1 : System.currentTimeMillis() - ts;
+    }
+
+    /**
+     * 注入过触摸、但 3 秒内没有出新帧 —— 「点击静默丢弃 + 画面定格」的判据。
+     * 只报警不改行为：真冻住了唯一可靠的办法是重建虚拟屏（见 lesson-vscreen-doze-freeze）。
+     */
+    private static boolean suspectFrozen(Session s) {
+        long in = s.lastInputTs;
+        if (in <= 0 || !s.sawFrame) {
+            return false;
+        }
+        return System.currentTimeMillis() - in > 3000 && s.frameTs < in;
+    }
+
     private static void startFramePump(final Session s) {
         Thread t = new Thread(new Runnable() {
             @Override
@@ -383,8 +467,11 @@ public class Main {
                     | flag("VIRTUAL_DISPLAY_FLAG_TOUCH_FEEDBACK_DISABLED");
         }
         if (Build.VERSION.SDK_INT >= 34) {
-            flags |= flag("VIRTUAL_DISPLAY_FLAG_OWN_FOCUS")
-                    | flag("VIRTUAL_DISPLAY_FLAG_DEVICE_DISPLAY_GROUP");
+            // 2026-10-24：去掉 DEVICE_DISPLAY_GROUP。它的语义是「把这块屏并进设备默认显示组」，
+            // 后果是主屏一息屏，整个显示组一起断电 —— 画面定格、注入的触摸被静默丢弃
+            // （lesson-vscreen-doze-freeze 就是这么来的）。显示组交给 33+ 已设的 OWN_DISPLAY_GROUP
+            // （自成一组，不随默认组断电），这里只保留 OWN_FOCUS。
+            flags |= flag("VIRTUAL_DISPLAY_FLAG_OWN_FOCUS");
         }
 
         ImageReader reader = null;
@@ -404,8 +491,12 @@ public class Main {
                 return err("createVirtualDisplay 返回空 display");
             }
             int id = vd.getDisplay().getDisplayId();
+            // 照 Operit：输入法策略设成 LOCAL，键盘只在虚拟屏内弹，
+            // 不再把用户主屏的输入法拉起来（2026-10-24 实测痛点）。
+            applyImePolicyLocal(id);
 
             Session s = new Session(id, w, h, vd, reader);
+            s.wakeLock = acquireCpuWakeLock("dsh:vscreen:" + id);
             sSessions.put(id, s);
             sCurrentDisplayId = id;
             startFramePump(s);
@@ -560,9 +651,14 @@ public class Main {
             int iw = bmp.getWidth();
             int ih = bmp.getHeight();
             bmp.recycle();
+            if (suspectFrozen(s)) {
+                log("警告：注入后 3s 无新帧（frameAge=" + frameAgeMs(s) + "ms），虚拟屏可能已冻死，需要重建", null);
+            }
             return "{\"ok\":true,\"path\":\"" + out.getAbsolutePath() + "\",\"displayId\":" + s.displayId
                     + ",\"screenW\":" + s.width + ",\"screenH\":" + s.height
                     + ",\"imageW\":" + iw + ",\"imageH\":" + ih
+                    + ",\"frameAgeMs\":" + frameAgeMs(s)
+                    + ",\"suspectFrozen\":" + suspectFrozen(s)
                     + ",\"scaleX\":1.0,\"scaleY\":1.0}";
         } catch (Throwable t) {
             bmp.recycle();
@@ -614,6 +710,7 @@ public class Main {
         cmd[3] = action;
         System.arraycopy(args, 0, cmd, 4, args.length);
         String out = execCapture(cmd);
+        s.lastInputTs = System.currentTimeMillis();
         if (!out.startsWith("exit=0")) {
             log("input " + action + " 失败: " + out, null);
             return err("注入失败：" + out.replace("\n", " "));
@@ -629,7 +726,9 @@ public class Main {
         return "{\"ok\":true,\"displayId\":" + s.displayId + ",\"running\":true,\"server\":true"
                 + ",\"build\":\"" + BUILD + "\""
                 + ",\"width\":" + s.width + ",\"height\":" + s.height
-                + ",\"hasFrame\":" + s.sawFrame + "}";
+                + ",\"hasFrame\":" + s.sawFrame
+                + ",\"frameAgeMs\":" + frameAgeMs(s)
+                + ",\"suspectFrozen\":" + suspectFrozen(s) + "}";
     }
 
     // ==================== HTTP ====================
