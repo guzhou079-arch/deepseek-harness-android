@@ -27,6 +27,14 @@ def scan(apk, overlay, wallpaper):
                 problems.append('duplicate payload entries')
             forbidden = r'dsh-bg-user|keystore|\.(?:p12|pfx)$|(?:^|/)AGENTS\.md$|selfbuild/|PATCH-NOTES|whale-shota|archive-2\.5d|\.(?:bak|orig|pre-lan)(?:-[\d.]+)?$|session\.v4\.jsonl|\.credentials|(?:^|/)review\.json|(?:^|/)skills-local/'
             problems.extend('forbidden filename: ' + n for n in names if re.search(forbidden, n, re.I))
+            problems.extend('purge filename: ' + n for n in names if 'purge' in n.lower())
+            profile = 'dshhome/profiles/web/package.json'
+            if profile not in names:
+                problems.append('missing distribution profile: ' + profile)
+            else:
+                dependencies = json.loads(inner.read(profile).decode('utf-8')).get('dependencies', {})
+                if not isinstance(dependencies, dict) or dependencies:
+                    problems.append('distribution profile dependencies must be empty')
             # Only distributable seed configuration may survive under dshhome.
             allowed = {'skills', 'cordis.patch.yml', 'profiles'}
             for n in names:
@@ -42,7 +50,13 @@ def scan(apk, overlay, wallpaper):
             own = set()
             for root, _, files in os.walk(overlay):
                 for f in files:
-                    own.add(os.path.relpath(os.path.join(root, f), overlay).replace(os.sep, '/'))
+                    full = os.path.join(root, f)
+                    rel = os.path.relpath(full, overlay).replace(os.sep, '/')
+                    own.add(rel)
+                    with open(full, 'rb') as source:
+                        data = source.read()
+                    if b'\0' not in data[:1024] and re.search(r'dsh-purge|\[dsh-purge\]', data.decode('utf-8', 'ignore')):
+                        problems.append('purge patch in overlay: ' + rel)
             own.update(n for n in names if n.startswith('dshhome/profiles/') or n.endswith('CHANGELOG.md'))
             patterns = {
                 'phone': r'(?<!\d)1[3-9]\d{9}(?!\d)',
@@ -94,7 +108,8 @@ def main():
         return 1
     report = {'schema': 1, 'kind': 'privacy', 'ok': True, 'apkSha256': before,
               'checks': {'filenames': True, 'wallpaperBytes': True, 'contents': True,
-                         'dshhomeAllowlist': True, 'background': True},
+                         'dshhomeAllowlist': True, 'background': True, 'purge': True,
+                         'profileDependencies': True},
               'scannerSha256': file_sha(__file__), 'overlay': os.path.abspath(args.overlay)}
     target = os.path.abspath(args.report)
     tmp = target + '.tmp-' + str(os.getpid())

@@ -3,11 +3,39 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import { project, sb, VERSION, CODE, insist, checkArtifact, checkBaseline, checkEvidence, writeJson } from './release-receipts.mjs';
 import { checkSynced } from './release-sync.mjs';
 const argv = process.argv.slice(2);
 const arg = (k, d) => { const i = argv.indexOf('--' + k); return i < 0 ? d : argv[i + 1]; };
 const REPO = 'guzhou079-arch/deepseek-harness-android', API = `https://api.github.com/repos/${REPO}`;
+
+export async function publishVerifiedRelease({ request, artifact, tag, commit, title, body, name }) {
+  let release = await request(`${API}/releases/tags/${tag}`, {}, true);
+  insist(!release || typeof release.draft === 'boolean', 'Release draft state unavailable');
+  const existingAsset = (release?.assets || []).find(a => a.name === name);
+  if (release && !release.draft) {
+    insist(existingAsset && existingAsset.size === artifact.apkSize && existingAsset.digest === 'sha256:' + artifact.apkSha256,
+      'Published release is incomplete; refusing to mutate it without a separate recovery decision');
+  }
+  const data = JSON.stringify({ tag_name: tag, target_commitish: commit, name: title, body, draft: release ? release.draft : true, prerelease: false });
+  release = await request(release ? `${API}/releases/${release.id}` : `${API}/releases`, { method: release ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, body: data });
+  let asset = (release.assets || []).find(a => a.name === name);
+  if (asset) insist(asset.size === artifact.apkSize && asset.digest === 'sha256:' + artifact.apkSha256, 'Existing asset differs; replacement needs a separate explicit decision');
+  else asset = await request(`https://uploads.github.com/repos/${REPO}/releases/${release.id}/assets?name=${encodeURIComponent(name)}`, { method: 'POST', headers: { 'Content-Type': 'application/vnd.android.package-archive', 'Content-Length': String(artifact.apkSize) }, body: fs.createReadStream(artifact.apk), duplex: 'half' });
+  const fresh = await request(`${API}/releases/tags/${tag}`), uploaded = fresh.assets.find(a => a.id === asset.id);
+  insist(uploaded && uploaded.state === 'uploaded' && uploaded.size === artifact.apkSize && uploaded.digest === 'sha256:' + artifact.apkSha256, 'Uploaded asset SHA-256 verification failed');
+  if (release.draft) {
+    release = await request(`${API}/releases/${release.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ draft: false }) });
+    insist(release.draft === false, 'Release did not leave draft state');
+  }
+  const finalRef = await request(`${API}/git/ref/tags/${tag}`); let finalObject = finalRef.object;
+  if (finalObject.type === 'tag') finalObject = (await request(`${API}/git/tags/${finalObject.sha}`)).object;
+  insist(finalObject.type === 'commit' && finalObject.sha === commit, 'Published tag does not match pushed source');
+  writeJson(artifact.apk + '.published.json', { schema: 1, kind: 'published', ok: true, repo: REPO, tag, sourceCommit: commit, apkSha256: artifact.apkSha256, assetId: uploaded.id, verifiedAt: new Date().toISOString() });
+  return uploaded;
+}
+
 async function main() {
   const artifactFile = arg('artifact', path.join(sb, 'out/release-v1.38-code70.json')), artifact = checkArtifact(artifactFile);
   const baseline = checkBaseline(arg('baseline', path.join(sb, 'out/baseline-v1.37.json')));
@@ -53,19 +81,9 @@ async function main() {
   if (!argv.includes('--go')) { console.log('Review complete; publishing requires explicit --go.'); process.exitCode = 1; return; }
   // Re-read immutable artifacts immediately before the first remote write.
   checkArtifact(artifactFile);
-  let release = await request(`${API}/releases/tags/${tag}`, {}, true);
-  const data = JSON.stringify({ tag_name: tag, target_commitish: commit, name: title, body, draft: false, prerelease: false });
-  release = await request(release ? `${API}/releases/${release.id}` : `${API}/releases`, { method: release ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, body: data });
-  let asset = (release.assets || []).find(a => a.name === name);
-  if (asset) insist(asset.size === artifact.apkSize && asset.digest === 'sha256:' + artifact.apkSha256, 'Existing asset differs; replacement needs a separate explicit decision');
-  // GitHub 的资产上传接口不接受 chunked（Node fetch 传流默认就是 chunked）→ 必须显式给长度，否则 400
-  else asset = await request(`https://uploads.github.com/repos/${REPO}/releases/${release.id}/assets?name=${encodeURIComponent(name)}`, { method: 'POST', headers: { 'Content-Type': 'application/vnd.android.package-archive', 'Content-Length': String(artifact.apkSize) }, body: fs.createReadStream(artifact.apk), duplex: 'half' });
-  const fresh = await request(`${API}/releases/tags/${tag}`), uploaded = fresh.assets.find(a => a.id === asset.id);
-  insist(uploaded && uploaded.state === 'uploaded' && uploaded.size === artifact.apkSize && uploaded.digest === 'sha256:' + artifact.apkSha256, 'Uploaded asset SHA-256 verification failed');
-  const finalRef = await request(`${API}/git/ref/tags/${tag}`); let finalObject = finalRef.object;
-  if (finalObject.type === 'tag') finalObject = (await request(`${API}/git/tags/${finalObject.sha}`)).object;
-  insist(finalObject.type === 'commit' && finalObject.sha === commit, 'Published tag does not match pushed source');
-  writeJson(artifact.apk + '.published.json', { schema: 1, kind: 'published', ok: true, repo: REPO, tag, sourceCommit: commit, apkSha256: artifact.apkSha256, assetId: uploaded.id, verifiedAt: new Date().toISOString() });
+  const uploaded = await publishVerifiedRelease({ request, artifact, tag, commit, title, body, name });
   console.log('Published and verified:', uploaded.browser_download_url);
 }
-main().catch(e => { console.error('✗ ' + e.message); process.exitCode = 1; });
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  main().catch(e => { console.error('✗ ' + e.message); process.exitCode = 1; });
+}

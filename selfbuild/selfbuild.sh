@@ -119,9 +119,9 @@ pack)
   [ "$PAY" = "-" ] && [ -z "$DEX" ] && [ -z "$ASSETS" ] && { echo "✗ 既没有 payload-new.zip 也没有 --dex/--asset"; exit 1; }
   [ -n "$DEX" ] && { [ -f "$DEX" ] || { echo "✗ 找不到 dex: $DEX"; exit 1; }; echo "  换 dex: $DEX"; }
   if [ -n "$DEX" ]; then
-    "$NODE" "$SB/lib/selfbuild.js" apk-pack "$BASE" "$PAY" "$UNSIGNED" --dex "$DEX" $ASSETS
+    "$NODE" "$SB/lib/selfbuild.js" apk-pack "$BASE" "$PAY" "$UNSIGNED" --dex "$DEX" --asset-receipt "$WORK/packed-assets.json" $ASSETS
   else
-    "$NODE" "$SB/lib/selfbuild.js" apk-pack "$BASE" "$PAY" "$UNSIGNED" $ASSETS
+    "$NODE" "$SB/lib/selfbuild.js" apk-pack "$BASE" "$PAY" "$UNSIGNED" --asset-receipt "$WORK/packed-assets.json" $ASSETS
   fi
   ;;
 mark)
@@ -214,6 +214,8 @@ verify)
       echo "  ✓ $AN ($ASZ B)"
     done < "$SB/required-assets.list"
   fi
+  echo '— pack 输入 asset 与最终 APK 必须逐字节一致 —'
+  "$NODE" "$SB/scripts/release-receipts.mjs" assets-check --apk "$APK" --assets "$WORK/packed-assets.json"
   if [ -f "$WORK/appbuild/out/compile-receipt.json" ]; then
     "$NODE" "$SB/scripts/release-receipts.mjs" compile-check --receipt "$WORK/appbuild/out/compile-receipt.json"
     "$NODE" "$SB/lib/selfbuild.js" dex-extract "$APK" "$WORK/check-classes.dex"

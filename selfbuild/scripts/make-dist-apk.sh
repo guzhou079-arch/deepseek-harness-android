@@ -69,7 +69,7 @@ fi
 # 防止把开发机上的用户插件 .pnpm / 个人状态打进发行包 —— 多一个条目就失败退出。
 PROF_MOD="$OVL/dshhome/profiles/web/node_modules"
 if [ -d "$PROF_MOD" ]; then
-  PROF_ALLOW="dsh-android-console dsh-plugin-auto-summary-policy dsh-plugin-session-rewind dsh-plugin-turn-notify dsh-session-delete dsh-codex-power-slider dsh-doc-media dsh-doc-actions @deepseek-ai"
+  PROF_ALLOW="dsh-android-console dsh-plugin-auto-summary-policy dsh-plugin-session-rewind dsh-plugin-turn-notify dsh-session-delete dsh-codex-power-slider dsh-doc-media dsh-doc-actions dsh-smart-search @deepseek-ai"
   for child in "$PROF_MOD"/* "$PROF_MOD"/.[!.]* "$PROF_MOD"/..?*; do
     [ -e "$child" ] || continue
     pname=$(basename "$child")
@@ -122,6 +122,6 @@ runlog "$PY" "$SB/scripts/scan-dist-privacy.py" --apk "$OUT" --overlay "$OVL" --
 runlog "$NODE" "$RECEIPTS" evidence --kind privacy --apk "$OUT" --report "$REPORT" --out "$OUT.privacy.json"
 restore_dist
 ARTIFACT="${DSH_ARTIFACT_RECEIPT:-$SB/out/release-v1.38-code70.json}"
-runlog "$NODE" "$RECEIPTS" artifact --apk "$OUT" --compile "$COMPILE" --payload "$SB/work/payload-new.zip" --checks "$SB/checks.manifest" --signature "$SIGNATURE" --out "$ARTIFACT"
+runlog "$NODE" "$RECEIPTS" artifact --apk "$OUT" --compile "$COMPILE" --payload "$SB/work/payload-new.zip" --checks "$SB/checks.manifest" --signature "$SIGNATURE" --assets "$SB/work/packed-assets.json" --out "$ARTIFACT"
 echo "✓ Exact artifact: $OUT"
 echo "✓ Artifact receipt: $ARTIFACT"

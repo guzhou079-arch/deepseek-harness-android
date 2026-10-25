@@ -111,12 +111,28 @@ export function apkIdentity(apk) {
     kernel: readEntry(apk, get('assets/dshroot_kernel_version.txt')).toString('utf8').trim(),
     revision: readEntry(apk, get('assets/dshroot_revision.txt')).toString('utf8').trim() };
 }
+export function checkPackedAssets(apk, receiptFile) {
+  const receipt = readJson(receiptFile);
+  insist(receipt.schema === 1 && receipt.kind === 'packed-assets' && Array.isArray(receipt.assets), 'Invalid packed asset receipt');
+  const entries = readZip(apk, { load: false }), names = new Set();
+  for (const asset of receipt.assets) {
+    insist(asset && typeof asset.name === 'string' && asset.name.startsWith('assets/') && !asset.name.split('/').includes('..'), 'Invalid packed asset name');
+    insist(!names.has(asset.name) && HASH.test(asset.sha256) && Number.isSafeInteger(asset.size) && asset.size >= 0, 'Invalid packed asset entry: ' + asset.name);
+    names.add(asset.name);
+    insist(shaFile(asset.source) === asset.sha256 && fs.statSync(asset.source).size === asset.size, 'Packed asset source changed: ' + asset.name);
+    const hit = entries.filter(e => e.name === asset.name);
+    insist(hit.length === 1, 'APK needs one packed asset: ' + asset.name);
+    const content = readEntry(apk, hit[0]);
+    insist(content.length === asset.size && shaBuffer(content) === asset.sha256, 'APK asset differs from pack input: ' + asset.name);
+  }
+  return { packedAssets: path.resolve(receiptFile), packedAssetsSha256: shaFile(receiptFile), assetCount: receipt.assets.length, assets: receipt.assets };
+}
 export function evidence(kind, apk, report, output) {
   insist(['privacy', 'isolated'].includes(kind), 'Unknown evidence kind');
   const identity = apkIdentity(apk), details = readJson(report);
   insist(details.schema === 1 && details.kind === kind && details.ok === true && details.apkSha256 === identity.apkSha256, 'Check report is not a passing report for this APK');
   const checks = details.checks;
-  if (kind === 'privacy') insist(checks?.filenames === true && checks.wallpaperBytes === true && checks.contents === true && checks.dshhomeAllowlist === true && checks.background === true, 'Privacy report incomplete');
+  if (kind === 'privacy') insist(checks?.filenames === true && checks.wallpaperBytes === true && checks.contents === true && checks.dshhomeAllowlist === true && checks.background === true && checks.purge === true && checks.profileDependencies === true, 'Privacy report incomplete');
   else insist(checks?.pidOwned === true && checks.rpc === true && checks.plugins === true && checks.native === true && checks.pending === 0 && checks.homeIsolated === true && Array.isArray(details.plugins) && ['session-rewind', 'turn-notify', 'auto-summary-policy'].every(n => details.plugins.includes(n)), 'Isolation report incomplete');
   const receipt = { schema: 1, kind, ok: true, completedAt: new Date().toISOString(), apk: identity.apk, apkSha256: identity.apkSha256, report: path.resolve(report), reportSha256: shaFile(report), details };
   writeJson(output, receipt); return receipt;
@@ -125,8 +141,8 @@ export function checkEvidence(file, kind, apkHash) {
   const receipt = readJson(file);
   insist(receipt.schema === 1 && receipt.kind === kind && receipt.ok === true && receipt.apkSha256 === apkHash && shaFile(receipt.report) === receipt.reportSha256, 'Missing/stale ' + kind + ' receipt'); return receipt;
 }
-export function recordArtifact({ apk, compile, payload, checks, signature, output }) {
-  const built = checkCompile(compile), identity = apkIdentity(apk), checked = checkPayload(payload, checks, true);
+export function recordArtifact({ apk, compile, payload, checks, signature, assets, output }) {
+  const built = checkCompile(compile), identity = apkIdentity(apk), checked = checkPayload(payload, checks, true), checkedAssets = checkPackedAssets(apk, assets);
   insist(identity.dexSha256 === built.dexSha256 && identity.payloadSha256 === shaFile(payload), 'APK dex/payload differs from build inputs');
   insist(identity.kernel && /^[0-9]{14}$/.test(identity.revision), 'APK kernel/revision markers invalid');
   const pkg = readZip(payload, { load: false }).find(e => e.name === 'dshroot/lib/node_modules/@deepseek-ai/dsh/package.json');
@@ -135,7 +151,7 @@ export function recordArtifact({ apk, compile, payload, checks, signature, outpu
   insist(/Verifies/.test(log) && /Verified using v[23] scheme.*true/.test(log) && /Signer #1 certificate SHA-256 digest: [a-f0-9]{64}/i.test(log), 'Signature verifier did not pass');
   const receipt = { schema: 1, kind: 'artifact', ok: true, completedAt: new Date().toISOString(), ...identity,
     compile: path.resolve(compile), compileSha256: shaFile(compile), inputsSha256: built.inputsSha256,
-    payload: path.resolve(payload), checks: path.resolve(checks), ...checked,
+    payload: path.resolve(payload), checks: path.resolve(checks), ...checked, ...checkedAssets,
     signature: path.resolve(signature), signatureSha256: shaFile(signature), signerSha256: log.match(/Signer #1 certificate SHA-256 digest: ([a-f0-9]{64})/i)[1].toLowerCase() };
   writeJson(output, receipt); return receipt;
 }
@@ -143,8 +159,8 @@ export function checkArtifact(file) {
   const receipt = readJson(file); insist(receipt.schema === 1 && receipt.kind === 'artifact' && receipt.ok === true, 'Invalid artifact receipt');
   const actual = apkIdentity(receipt.apk);
   for (const key of ['apkSha256', 'apkSize', 'versionName', 'versionCode', 'manifestSha256', 'dexSha256', 'payloadSha256', 'kernel', 'revision']) insist(actual[key] === receipt[key], 'Artifact changed: ' + key);
-  const built = checkCompile(receipt.compile);
-  insist(shaFile(receipt.compile) === receipt.compileSha256 && built.dexSha256 === receipt.dexSha256 && shaFile(receipt.checks) === receipt.checksSha256 && shaFile(receipt.signature) === receipt.signatureSha256, 'Artifact verification inputs changed');
+  const built = checkCompile(receipt.compile), packed = checkPackedAssets(receipt.apk, receipt.packedAssets);
+  insist(shaFile(receipt.compile) === receipt.compileSha256 && built.dexSha256 === receipt.dexSha256 && shaFile(receipt.checks) === receipt.checksSha256 && shaFile(receipt.signature) === receipt.signatureSha256 && packed.packedAssetsSha256 === receipt.packedAssetsSha256, 'Artifact verification inputs changed');
   return receipt;
 }
 export function checkBaseline(file) {
@@ -162,6 +178,7 @@ async function main(argv) {
   else if (cmd === 'compile-finish') completeCompile(a.inputs, a.dex, a.out);
   else if (cmd === 'compile-check') checkCompile(a.receipt || path.join(sb, 'work/appbuild/out/compile-receipt.json'), a.dex);
   else if (cmd === 'payload-check') checkPayload(a.payload, a.checks || path.join(sb, 'checks.manifest'), a.dist === 'yes');
+  else if (cmd === 'assets-check') checkPackedAssets(a.apk, a.assets);
   else if (cmd === 'artifact') recordArtifact({ ...a, output: a.out });
   else if (cmd === 'artifact-check') checkArtifact(a.receipt);
   else if (cmd === 'evidence') evidence(a.kind, a.apk, a.report, a.out);

@@ -47,7 +47,10 @@ case "$1" in
     SRC="$2"
     [ -f "$SRC" ] || { echo "✗ 找不到备份: $SRC"; exit 1; }
     echo "== 还原 $SRC =="
-    tar -xzf "$SRC" -C "$F" 2>&1 | head -5
+    if ! tar -xzf "$SRC" -C "$F"; then
+      echo "✗ 还原失败：tar 未能完整解压 $SRC" >&2
+      exit 1
+    fi
     echo "✓ 已还原到 $F（dshhome/keys/.pip/bin 覆盖回去；重启 App 生效）"
     exit 0
     ;;

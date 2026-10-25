@@ -33,6 +33,8 @@ node <本技能目录>/scripts/backup.mjs verify <备份文件绝对路径>
 
 ### 4. 从快照还原全站数据
 ```bash
-node <本技能目录>/scripts/backup.mjs restore <备份文件绝对路径>
+node <本技能目录>/scripts/backup.mjs restore <备份文件绝对路径> --yes
 ```
-- 安全解包并覆盖回 DSH 数据目录，自动触发 `mem.js sync` 重建记忆投影。
+- 先校验全部文件哈希、条目路径与解压总长度，再覆盖回 DSH 数据目录；`--yes` 表示确认覆盖，省略时不会写入。
+- 写入前自动生成 `BeforeRestore_<时间戳>` 安全快照；中途失败会给出快照路径，可再用 `restore <安全快照> --yes` 回滚。
+- 还原后自动触发 `mem.js sync` 重建记忆投影。

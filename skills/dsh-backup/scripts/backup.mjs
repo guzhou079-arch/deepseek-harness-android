@@ -18,9 +18,9 @@ import crypto from 'node:crypto';
 import { execSync } from 'node:child_process';
 
 const DSH_HOME = process.env.DSH_HOME || '/data/user/0/com.deepseek.harness/files/payload/dshhome';
-const MEM_DIR = '/sdcard/DeepSeekHarness/memory';
-const TOOLS_DIR = '/sdcard/DeepSeekHarness/tools';
-const BACKUP_DIR = '/sdcard/Download/DSH_Backups';
+const MEM_DIR = process.env.DSH_MEM_DIR || '/sdcard/DeepSeekHarness/memory';
+const TOOLS_DIR = process.env.DSH_TOOLS_DIR || '/sdcard/DeepSeekHarness/tools';
+const BACKUP_DIR = process.env.DSH_BACKUP_DIR || '/sdcard/Download/DSH_Backups';
 
 // 确保备份目录存在
 if (!fs.existsSync(BACKUP_DIR)) {
@@ -195,17 +195,54 @@ function parseBackupFile(filePath) {
   return { manifest, compressedPayload };
 }
 
-// 校验快照
-function verifyBackup(filePath) {
-  console.log(`🔍 正在校验备份快照: ${filePath}...`);
+// 完整校验快照；还原也必须先通过这里，避免损坏数据被写入。
+function loadVerifiedBackup(filePath) {
   const { manifest, compressedPayload } = parseBackupFile(filePath);
-  const decompressed = zlib.gunzipSync(compressedPayload);
+  if (!manifest || !Array.isArray(manifest.entries)) {
+    throw new Error('校验失败：清单缺少 entries 数组');
+  }
+
+  const allowedRoots = new Set(['memory', 'sessions', 'profiles', 'skills']);
+  const seenPaths = new Set();
+  let expectedSize = 0;
+  for (const entry of manifest.entries) {
+    if (!entry || typeof entry.path !== 'string' || !entry.path) {
+      throw new Error('校验失败：条目路径缺失');
+    }
+    const parts = entry.path.split('/');
+    if (entry.path.includes('\0') || entry.path.includes('\\') || entry.path.startsWith('/') ||
+        path.posix.normalize(entry.path) !== entry.path || parts.length < 2 ||
+        !allowedRoots.has(parts[0]) || parts.some(part => !part || part === '.' || part === '..')) {
+      throw new Error(`校验失败：非法条目路径 ${entry.path}`);
+    }
+    if (seenPaths.has(entry.path)) {
+      throw new Error(`校验失败：重复条目路径 ${entry.path}`);
+    }
+    seenPaths.add(entry.path);
+    if (!Number.isSafeInteger(entry.size) || entry.size < 0) {
+      throw new Error(`校验失败：条目 ${entry.path} 大小无效`);
+    }
+    if (typeof entry.sha256 !== 'string' || !/^[0-9a-f]{64}$/i.test(entry.sha256)) {
+      throw new Error(`校验失败：条目 ${entry.path} 哈希无效`);
+    }
+    expectedSize += entry.size;
+    if (!Number.isSafeInteger(expectedSize)) {
+      throw new Error('校验失败：清单总长度溢出');
+    }
+  }
+
+  let decompressed;
+  try {
+    decompressed = zlib.gunzipSync(compressedPayload, { maxOutputLength: Math.max(1, expectedSize) });
+  } catch (err) {
+    throw new Error(`校验失败：无法按清单总长度解压（${err.message}）`);
+  }
+  if (decompressed.length !== expectedSize) {
+    throw new Error(`校验失败：解压总长度不匹配，清单 ${expectedSize}，实际 ${decompressed.length}`);
+  }
 
   let offset = 0;
   for (const entry of manifest.entries) {
-    if (offset + entry.size > decompressed.length) {
-      throw new Error(`校验失败：条目 ${entry.path} 超过解压缓冲界限`);
-    }
     const chunk = decompressed.subarray(offset, offset + entry.size);
     const hash = crypto.createHash('sha256').update(chunk).digest('hex');
     if (hash !== entry.sha256) {
@@ -213,6 +250,13 @@ function verifyBackup(filePath) {
     }
     offset += entry.size;
   }
+  return { manifest, decompressed };
+}
+
+// 校验快照
+function verifyBackup(filePath) {
+  console.log(`🔍 正在校验备份快照: ${filePath}...`);
+  const { manifest } = loadVerifiedBackup(filePath);
 
   console.log('✅ 校验通过，快照完整无损！');
   console.log(`  🕒 创建时间: ${manifest.createdAt}`);
@@ -224,38 +268,40 @@ function verifyBackup(filePath) {
 
 // 还原快照
 function restoreBackup(filePath, force = false) {
+  if (!force) {
+    throw new Error('还原会覆盖现有资产；还原前会自动保存当前快照，确认后追加 --yes 执行');
+  }
   console.log(`⚠️ 准备还原快照: ${filePath}`);
-  const { manifest, compressedPayload } = parseBackupFile(filePath);
-  const decompressed = zlib.gunzipSync(compressedPayload);
+  const { manifest, decompressed } = loadVerifiedBackup(filePath);
+  const safetyBackup = createBackup(`BeforeRestore_${Date.now()}`);
+  console.log(`🛟 还原前安全快照: ${safetyBackup}`);
 
   console.log(`🚀 开始解包还原 ${manifest.entries.length} 个资产文件...`);
   let offset = 0;
   let restoredCount = 0;
 
-  for (const entry of manifest.entries) {
-    const chunk = decompressed.subarray(offset, offset + entry.size);
-    offset += entry.size;
+  try {
+    for (const entry of manifest.entries) {
+      const chunk = decompressed.subarray(offset, offset + entry.size);
+      offset += entry.size;
 
-    let targetBase = DSH_HOME;
-    let subPath = entry.path;
+      const targetBase = entry.path.startsWith('memory/') ? path.dirname(MEM_DIR) : DSH_HOME;
+      const targetFile = path.resolve(targetBase, entry.path);
+      const relative = path.relative(targetBase, targetFile);
+      if (!relative || relative.startsWith('..' + path.sep) || path.isAbsolute(relative)) {
+        throw new Error(`拒绝越界还原路径: ${entry.path}`);
+      }
+      const targetDir = path.dirname(targetFile);
 
-    if (entry.path.startsWith('memory/')) {
-      targetBase = path.dirname(MEM_DIR); // 即 /sdcard/DeepSeekHarness
-      subPath = entry.path;
-    } else {
-      targetBase = DSH_HOME;
-      subPath = entry.path;
+      if (!fs.existsSync(targetDir)) {
+        fs.mkdirSync(targetDir, { recursive: true });
+      }
+
+      fs.writeFileSync(targetFile, chunk);
+      restoredCount++;
     }
-
-    const targetFile = path.join(targetBase, subPath);
-    const targetDir = path.dirname(targetFile);
-
-    if (!fs.existsSync(targetDir)) {
-      fs.mkdirSync(targetDir, { recursive: true });
-    }
-
-    fs.writeFileSync(targetFile, chunk);
-    restoredCount++;
+  } catch (err) {
+    throw new Error(`还原中断，可能处于混合状态；可用安全快照回滚: ${safetyBackup}（${err.message}）`);
   }
 
   console.log(`✅ 成功还原 ${restoredCount} 个文件！`);
@@ -330,7 +376,7 @@ switch (cmd) {
   case 'restore': {
     const target = args[1];
     if (!target) {
-      console.error('用法: node backup.mjs restore <备份文件路径>');
+      console.error('用法: node backup.mjs restore <备份文件路径> [--yes]');
       process.exit(1);
     }
     restoreBackup(target, args.includes('--yes') || args.includes('-y'));

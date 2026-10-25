@@ -111,10 +111,9 @@ dshhome/profiles/web/node_modules/dsh-plugin-session-rewind/lib/index.js|d70735d
 dshhome/profiles/web/node_modules/dsh-plugin-turn-notify/lib/index-v3.js|3e40e4c4311269e5eac5a2258a0a1d40|turn-notify
 # ③ App 每次冷启动都会用包里的 dshhome/cordis.patch.yml 覆盖用户家目录（最后生效的一层）——
 #    同 id 条目会替换前一层并**静默丢掉它的 config**，1.38 的"新建会话失败"就是这么来的
-# 2026-10-18 更新 md5（be946ec→430d9fd）：本层新增 Codex 电源滑块注册
-# （dsh-codex-power-slider）+ 停用 ui-model-selection，让滑块接管 composer 模型槽。
-# 关键字沿用 modelPolicies：auto-summary-policy 的调优块仍在，没被这次追加挤掉。
-dshhome/cordis.patch.yml|539e4f426b884994d479e5461e8fde18|dsh-doc-media
+# 2026-10-24 更新 md5：新增 dsh-smart-search，并把 web.searchProvider 设为 auto-search。
+# 原 auto-summary-policy、dsh-doc-media 等条目保留；强制搜索仍由 web_search_with 显式选择。
+dshhome/cordis.patch.yml|b99d71dc869ab09fbb26497db0ee056a|dsh-doc-media
 
 # 2026-10-21 v1.42：文件预览视频播放 + 安卓文件动作。两个都是纯客户端插件，
 # Node 半边（lib/index.js）只为让 Loader 能解析包入口，必须随包，否则启动日志报

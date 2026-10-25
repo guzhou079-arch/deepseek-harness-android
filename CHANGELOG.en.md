@@ -3,10 +3,20 @@
 > Chinese original (authoritative and most up to date): [CHANGELOG.md](CHANGELOG.md).
 > This English page mirrors it; if the two ever disagree, the Chinese one wins.
 
-> Current release: `1.39.5`. Every release installs **straight over the previous one** — same signing key,
+> Current release: `1.42.4`. Every release installs **straight over the previous one** — same signing key,
 > in-place upgrade, no uninstall (uninstalling wipes all app-private data).
 
 ---
+
+## v1.42.4 — safer restores and end-to-end release verification
+
+- Full-site snapshot restores now verify every file hash, entry path, duplicate path and exact extracted size. Writes require an explicit `--yes`.
+- A `BeforeRestore_<timestamp>` safety snapshot is created before restoration, with a rollback path if the operation fails.
+- Legacy dshhome restores no longer hide extraction errors behind a truncated pipeline.
+- Packaging records each independent asset's source, APK path and SHA-256, then checks the final signed APK byte for byte.
+- Privacy checks reject purge artifacts and require an empty distribution dependency list.
+- Failed install preflight checks now stop the flow; rollback candidates can be strictly compared with a known-good APK.
+- Releases are created as drafts, and the APK size and SHA-256 are verified before publication.
 
 ## v1.39.5 — install the document-preview engine in one tap
 

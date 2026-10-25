@@ -53,6 +53,7 @@ bad()  { echo "  ❌ $1"; FAIL=1; }
 ok()   { echo "  ✅ $1"; }
 
 [ -n "${APK:-}" ] && [ -f "$APK" ] || { echo "用法：sh verify-dist-isolated.sh <dist.apk>"; exit 2; }
+APK=$(realpath "$APK") || { echo "✗ 无法解析 APK 绝对路径"; exit 2; }
 echo "=== 验证 $APK（$(stat -c%s "$APK") 字节）==="
 
 rm -rf "$ISO"; mkdir -p "$ISO"
@@ -76,7 +77,7 @@ done
 [ -f "$ISO/payload/dshroot/CHANGELOG.md" ] && ok "在包里：dshroot/CHANGELOG.md" || bad "缺少更新日志"
 # 三个随包插件 + 控制台插件：故意"点名"检查，少一个就红（不是只看目录里有没有东西）
 PLUGDIR="$ISO/payload/dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules"
-for p in dsh-plugin-session-rewind dsh-plugin-turn-notify dsh-plugin-auto-summary-policy dsh-android-console; do
+for p in dsh-plugin-session-rewind dsh-plugin-turn-notify dsh-plugin-auto-summary-policy dsh-android-console dsh-smart-search; do
   [ -d "$PLUGDIR/$p" ] && ok "插件在包里：$p" || bad "插件缺失：$p"
 done
 

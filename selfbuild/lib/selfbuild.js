@@ -178,12 +178,20 @@ else if (cmd === 'apk-pack') {
   // 为什么需要：pack 原本只换这两样，于是「虚拟屏核心 assets/vscreen_shizuku.jar」这类
   // 独立 asset，光改 Java 源码再 pack 也进不去包（2026-10-03 踩到，v143 差点白装）。
   const assetSpecs = [];
+  const assetNames = new Set();
+  const ai = args.indexOf('--asset-receipt');
+  const assetReceipt = ai >= 0 ? args[ai + 1] : null;
+  if (ai >= 0 && !assetReceipt) die('--asset-receipt 需要输出路径');
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--asset') {
       const v = args[i + 1] || '';
       const k = v.lastIndexOf(':');
       if (k <= 0) die('--asset 用法: <本地文件>:<APK 内条目名>');
-      assetSpecs.push([v.slice(0, k), v.slice(k + 1)]);
+      const src = v.slice(0, k), name = v.slice(k + 1);
+      if (!name.startsWith('assets/') || name.split('/').includes('..') || name === ASSET) die('非法 --asset 条目: ' + name);
+      if (assetNames.has(name)) die('--asset 条目重复: ' + name);
+      assetNames.add(name);
+      assetSpecs.push([src, name]);
     }
   }
   // 2026-10-19：payload 不再 readFileSync（155MB 进堆），改成 rawFile + 分块 crc。
@@ -236,6 +244,15 @@ else if (cmd === 'apk-pack') {
   writeZip(entries(), out);
   if (pInfo && !hitP) die('骨架里没有 ' + ASSET);
   if (dbuf && !hitD) die('骨架里没有 classes.dex');
+  if (assetReceipt) {
+    const assets = assetSpecs.map(([src, name]) => {
+      const buf = fs.readFileSync(src);
+      return { name, source: path.resolve(src), size: buf.length, sha256: crypto.createHash('sha256').update(buf).digest('hex') };
+    });
+    const tmp = assetReceipt + '.tmp-' + process.pid;
+    fs.writeFileSync(tmp, JSON.stringify({ schema: 1, kind: 'packed-assets', assets }, null, 2) + '\n', { flag: 'wx' });
+    fs.renameSync(tmp, assetReceipt);
+  }
   log(`✓ 写出未签名 APK ${out}（${fs.statSync(out).size} 字节，条目 ${total}）`);
 }
 
