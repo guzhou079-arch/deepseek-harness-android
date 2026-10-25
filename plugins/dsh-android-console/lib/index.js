@@ -1,6 +1,6 @@
 /** Android console data routes. Native actions remain in the WebView bridge. */
 import { createRequire } from 'node:module';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 
@@ -96,5 +96,78 @@ export function apply(ctx) {
         },
       }), `android-console: ${prefix} route`);
     }
+
+    // 2026-10-25：角色分工表落盘 —— 设置页编辑、AI 派活共用同一份（$DSH_HOME/model-roles.json）。
+    // 22:32 Kimi 复核后加固：过准入门、按字节限长、临时文件 + rename 原子写、失败不再装成 200。
+    const rolesFile = process.env.DSH_HOME ? join(process.env.DSH_HOME, 'model-roles.json') : null;
+    const ROLE_EFFORTS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+    const ROLE_FIELDS = ['id', 'label', 'provider', 'model', 'effort', 'use', 'cost'];
+    webCtx.effect(() => webCtx.webServer.register({
+      kind: 'prefix',
+      path: '/android-console-roles',
+      handler: async (req, res) => {
+        if (!admitConsoleRequest(webCtx, req, res)) return;
+        const send = (status, body) => {
+          res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+          res.end(JSON.stringify(body));
+        };
+        if (!rolesFile) return send(500, { ok: false, error: 'DSH_HOME unset' });
+        if (req.method === 'GET') {
+          let raw;
+          try { raw = readFileSync(rolesFile, 'utf8'); }
+          catch (error) {
+            if (error && error.code === 'ENOENT') return send(200, { ok: true, roles: null });
+            return send(500, { ok: false, error: 'read failed' });
+          }
+          try { return send(200, { ok: true, roles: JSON.parse(raw) }); }
+          catch (_e) { return send(500, { ok: false, error: 'roles file is not valid json' }); }
+        }
+        if (req.method !== 'POST') return send(405, { ok: false, error: 'method not allowed' });
+        const chunks = [];
+        let size = 0;
+        try {
+          for await (const chunk of req) {
+            const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+            size += buf.length;
+            if (size > 65536) return send(413, { ok: false, error: 'too large' });
+            chunks.push(buf);
+          }
+        } catch (_e) { return send(400, { ok: false, error: 'read failed' }); }
+        let roles;
+        try { roles = JSON.parse(Buffer.concat(chunks).toString('utf8')).roles; }
+        catch (_e) { return send(400, { ok: false, error: 'bad json' }); }
+        if (!Array.isArray(roles) || roles.length === 0 || roles.length > 20) return send(400, { ok: false, error: 'roles must be 1..20' });
+        const ids = new Set();
+        const clean = [];
+        for (const role of roles) {
+          if (!role || typeof role !== 'object' || Array.isArray(role)) return send(400, { ok: false, error: 'bad role' });
+          for (const key of ['id', 'label', 'provider', 'model']) {
+            if (typeof role[key] !== 'string' || !role[key].trim()) return send(400, { ok: false, error: 'role.' + key + ' required' });
+          }
+          if (ids.has(role.id)) return send(400, { ok: false, error: 'duplicate role id: ' + role.id });
+          ids.add(role.id);
+          if (role.effort !== undefined && role.effort !== null && !ROLE_EFFORTS.includes(String(role.effort))) {
+            return send(400, { ok: false, error: 'role.effort not allowed: ' + String(role.effort) });
+          }
+          const row = {};
+          for (const key of ROLE_FIELDS) {
+            const value = role[key];
+            if (value === undefined || value === null || value === '') continue;
+            if (typeof value !== 'string') return send(400, { ok: false, error: 'role.' + key + ' must be string' });
+            row[key] = value.trim();
+          }
+          clean.push(row);
+        }
+        const tmp = rolesFile + '.tmp-' + process.pid;
+        try {
+          writeFileSync(tmp, JSON.stringify(clean, null, 2) + '\n');
+          renameSync(tmp, rolesFile);
+        } catch (error) {
+          try { unlinkSync(tmp); } catch (_e2) {}
+          return send(500, { ok: false, error: 'write failed' });
+        }
+        return send(200, { ok: true, saved: clean.length });
+      },
+    }), 'android-console: model roles route');
   });
 }

@@ -572,13 +572,70 @@ window.__ModuleLoader__.load({
 
     // Model routing uses the same live directory as the composer model selector.
     const MODEL_ROLES = [
-      { id: 'cheap', label: '日常与重复任务', provider: 'dp', model: 'deepseek-v4.1-flash', use: '取数、转格式、常规问答、写测试', cost: '参考倍率 0.15' },
-      { id: 'code', label: '代码实现', provider: 'dp', model: 'kimi-k2.7-code', use: '实现功能、批量修改、补注释', cost: '参考倍率 0.15' },
-      { id: 'fast', label: '快速处理', provider: 'dp', model: 'gemini-3.8-flash', use: '摘要、翻译、分类、初筛', cost: '参考倍率 0.15' },
-      { id: 'claude', label: '分析与审查', provider: 'claude', model: 'claude-opus-5-5', use: '需求分析、代码审查、多轮推敲', cost: '参考倍率 0.75' },
-      { id: 'plan', label: '架构与规划', provider: 'gpt', model: 'gpt-5.6-sol', use: '架构设计、技术选型、方案比较', cost: '参考倍率 0.27' },
-      { id: 'ds', label: 'DeepSeek 官方 · 暂停使用', provider: 'deepseek-official', model: 'deepseek-flash', use: '你近期不续费官方 API，暂不从此页切入', paused: true },
+      { id: 'frontend', label: '前端 UI 与审美', provider: 'opencode-go', model: 'kimi-k3.1-pro', effort: 'high', use: '界面设计、交互细节、视觉打磨和前端实现', cost: 'Go · Kimi high' },
+      { id: 'backend', label: '后端与复杂编码', provider: 'opencode-go', model: 'deepseek-v4.1-flash', effort: 'max', use: '服务端、数据链路、疑难排错和复杂仓库修改', cost: 'Go · DeepSeek max' },
+      { id: 'plan', label: '需求分析与拆解', provider: 'opencode-go', model: 'kimi-k3.1-pro', effort: 'max', use: '临时把本会话切到 Kimi max 拆需求，拆完切回；日常需求分析用子代理跑', cost: 'Go · Kimi max' },
+      { id: 'docs', label: '中文长文与翻译', provider: 'opencode-go', model: 'qwen3.8-max', use: '中文长文、翻译和文档改写；不做需求或生活常识终审', cost: 'Go · Qwen 默认档' },
+      { id: 'test', label: '测试与第二遍查错', provider: 'opencode-go', model: 'glm-5.3', effort: 'high', use: '测试用例、静态查错和代码复检；不派读图任务', cost: 'Go · GLM high' },
+      { id: 'ds', label: '日常工作', provider: 'opencode-go', model: 'deepseek-v4.1-flash', effort: 'high', use: '日常问答、常规脚本、文档和一般工具任务', cost: 'Go · DeepSeek high' },
+      { id: 'cheap', label: '轻量与重复任务', provider: 'opencode-go', model: 'deepseek-v4.1-flash', effort: 'low', use: '取数、转格式、摘要、分类和批量重复任务', cost: 'Go · DeepSeek low' },
     ];
+    // 2026-10-25：角色表改成用户可编辑。默认值仍是 MODEL_ROLES，改动存 localStorage，刷新仍在。
+    // 2026-10-25：模型清单走官方 RPC remote.session.modelCatalog()（设置页的模型项也是读它）。
+    let PROVIDER_CTX = null;
+    const readAnyService = name => {
+      try { if (PROVIDER_CTX && typeof PROVIDER_CTX.get === 'function') { const v = PROVIDER_CTX.get(name); if (v) return v; } } catch (_e) {}
+      try { return PROVIDER_CTX ? PROVIDER_CTX[name] || null : null; } catch (_e2) { return null; }
+    };
+    let CATALOG_LOADER = null;
+    const MODEL_CATALOG_SNAPSHOT = {"opencode-go":[{"id":"beam-free","name":"Beam Free","efforts":["low","medium","high","xhigh","max"]},{"id":"claude-haiku-5-5","name":"Claude Haiku 5.5","efforts":["xhigh","max"]},{"id":"deepseek-v4-pro","name":"DeepSeek V4 Pro (New)","efforts":["high","max"]},{"id":"deepseek-v4.1-flash","name":"DeepSeek V4.1 Flash","efforts":["low","high","max"]},{"id":"gemini-4-argon","name":"Gemini 4 Argon","efforts":["low","medium","high"]},{"id":"glm-5.1","name":"GLM-5.1","efforts":[]},{"id":"glm-5.2","name":"GLM-5.2","efforts":["high","max"]},{"id":"glm-5.3","name":"GLM-5.3","efforts":["low","high","max"]},{"id":"glm-5.3-flash","name":"GLM-5.3-Flash","efforts":["low","high","max"]},{"id":"gpt-5.6-luna","name":"GPT-5.6 Luna","efforts":["low","medium","high","xhigh","max"]},{"id":"gpt-6-luna","name":"GPT-6 Luna","efforts":["off","low","medium","high","xhigh","max"]},{"id":"grok-4.6","name":"Grok 4.6","efforts":["low","medium","high","xhigh"]},{"id":"grok-4.7","name":"Grok 4.7","efforts":["low","medium","high","xhigh"]},{"id":"hy3","name":"Hy3","efforts":["off","low","high"]},{"id":"hy4-preview","name":"Hy4 preview","efforts":["off","high"]},{"id":"iceman-contributor-free","name":"Iceman Contributor Free","efforts":[]},{"id":"kimi-k2.6","name":"Kimi K2.6","efforts":[]},{"id":"kimi-k2.7-code","name":"Kimi K2.7 Code","efforts":[]},{"id":"kimi-k3","name":"Kimi K3","efforts":["max"]},{"id":"kimi-k3.1-pro","name":"Kimi K3.1 Pro","efforts":["low","high","max"]},{"id":"longcat-2.0","name":"LongCat-2.0","efforts":[]},{"id":"mimo-v2.5","name":"MiMo V2.5","efforts":[]},{"id":"mimo-v2.5-pro","name":"MiMo V2.5 Pro","efforts":[]},{"id":"mimo-v2.6-flash","name":"MiMo-V2.6-Flash","efforts":[]},{"id":"mimo-v2.6-pro","name":"MiMo-V2.6-Pro","efforts":[]},{"id":"minimax-m2.5","name":"MiniMax-M2.5","efforts":[]},{"id":"minimax-m2.7","name":"MiniMax-M2.7","efforts":[]},{"id":"minimax-m3","name":"MiniMax-M3","efforts":[]},{"id":"minimax-m3.1-flash","name":"MiniMax M3.1 Flash","efforts":["low","medium","high","xhigh","max"]},{"id":"muse-spark-1.2-contributor","name":"Muse Spark 1.2 Contributor","efforts":["minimal","low","medium","high","xhigh"]},{"id":"muse-spark-1.3-contributor","name":"Muse Spark 1.3 Contributor","efforts":["minimal","low","medium","high","xhigh"]},{"id":"omen-alpha","name":"omen-alpha","efforts":[]},{"id":"qwen3.6-plus","name":"Qwen3.6 Plus","efforts":[]},{"id":"qwen3.7-max","name":"Qwen3.7 Max","efforts":[]},{"id":"qwen3.7-plus","name":"Qwen3.7 Plus","efforts":[]},{"id":"qwen3.8-flash","name":"Qwen3.8 Flash","efforts":[]},{"id":"qwen3.8-max","name":"Qwen3.8 Max","efforts":[]},{"id":"step-5-preview","name":"Step 5 Preview","efforts":["low","medium","high"]}]};
+    const loadModelCatalog = () => (typeof CATALOG_LOADER === 'function' ? Promise.resolve().then(() => CATALOG_LOADER()).catch(() => null) : Promise.resolve(null));
+    const ROLE_STORE_KEY = 'dsh-console:model-roles:v1';
+    // 2026-10-25：角色表落盘到引擎侧（$DSH_HOME/model-roles.json），AI 派活读同一份。
+    // 远端拿不到就退回 localStorage / 默认表，离线时页面照常用。
+    let REMOTE_ROLES = null;
+    const ROLES_ENDPOINT = '/android-console-roles';
+    const readRemoteRoles = () => {
+      try {
+        if (typeof fetch !== 'function') return Promise.resolve(null);
+        return fetch(ROLES_ENDPOINT, { credentials: 'same-origin' })
+          .then(res => (res.ok ? res.json() : null))
+          .then(json => (json && Array.isArray(json.roles) && json.roles.length ? json.roles : null))
+          .catch(() => null);
+      } catch (_e) { return Promise.resolve(null); }
+    };
+    const writeRemoteRoles = roles => {
+      try {
+        if (typeof fetch !== 'function' || !Array.isArray(roles) || !roles.length) return;
+        fetch(ROLES_ENDPOINT, {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ roles }),
+        }).catch(() => {});
+      } catch (_e) {}
+    };
+
+    const ROLE_EFFORTS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+    const readRoleOverrides = () => {
+      try {
+        const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(ROLE_STORE_KEY) : null;
+        const parsed = raw ? JSON.parse(raw) : {};
+        return parsed && typeof parsed === 'object' ? parsed : {};
+      } catch (_e) { return {}; }
+    };
+    const writeRoleOverrides = overrides => {
+      try { if (typeof localStorage !== 'undefined') localStorage.setItem(ROLE_STORE_KEY, JSON.stringify(overrides)); } catch (_e) {}
+    };
+    const effectiveRoles = () => {
+      const overrides = readRoleOverrides();
+      return (REMOTE_ROLES || MODEL_ROLES).map(role => {
+        const o = overrides[role.id];
+        if (!o || !o.provider || !o.model) return role;
+        return Object.assign({}, role, { provider: o.provider, model: o.model, effort: o.effort === undefined ? role.effort : o.effort });
+      });
+    };
+
     const routeName = value => value ? value.provider + '/' + value.model : '尚未读取';
     const routeMatch = (a, b) => !!a && !!b && a.provider === b.provider && a.model === b.model;
     const routeModel = (groups, value) => groups.find(g => g.id === value?.provider)?.models.find(m => m.id === value?.model);
@@ -596,7 +653,28 @@ window.__ModuleLoader__.load({
       emit(patch) { this.state = { ...this.state, ...patch }; for (const fn of this.listeners) fn(); }
       subscribe(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
       start() {
-        if (!this.services?.sessions || !this.services?.modelDirectories) { this.emit({ error: '模型服务尚未就绪，请刷新页面后再进入。' }); return; }
+        if (!this.services?.sessions || !this.services?.modelDirectories) {
+          this.retry = (this.retry || 0) + 1;
+          if (this.retry <= 10) {
+            try {
+              var _s = null, _d = null;
+              try { _s = this.services && this.services.sessions; } catch (_e1) {}
+              try { _d = this.services && this.services.modelDirectories; } catch (_e2) {}
+              var _win = typeof window !== 'undefined' ? window : null;
+              this.emit({ error: '模型服务还在启动，稍后点“刷新状态”重试' });
+            } catch (_e3) {
+              this.emit({ error: '诊断失败 ' + String(_e3 && _e3.message || _e3) });
+            }
+            clearTimeout(this.retryTimer);
+            this.retryTimer = setTimeout(() => this.start(), 400);
+            return;
+          }
+          this.retry = 0;
+          this.emit({ error: '读不到模型服务：sessions=' + (!!(this.services && this.services.sessions)) + '，模型目录=' + (!!(this.services && this.services.modelDirectories)) });
+          return;
+        }
+        this.retry = 0;
+        clearTimeout(this.retryTimer);
         this.state = { ...this.state, sessionId: null };
         this.stopSessions = this.services.sessions.list.subscribe(() => this.bind());
         this.bind();
@@ -669,6 +747,15 @@ window.__ModuleLoader__.load({
       const [chosen, setChosen] = react.useState(null);
       const [effort, setEffort] = react.useState('');
       const [pending, setPending] = react.useState(null);
+      const [roles, setRoles] = react.useState(() => effectiveRoles());
+      const [editing, setEditing] = react.useState(null);
+      const [catalog, setCatalog] = react.useState(null);
+      react.useEffect(() => {
+        let alive = true;
+        loadModelCatalog().then(value => { if (alive) setCatalog(value); });
+        readRemoteRoles().then(value => { if (alive && value) { REMOTE_ROLES = value; setRoles(effectiveRoles()); } });
+        return () => { alive = false; };
+      }, []);
       react.useEffect(() => {
         const stop = controller.subscribe(() => setState(controller.state));
         controller.start();
@@ -681,8 +768,18 @@ window.__ModuleLoader__.load({
       const target = chosen || current;
       const model = routeModel(groups, target);
       const levels = model?.reasoning?.efforts || [];
-      const currentRole = MODEL_ROLES.find(r => routeMatch(r, current));
-      const unavailable = !state.sessionId || !current || directory.status === 'loading' || directory.status === 'error' || directory.status === 'selecting' || state.busy;
+      const currentRole = roles.find(r => routeMatch(r, current));
+      const liveGroups = catalog && Array.isArray(catalog.groups) ? catalog.groups : [];
+      const liveGroup = editing ? liveGroups.find(g => g.id === editing.provider) : undefined;
+      const liveModels = liveGroup && Array.isArray(liveGroup.models)
+        ? liveGroup.models.map(m => ({ id: m.id, name: m.id, efforts: m.reasoning && Array.isArray(m.reasoning.efforts) ? m.reasoning.efforts.map(x => x.id) : [] }))
+        : [];
+      const snapshotModels = editing && typeof MODEL_CATALOG_SNAPSHOT !== 'undefined' && MODEL_CATALOG_SNAPSHOT[editing.provider] ? MODEL_CATALOG_SNAPSHOT[editing.provider] : [];
+      const modelOptions = liveModels.length ? liveModels : snapshotModels;
+      const providerOptions = Array.from(new Set(['opencode-go', 'deepseek-official'].concat(typeof MODEL_CATALOG_SNAPSHOT !== 'undefined' ? Object.keys(MODEL_CATALOG_SNAPSHOT) : []).concat(editing && editing.provider ? [editing.provider] : [])));
+      const editingMeta = editing ? modelOptions.find(m => m.id === editing.model) : undefined;
+      const effortChoices = editingMeta && Array.isArray(editingMeta.efforts) && editingMeta.efforts.length ? editingMeta.efforts.map(x => ({ id: x, name: x })) : ROLE_EFFORTS.map(x => ({ id: x, name: x }));
+      const unavailable = !state.sessionId || directory.status === 'loading' || directory.status === 'error' || directory.status === 'selecting' || state.busy;
       const targetEffort = effort || (routeMatch(target, current) ? current?.reasoningEffort : undefined) || model?.reasoning?.defaultEffort;
       const request = target ? { provider: target.provider, model: target.model, ...(targetEffort ? { reasoningEffort: targetEffort } : {}) } : null;
       const pick = value => { setChosen(value); setEffort(''); setPending(null); };
@@ -699,14 +796,28 @@ window.__ModuleLoader__.load({
         ] }),
         (state.error || directory.error) ? jsx('div', { role: 'alert', className: 'ctl-desc ctl-warn', children: state.error || String(directory.error?.message || directory.error) }) : null,
         state.message ? jsx('div', { role: 'status', className: 'ctl-note', children: state.message }) : null,
+        editing ? jsxs('div', { className: 'ctl-life-card', style: { margin: '0 0 12px' }, children: [
+          jsx('div', { className: 'ctl-brand', children: '修改角色：' + ((roles.find(r => r.id === editing.id) || {}).label || editing.id) }),
+          jsxs('label', { className: 'ctl-note', children: ['厂商 (provider)', jsx('select', { className: 'ctl-voice-input', value: editing.provider, onChange: e => { const nextList = (typeof MODEL_CATALOG_SNAPSHOT !== 'undefined' && MODEL_CATALOG_SNAPSHOT[e.target.value]) || []; const nextLive = liveGroups.find(g => g.id === e.target.value); const firstModel = nextLive && nextLive.models && nextLive.models[0] ? nextLive.models[0].id : (nextList[0] ? nextList[0].id : ''); setEditing(Object.assign({}, editing, { provider: e.target.value, model: firstModel, effort: '' })); }, children: providerOptions.map(p => jsx('option', { value: p, children: p }, p)) })] }),
+          modelOptions.length ? jsxs('label', { className: 'ctl-note', children: ['模型 id', jsx('select', { className: 'ctl-voice-input', value: editing.model, onChange: e => setEditing(Object.assign({}, editing, { model: e.target.value, effort: '' })), children: modelOptions.map(m => jsx('option', { value: m.id, children: m.id === editing.model && m.efforts && m.efforts.length ? m.id + ' · 档位 ' + m.efforts.join('/') : m.id }, m.id)) })] }) : jsxs('label', { className: 'ctl-note', children: ['模型 id', jsx('input', { className: 'ctl-voice-input', value: editing.model, placeholder: 'kimi-k3.1-pro', onChange: e => setEditing(Object.assign({}, editing, { model: e.target.value })) })] }),
+          jsxs('label', { className: 'ctl-note', children: ['思考深度', jsx('select', { className: 'ctl-voice-input', value: editing.effort, onChange: e => setEditing(Object.assign({}, editing, { effort: e.target.value })), children: [jsx('option', { value: '', children: '模型默认' }), ...effortChoices.map(x => jsx('option', { value: x.id, children: x.name }, x.id))] })] }),
+          jsxs('div', { className: 'ctl-bar', children: [
+            jsx(Button, { variant: 'primary', size: 'sm', onClick: () => { const overrides = readRoleOverrides(); overrides[editing.id] = { provider: String(editing.provider || '').trim(), model: String(editing.model || '').trim(), effort: editing.effort || undefined }; writeRoleOverrides(overrides); setRoles(effectiveRoles()); setEditing(null); writeRemoteRoles(effectiveRoles()); try { controller.refresh(); } catch (_e6) {} }, children: '保存' }),
+            jsx(Button, { variant: 'outline', size: 'sm', onClick: () => { const overrides = readRoleOverrides(); delete overrides[editing.id]; writeRoleOverrides(overrides); setRoles(effectiveRoles()); setEditing(null); writeRemoteRoles(effectiveRoles()); try { controller.refresh(); } catch (_e7) {} }, children: '恢复默认' }),
+            jsx(Button, { variant: 'ghost', size: 'sm', onClick: () => setEditing(null), children: '取消' }),
+          ] }),
+        ] }) : null,
         jsx('div', { className: 'ctl-group', children: '按任务选择' }),
-        jsx('div', { className: 'ctl-life-grid', children: MODEL_ROLES.map(role => {
+        jsx('div', { className: 'ctl-life-grid', children: roles.map(role => {
           const available = !!routeModel(groups, role), selected = routeMatch(role, target);
           return jsxs('div', { className: 'ctl-life-card', style: selected ? { borderColor: 'var(--dsw-alias-state-business-primary)' } : {}, children: [
             jsxs('div', { className: 'ctl-life-card-head', children: [jsx('div', { className: 'ctl-life-card-title', children: role.label }), jsx('span', { className: 'ctl-tag', children: role.paused ? '已暂停' : routeMatch(role, current) ? '使用中' : role.cost })] }),
             jsx('div', { className: 'ctl-desc', children: routeName(role) }),
             jsx('div', { className: 'ctl-desc', children: role.use }),
-            jsx(Button, { variant: 'outline', size: 'sm', disabled: unavailable || role.paused || !available, onClick: () => pick({ provider: role.provider, model: role.model }), children: role.paused ? '暂不使用' : !available ? '目录中不可用' : selected ? '已选定' : '选择此角色' }),
+            jsxs('div', { className: 'ctl-bar', children: [
+              jsx(Button, { variant: 'outline', size: 'sm', disabled: unavailable || role.paused || !available, onClick: () => pick({ provider: role.provider, model: role.model }), children: role.paused ? '暂不使用' : !available ? '目录中不可用' : selected ? '已选定' : '选择此角色' }),
+              jsx(Button, { variant: 'ghost', size: 'sm', onClick: () => setEditing({ id: role.id, provider: role.provider, model: role.model, effort: role.effort || '' }), children: '更换模型' }),
+            ] }),
           ] }, role.id);
         }) }),
         jsx('div', { className: 'ctl-group', children: '本次配置' }),
@@ -2720,9 +2831,98 @@ const PET_SVG = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 322 335
         label: () => '控制台',
         inject: () => ({}),
       }, function ConsoleSectionGuarded(props) {
-        var _md = null;
-        try { _md = ctx.modelDirectories || null; } catch (_e) { _md = null; }
-        props = { ...props, modelServices: { sessions: ctx.sessions, modelDirectories: _md } };
+        // 2026-10-25：服务必须“用时再取”。直接读 ctx.modelDirectories 在服务未注册时会抛异常，
+        // 被 catch 成 null → 整页显示“模型服务尚未就绪”、所有档位“目录中不可用”。
+        try { if (!PROVIDER_CTX && typeof ctx !== 'undefined') PROVIDER_CTX = ctx; } catch (_e8) {}
+        var readSvc = function (name) {
+          try { if (typeof ctx.get === 'function') { var v = ctx.get(name); if (v) return v; } } catch (_e) {}
+          try { return ctx[name] || null; } catch (_e2) { return null; }
+        };
+        // 模型清单必须用 ctx.inject 声明依赖后再取；服务缺失时回调不执行，不会抛错。
+        try {
+          if (typeof CATALOG_LOADER !== 'function' && ctx && typeof ctx.inject === 'function') {
+            CATALOG_LOADER = function () {
+              return new Promise(function (resolve) {
+                try {
+                  ctx.inject(['remote.session'], function (scope) {
+                    try {
+                      Promise.resolve(scope.remote.session.modelCatalog()).then(function (r) {
+                        resolve(r && r.ok && r.value ? r.value : null);
+                      }).catch(function () { resolve(null); });
+                    } catch (_e10) { resolve(null); }
+                  });
+                } catch (_e11) { resolve(null); }
+              });
+            };
+          }
+        } catch (_e9) {}
+        // 2026-10-25 兜底：官方 modelDirectories 服务在本机一直没注册（ui-model-selection 没跑起来），
+        // 但切换模型真正走的是 sessions.selectModel，所以这里用本插件自己的 7 档角色表拼一个目录。
+        var makeFallbackDirectory = function (sessionId) {
+          var roles = typeof effectiveRoles === 'function' ? effectiveRoles() : [];
+          var byProvider = new Map();
+          roles.forEach(function (r) {
+            if (!r || !r.provider || !r.model) return;
+            if (!byProvider.has(r.provider)) byProvider.set(r.provider, new Map());
+            var m = byProvider.get(r.provider);
+            if (!m.has(r.model)) m.set(r.model, { id: r.model, reasoning: { defaultEffort: r.effort } });
+          });
+          var groups = [];
+          byProvider.forEach(function (m, provider) { groups.push({ id: provider, models: Array.from(m.values()) }); });
+          var listeners = new Set();
+          var snapshot = { current: null, routable: true, groups: groups, failures: [], status: 'ready', pending: null, error: null };
+          var snapshotGroups = function () {
+            if (typeof MODEL_CATALOG_SNAPSHOT === 'undefined' || !MODEL_CATALOG_SNAPSHOT) return [];
+            return Object.keys(MODEL_CATALOG_SNAPSHOT).map(function (pid) {
+              return { id: pid, models: (MODEL_CATALOG_SNAPSHOT[pid] || []).map(function (m) { return { id: m.id, reasoning: { defaultEffort: (m.efforts && m.efforts[0]) || undefined } }; }) };
+            });
+          };
+          Promise.resolve(typeof loadModelCatalog === 'function' ? loadModelCatalog() : null).then(function (real) {
+            if (real && Array.isArray(real.groups) && real.groups.length) { update({ groups: real.groups }); return; }
+            var snap = snapshotGroups();
+            if (snap.length) update({ groups: snap });
+          }).catch(function () {});
+          var update = function (patch) { snapshot = Object.assign({}, snapshot, patch); listeners.forEach(function (fn) { try { fn(); } catch (_e) {} }); };
+          var store = { getSnapshot: function () { return snapshot; }, subscribe: function (fn) { listeners.add(fn); return function () { listeners.delete(fn); }; } };
+          try {
+            var s2 = readSvc('sessions');
+            var binding = s2 && typeof s2.binding === 'function' ? s2.binding(sessionId) : null;
+            var proj = binding && binding.session && binding.session.projections && typeof binding.session.projections.faceOf === 'function' ? binding.session.projections.faceOf('modelSelection') : null;
+            var readCurrent = function () {
+              try {
+                var snap = proj && typeof proj.getSnapshot === 'function' ? proj.getSnapshot() : null;
+                var cand = snap && (snap.current || snap.selection || snap);
+                if (cand && cand.provider && cand.model) return { provider: cand.provider, model: cand.model, reasoningEffort: cand.reasoningEffort };
+              } catch (_e5) {}
+              return null;
+            };
+            var seeded = readCurrent();
+            if (seeded) update({ current: seeded });
+            if (proj && typeof proj.subscribe === 'function') proj.subscribe(function () { var next = readCurrent(); if (next) update({ current: next }); });
+          } catch (_e4) {}
+          return {
+            store: store,
+            load: function () { return Promise.resolve(snapshot); },
+            select: function (target) {
+              update({ status: 'selecting', pending: target, error: null });
+              var sessions = readSvc('sessions');
+              if (!sessions || typeof sessions.selectModel !== 'function') { update({ status: 'error', error: 'sessions.selectModel 不可用' }); return Promise.resolve({ ok: false, error: { code: 'no-sessions', message: 'sessions.selectModel 不可用' } }); }
+              var request = Object.assign({ sessionId: sessionId, provider: target.provider, model: target.model }, target.reasoningEffort === undefined ? {} : { reasoningEffort: target.reasoningEffort });
+              return Promise.resolve(sessions.selectModel(request)).then(function (result) {
+                if (!result || result.ok) { update({ status: 'ready', pending: null, current: { provider: target.provider, model: target.model, reasoningEffort: target.reasoningEffort } }); return { ok: true, value: undefined }; }
+                update({ status: 'error', pending: null, error: result.error ? (String(result.error.code) + ': ' + String(result.error.message)) : '切换失败' });
+                return result;
+              });
+            },
+          };
+        };
+        var fallbackDirectories = {
+          directoryFor: function (sessionId) { return makeFallbackDirectory(sessionId); },
+        };
+        props = { ...props, modelServices: {
+          get sessions() { return readSvc('sessions'); },
+          get modelDirectories() { return readSvc('modelDirectories') || fallbackDirectories; },
+        } };
         return Boundary === null
           ? jsx(ConsoleSection, props)
           : jsx(Boundary, { children: jsx(ConsoleSection, props) });

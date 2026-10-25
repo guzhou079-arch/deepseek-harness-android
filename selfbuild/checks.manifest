@@ -97,8 +97,8 @@ dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-fs-
 # ② 分享进来的可见性与落盘副本（2026-10-15 事故：两份副本里服务的是"瘦"的那份，
 #    且"到货卡片"只挂在会话页 → 用户分享进来的文件收下了却没人看见。
 #    这两条把「带 shell.overlay 到货横幅的那一份」钉死，两份副本都必须一致）
-dshhome/profiles/web/node_modules/dsh-android-console/lib/client.js|a31a96a3cbaeddb1312fb6b816b885d2|android-share-notice
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-android-console/lib/client.js|339433ef5ad60be2c1d90d2e38f2cc1b|android-share-notice
+dshhome/profiles/web/node_modules/dsh-android-console/lib/client.js|a00cbdb46730a00ada17759207fbe4c1|android-share-notice
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-android-console/lib/client.js|08b79df4ea2d89a6eee5a8ab98ed54b5|android-share-notice
 # ⚠️ 2026-10-15 之前这条清单**没覆盖**这两个文件，于是"源码改了、包里带的还是旧的"
 #    能一路通过 verify。装 1.39 之前，patch-check 对这两条会报漂移（装机副本还是旧的）——那是**正确**的。
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-plugin-auto-summary-policy/lib/index.js|d0beb2db51a199d1d7b4a45b5cc74936|0.1.2-effective-policy
@@ -136,3 +136,5 @@ dshhome/profiles/web/node_modules/dsh-session-delete/package.json|3bdc3facb75ffa
 dshhome/profiles/web/node_modules/dsh-session-delete/cordis.patch.yml|ab91020b5d7bc179e36fc143d93361a4|dsh-session-delete
 dshhome/profiles/web/node_modules/dsh-session-delete/lib/index.js|348f3274289ac550b7ab7a6226273a5b|dsh-session-delete
 dshhome/profiles/web/node_modules/dsh-session-delete/lib/client.js|2025320c13b37025ed13a7fe7e53d47d|data-dsd-confirm
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-experimental-agent-team/lib/index.js|f749f84b715a4d0f2fc0c1cb34f32a04|agentOptions
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-experimental-tool-agent-team/lib/index.js|f31f3b71a168defb527f2e652626353f|top-level array of roles
