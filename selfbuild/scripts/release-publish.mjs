@@ -12,6 +12,14 @@ const REPO = 'guzhou079-arch/deepseek-harness-android', API = `https://api.githu
 
 export async function publishVerifiedRelease({ request, artifact, tag, commit, title, body, name }) {
   let release = await request(`${API}/releases/tags/${tag}`, {}, true);
+  if (!release) {
+    // GitHub's tag lookup does not return drafts. Find an existing draft through
+    // the list endpoint instead of creating another same-tag draft on retry.
+    const releases = await request(`${API}/releases?per_page=100`);
+    const drafts = releases.filter(r => r.tag_name === tag && r.draft);
+    insist(drafts.length <= 1, 'Multiple draft releases exist for this tag; clean up duplicates explicitly');
+    release = drafts[0] || null;
+  }
   insist(!release || typeof release.draft === 'boolean', 'Release draft state unavailable');
   const existingAsset = (release?.assets || []).find(a => a.name === name);
   if (release && !release.draft) {
@@ -23,7 +31,7 @@ export async function publishVerifiedRelease({ request, artifact, tag, commit, t
   let asset = (release.assets || []).find(a => a.name === name);
   if (asset) insist(asset.size === artifact.apkSize && asset.digest === 'sha256:' + artifact.apkSha256, 'Existing asset differs; replacement needs a separate explicit decision');
   else asset = await request(`https://uploads.github.com/repos/${REPO}/releases/${release.id}/assets?name=${encodeURIComponent(name)}`, { method: 'POST', headers: { 'Content-Type': 'application/vnd.android.package-archive', 'Content-Length': String(artifact.apkSize) }, body: fs.createReadStream(artifact.apk), duplex: 'half' });
-  const fresh = await request(`${API}/releases/tags/${tag}`), uploaded = fresh.assets.find(a => a.id === asset.id);
+  const fresh = await request(release.draft ? `${API}/releases/${release.id}` : `${API}/releases/tags/${tag}`), uploaded = fresh.assets.find(a => a.id === asset.id);
   insist(uploaded && uploaded.state === 'uploaded' && uploaded.size === artifact.apkSize && uploaded.digest === 'sha256:' + artifact.apkSha256, 'Uploaded asset SHA-256 verification failed');
   if (release.draft) {
     release = await request(`${API}/releases/${release.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ draft: false }) });
