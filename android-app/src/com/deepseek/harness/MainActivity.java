@@ -3302,8 +3302,9 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** 探测 root（su）是否可用：执行 `su -c id`，输出含 uid=0 即视为可用。结果缓存，onResume 时重置。 */
+    /** 结果缓存，onResume 时重置；执行端使用同一次探测得到的 su 绝对路径。 */
     private volatile Boolean rootOk = null;
+    private volatile String rootSuPath = "su";
     private boolean rootAvailable() {
         Boolean cached = rootOk;
         if (cached != null) return cached;
@@ -3313,25 +3314,10 @@ public class MainActivity extends Activity {
     }
 
     private boolean probeRoot() {
-        Process p = null;
-        try {
-            p = Runtime.getRuntime().exec(new String[]{"su", "-c", "id"});
-            BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream()));
-            String line = r.readLine();
-            // 等待进程退出，避免僵尸；API 26+ 支持超时，低版本直接等待（su -c id 很快返回）
-            try {
-                if (Build.VERSION.SDK_INT >= 26) {
-                    if (!p.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)) p.destroy();
-                } else {
-                    p.waitFor();
-                }
-            } catch (Throwable ignored) {}
-            return line != null && line.contains("uid=0");
-        } catch (Throwable t) {
-            return false;
-        } finally {
-            try { if (p != null) p.destroy(); } catch (Throwable ignored) {}
-        }
+        RootShell.Probe result = RootShell.probe();
+        rootSuPath = result.suPath;
+        Log.i(TAG, "root probe: " + result.detail);
+        return result.ok;
     }
 
     private File extractRishDex() {
@@ -6379,6 +6365,7 @@ public class MainActivity extends Activity {
         // AI 不会反复尝试系统操作；文件读写仍可用 DSH 自带的 fs/bash 工具（只需存储权限）。
         env.put("SHIZUKU_AVAILABLE", shizukuAvailable() ? "1" : "0");
         env.put("ROOT_AVAILABLE", rootAvailable() ? "1" : "0");
+        env.put("ROOT_SU", rootSuPath);
         // v1.13.1：本地特权路由 /shell 的鉴权令牌——只经 env 交给本应用自己的引擎，本机其它应用猜不到，
         // 避免任意应用通过 127.0.0.1:<notifyPort>/shell 拿到 shell 权限。
         env.put("APP_LOCAL_TOKEN", localToken());

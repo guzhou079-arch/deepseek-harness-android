@@ -163,9 +163,10 @@ export function checkArtifact(file) {
   insist(shaFile(receipt.compile) === receipt.compileSha256 && built.dexSha256 === receipt.dexSha256 && shaFile(receipt.checks) === receipt.checksSha256 && shaFile(receipt.signature) === receipt.signatureSha256 && packed.packedAssetsSha256 === receipt.packedAssetsSha256, 'Artifact verification inputs changed');
   return receipt;
 }
-export function checkBaseline(file) {
+export function checkBaseline(file, expectedTag) {
+  insist(expectedTag && /^v[0-9]+(?:\.[0-9]+)+$/.test(expectedTag), 'Explicit published baseline tag required');
   const r = readJson(file);
-  insist(r.schema === 1 && r.kind === 'baseline' && r.ok === true && r.tag === 'v1.37' && r.source === 'github-api' && r.repo === 'guzhou079-arch/deepseek-harness-android' && r.assets?.length > 0, 'Fresh published v1.37 baseline required');
+  insist(r.schema === 1 && r.kind === 'baseline' && r.ok === true && r.tag === expectedTag && r.source === 'github-api' && r.repo === 'guzhou079-arch/deepseek-harness-android' && r.assets?.length > 0, `Fresh published ${expectedTag} baseline required`);
   insist(Number.isFinite(Date.parse(r.checkedAt)) && Date.now() - Date.parse(r.checkedAt) >= 0 && Date.now() - Date.parse(r.checkedAt) <= 86400000, 'Baseline receipt expired; re-run baseline');
   for (const a of r.assets) insist(HASH.test(a.sha256) && shaFile(a.local) === a.sha256, 'Baseline local package changed'); return r;
 }
@@ -182,8 +183,8 @@ async function main(argv) {
   else if (cmd === 'artifact') recordArtifact({ ...a, output: a.out });
   else if (cmd === 'artifact-check') checkArtifact(a.receipt);
   else if (cmd === 'evidence') evidence(a.kind, a.apk, a.report, a.out);
-  else if (cmd === 'gate') { const r = checkArtifact(a.receipt); checkBaseline(a.baseline); checkEvidence(a.privacy, 'privacy', r.apkSha256); checkEvidence(a.isolated, 'isolated', r.apkSha256); }
-  else if (cmd === 'artifact-path') { const r = readJson(a.receipt); insist(r.kind === 'artifact' && r.ok && r.versionName === VERSION && r.versionCode === CODE && HASH.test(r.apkSha256), 'No selected v1.38/code70 artifact'); console.log(r.apk); return; }
+  else if (cmd === 'gate') { const r = checkArtifact(a.receipt); checkBaseline(a.baseline, a.baselineTag); checkEvidence(a.privacy, 'privacy', r.apkSha256); checkEvidence(a.isolated, 'isolated', r.apkSha256); }
+  else if (cmd === 'artifact-path') { const r = readJson(a.receipt); insist(r.kind === 'artifact' && r.ok && r.versionName === VERSION && r.versionCode === CODE && HASH.test(r.apkSha256), `No selected v${VERSION}/code${CODE} artifact`); console.log(r.apk); return; }
   else throw new Error('Unknown receipt command: ' + cmd);
   console.log('✓ ' + cmd + ' passed');
 }

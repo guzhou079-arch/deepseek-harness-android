@@ -1,5 +1,7 @@
 #!/system/bin/sh
-# Build the selected v1.38/code70 dist artifact. Compilation is a prior step.
+# Build one explicitly selected dist artifact. Compilation is a prior step.
+# Required: DSH_DIST_VERSION=<name> DSH_DIST_CODE=<1..2147483647>
+# Preview without building: append --print-plan. Historical versioned scripts remain unchanged.
 set -eu
 F=/data/user/0/com.deepseek.harness/files
 R="${DSH_PROJECT:-$(cd "$(dirname "$0")/../.." && pwd)}"
@@ -9,7 +11,14 @@ NODE="$F/payload/runtime/bin/node"
 RUN="$F/work/linux/run.sh"
 export LD_LIBRARY_PATH="$F/payload/runtime/lib:${LD_LIBRARY_PATH:-}"
 export DSH_PROJECT="$R"
-[ "${DSH_DIST_VERSION:-}" = 1.38 ] && [ "${DSH_DIST_CODE:-}" = 70 ] || { echo '✗ Requires DSH_DIST_VERSION=1.38 DSH_DIST_CODE=70'; exit 1; }
+V="${DSH_DIST_VERSION:-}"; C="${DSH_DIST_CODE:-}"
+case "$V" in ''|*[!0-9.]*|.*|*.|*..*) echo '✗ DSH_DIST_VERSION must contain digits/dots and no empty segment'; exit 2 ;; esac
+case "$C" in ''|*[!0-9]*|0*) echo '✗ DSH_DIST_CODE must be a canonical integer in 1..2147483647'; exit 2 ;; esac
+[ "$C" -ge 1 ] && [ "$C" -le 2147483647 ] || { echo '✗ DSH_DIST_CODE out of range'; exit 2; }
+if [ "${1:-}" = "--print-plan" ]; then
+  printf 'version=%s\ncode=%s\noutput=DeepSeekHarness-v%s-code%s-<timestamp>-<pid>-dist.apk\n' "$V" "$C" "$V" "$C"
+  exit 0
+fi
 BASE="$SB/work/base-current-175.apk"
 [ -f "$BASE" ] || { echo '✗ Missing base-current-175.apk'; exit 1; }
 [ -z "${DSH_BASE:-}" ] || [ "$(realpath "$DSH_BASE")" = "$(realpath "$BASE")" ] || { echo '✗ Wrong APK base'; exit 1; }
@@ -69,7 +78,7 @@ fi
 # 防止把开发机上的用户插件 .pnpm / 个人状态打进发行包 —— 多一个条目就失败退出。
 PROF_MOD="$OVL/dshhome/profiles/web/node_modules"
 if [ -d "$PROF_MOD" ]; then
-  PROF_ALLOW="dsh-android-console dsh-plugin-auto-summary-policy dsh-plugin-session-rewind dsh-plugin-turn-notify dsh-session-delete dsh-codex-power-slider dsh-doc-media dsh-doc-actions dsh-smart-search @deepseek-ai"
+  PROF_ALLOW="dsh-android-console dsh-plugin-auto-summary-policy dsh-plugin-session-rewind dsh-plugin-turn-notify dsh-session-delete dsh-codex-power-slider dsh-doc-media dsh-doc-actions dsh-smart-search dsh-plugin-roundtable dsh-ppt fflate @deepseek-ai @office-kit"
   for child in "$PROF_MOD"/* "$PROF_MOD"/.[!.]* "$PROF_MOD"/..?*; do
     [ -e "$child" ] || continue
     pname=$(basename "$child")
@@ -102,10 +111,10 @@ runlog sh "$SB/selfbuild.sh" patch
 runlog "$NODE" "$SB/scripts/strip-dist-payload.js" "$SB/work/payload-new.zip"
 runlog "$NODE" "$SB/scripts/slim-dist-payload.js" "$SB/work/payload-new.zip"
 runlog "$NODE" "$RECEIPTS" payload-check --payload "$SB/work/payload-new.zip" --checks "$SB/checks.manifest" --dist yes
-runlog sh "$SB/selfbuild.sh" pack --dex "$DEX"
+runlog sh "$SB/selfbuild.sh" pack --dex "$DEX" --asset "$R/v118/android-app/splash/boot.html:assets/boot.html"
 runlog sh "$SB/selfbuild.sh" mark
-runlog "$NODE" "$SB/scripts/set-apk-version.js" "$SB/work/unsigned.apk" "$SB/work/unsigned-v.apk" --name 1.38 --code 70 --share-target com.deepseek.harness.MainActivity
-OUT="$SB/out/DeepSeekHarness-v1.38-code70-$(date +%Y%m%d-%H%M%S)-$$-dist.apk"
+runlog "$NODE" "$SB/scripts/set-apk-version.js" "$SB/work/unsigned.apk" "$SB/work/unsigned-v.apk" --name "$V" --code "$C" --share-target com.deepseek.harness.MainActivity
+OUT="$SB/out/DeepSeekHarness-v$V-code$C-$(date +%Y%m%d-%H%M%S)-$$-dist.apk"
 [ ! -e "$OUT" ] || exit 1
 if ! sh "$RUN" java -cp /tc/apksigner.jar com.android.apksigner.ApkSignerTool sign \
   --ks /keys/dist.keystore --ks-pass "pass:$PASS" --key-pass "pass:$PASS" --ks-key-alias distkey \
@@ -121,7 +130,10 @@ REPORT="$OUT.privacy-report.json"
 runlog "$PY" "$SB/scripts/scan-dist-privacy.py" --apk "$OUT" --overlay "$OVL" --wallpaper "$R/bg-patch/dsh-bg-user.png" --report "$REPORT"
 runlog "$NODE" "$RECEIPTS" evidence --kind privacy --apk "$OUT" --report "$REPORT" --out "$OUT.privacy.json"
 restore_dist
-ARTIFACT="${DSH_ARTIFACT_RECEIPT:-$SB/out/release-v1.38-code70.json}"
+# 门禁咬住刚签名的最终 OUT；版本声明也随调用传入，防止文件名、清单和发布意图分叉。
+# runlog 原样返回非零，set -e 会在 artifact 收据之前中止；发布端没有可上传的通过凭据。
+runlog env DSH_EXPECT_VERSION="$V" DSH_EXPECT_CODE="$C" sh "$SB/scripts/gate.sh" "$OUT"
+ARTIFACT="${DSH_ARTIFACT_RECEIPT:-$SB/out/release-v$V-code$C.json}"
 runlog "$NODE" "$RECEIPTS" artifact --apk "$OUT" --compile "$COMPILE" --payload "$SB/work/payload-new.zip" --checks "$SB/checks.manifest" --signature "$SIGNATURE" --assets "$SB/work/packed-assets.json" --out "$ARTIFACT"
 echo "✓ Exact artifact: $OUT"
 echo "✓ Artifact receipt: $ARTIFACT"

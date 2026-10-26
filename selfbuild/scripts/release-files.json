@@ -4,6 +4,7 @@
   {"repo":"android-app/src/com/deepseek/harness/ScheduleBridge.java","local":"v118/android-app/src/com/deepseek/harness/ScheduleBridge.java"},
   {"repo":"android-app/src/com/deepseek/harness/ShareInbox.java","local":"v118/android-app/src/com/deepseek/harness/ShareInbox.java"},
   {"repo":"android-app/src/com/deepseek/harness/DraftInputBridge.java","local":"v118/android-app/src/com/deepseek/harness/DraftInputBridge.java"},
+  {"repo":"android-app/src/com/deepseek/harness/RootShell.java","local":"v118/android-app/src/com/deepseek/harness/RootShell.java"},
   {"repo":"selfbuild/scripts/release.sh","local":"selfbuild/scripts/release.sh"},
   {"repo":"selfbuild/scripts/release-checks.mjs","local":"selfbuild/scripts/release-checks.mjs"},
   {"repo":"selfbuild/scripts/release-receipts.mjs","local":"selfbuild/scripts/release-receipts.mjs"},

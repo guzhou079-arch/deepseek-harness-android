@@ -32,6 +32,8 @@ const BAD = [
   [/archive-2\.5d\/layers\//i, '派生美术'],
   [/MainActivity\.java\.(bak|pre-lan)/i, '源码备份'],
   [/\.(keystore|p12|pfx)$/i, '签名钥匙'],
+  // 开发备份不属于运行内容；overlay 里出现 .bak-* / *.bak / *.orig 时也不能带进发行包。
+  [/(?:\.bak(?:[.-]|$)|\.orig$)/i, '开发备份'],
   [/(^|\/)AGENTS\.md$/i, '全局指令'],
   [/(^|\/)\.credentials/i, '登录凭据'],
   [/sessions\/session-|session\.v4\.jsonl/i, '会话数据'],
@@ -44,6 +46,8 @@ const BAD = [
   // 开发机自己的状态（ui-conversation / ui-onboarding），发给新用户会让对方**跳过首次引导**，
   // 而且它属于「用户文件」（App 只在缺失时写入），本来就不该随包。
   [/(^|\/)dshhome\/settings\.yaml$/i, '个人设置（非可分发种子）'],
+  // 白名单要约束底包，不只是 overlay：model-roles.json 等后增个人配置同样不能随包。
+  [/^dshhome\/(?!(?:skills|cordis\.patch\.yml|profiles)(?:\/|$))[^/]+(?:\/|$)/i, '非可分发 dshhome 种子'],
   // 2026-10-15：第三方 changelog 是纯死重量（30 份 ≈ 830KB），
   // 更是隐私扫描**假阳性**的来源：上游 changelog 里 40 位 commit SHA 会命中
   // 11 位手机号正则，dependabot 的 @users.noreply.github.com 会命中邮箱正则。

@@ -54,26 +54,10 @@ public final class ScheduleExecutor {
         }
     }
 
-    /** root(su) 是否可用：`su -c id` 输出含 uid=0。与 MainActivity.probeRoot() 同判据。 */
-    private static boolean rootAvailable() {
-        Process p = null;
-        try {
-            p = Runtime.getRuntime().exec(new String[]{"su", "-c", "id"});
-            BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream()));
-            String line = r.readLine();
-            try {
-                if (android.os.Build.VERSION.SDK_INT >= 26) {
-                    if (!p.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)) p.destroy();
-                } else {
-                    p.waitFor();
-                }
-            } catch (Throwable ignored) {}
-            return line != null && line.contains("uid=0");
-        } catch (Throwable t) {
-            return false;
-        } finally {
-            try { if (p != null) p.destroy(); } catch (Throwable ignored) {}
-        }
+    private static RootShell.Probe probeRoot() {
+        RootShell.Probe result = RootShell.probe();
+        Log.i(TAG, "root probe: " + result.detail);
+        return result;
     }
 
     /** 本地特权路由 /shell 的鉴权令牌。
@@ -270,8 +254,10 @@ public final class ScheduleExecutor {
             // 改为真探测（判据同 MainActivity），并把相关环境补齐：
             //   APP_LOCAL_TOKEN → 默认首选通道就是 App 内嵌桥 /shell，没有它插件会退回抖动的 rish；
             //   APP_A11Y_PORT   → dsh-tool-accessibility 靠它读屏/点击，缺了「屏幕助手」类工具全不可用。
+            RootShell.Probe rootProbe = probeRoot();
             env.put("SHIZUKU_AVAILABLE", shizukuAvailable() ? "1" : "0");
-            env.put("ROOT_AVAILABLE", rootAvailable() ? "1" : "0");
+            env.put("ROOT_AVAILABLE", rootProbe.ok ? "1" : "0");
+            env.put("ROOT_SU", rootProbe.suPath);
             env.put("APP_LOCAL_TOKEN", localToken(ctx));
             env.put("APP_NOTIFY_PORT", String.valueOf(enginePort(ctx) + 1));
             env.put("APP_A11Y_PORT", String.valueOf(enginePort(ctx) + 101));

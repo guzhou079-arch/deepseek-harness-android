@@ -58,6 +58,15 @@ def scan(apk, overlay, wallpaper):
                     if b'\0' not in data[:1024] and re.search(r'dsh-purge|\[dsh-purge\]', data.decode('utf-8', 'ignore')):
                         problems.append('purge patch in overlay: ' + rel)
             own.update(n for n in names if n.startswith('dshhome/profiles/') or n.endswith('CHANGELOG.md'))
+            # 2026-10-26：vendored 第三方依赖（原样 npm 包）里有两类**非用户数据**的必然命中：
+            #   · 作者邮箱：各包 package.json / README / SECURITY.md（npm 元数据，不是我们的联系人）
+            #   · SWC 生成的哈希变量名 `$69aac16029968692$var$…` 里含 11 位数字，会命中手机号正则
+            #     （fontkit 的 dist 被 swc 打包成这种名字，改不动）
+            # 只对这三棵上游依赖树放行正文特征，文件名/私图/purge/dshhome 种子等判定照旧，
+            # 放行条数写进报告，便于审计。
+            vendor = ('dshhome/profiles/web/node_modules/@office-kit/',
+                      'dshhome/profiles/web/node_modules/fflate/',
+                      'dshhome/profiles/web/node_modules/dsh-ppt/node_modules/')
             patterns = {
                 'phone': r'(?<!\d)1[3-9]\d{9}(?!\d)',
                 'email': r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.(?:com|cn|net)',
@@ -66,7 +75,11 @@ def scan(apk, overlay, wallpaper):
                 'credential': r'\bsk-[A-Za-z0-9_-]{16,}|\bghp_[A-Za-z0-9]{20,}|\bgithub_pat_',
                 'local dependency': r'link:/',
             }
+            vendored = 0
             for n in sorted(own & set(names)):
+                if n.startswith(vendor):
+                    vendored += 1
+                    continue
                 data = inner.read(n)
                 if b'\0' in data[:1024]:
                     continue
@@ -88,7 +101,7 @@ def scan(apk, overlay, wallpaper):
             image = [line.strip() for line in css.splitlines() if '--dsh-user-bg-image:' in line]
             if not image or 'dsh-bg.svg' not in image[0] or prefix + 'dsh-bg.svg' not in names:
                 problems.append('generic background missing or not selected')
-    return problems
+    return problems, vendored
 
 
 def main():
@@ -99,7 +112,7 @@ def main():
     a.add_argument('--report', required=True)
     args = a.parse_args()
     before = file_sha(args.apk)
-    problems = scan(args.apk, args.overlay, args.wallpaper)
+    problems, vendored = scan(args.apk, args.overlay, args.wallpaper)
     if file_sha(args.apk) != before:
         raise RuntimeError('APK changed during privacy scan')
     if problems:
@@ -109,7 +122,7 @@ def main():
     report = {'schema': 1, 'kind': 'privacy', 'ok': True, 'apkSha256': before,
               'checks': {'filenames': True, 'wallpaperBytes': True, 'contents': True,
                          'dshhomeAllowlist': True, 'background': True, 'purge': True,
-                         'profileDependencies': True},
+                         'profileDependencies': True, 'vendoredContentSkipped': vendored},
               'scannerSha256': file_sha(__file__), 'overlay': os.path.abspath(args.overlay)}
     target = os.path.abspath(args.report)
     tmp = target + '.tmp-' + str(os.getpid())

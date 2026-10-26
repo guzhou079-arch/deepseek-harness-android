@@ -110,19 +110,23 @@ $NODE <本技能目录>/scripts/review-channels.mjs --gate     # 体检默认会
 
 ## 5. 配置（可选，个人数据，放在自己家里、不进包）
 
-`$DSH_HOME/review.json`：
+`$DSH_HOME/review.json`（`defaults` 两种写法都认：字符串 = 单通道；对象 = 同一 provider 挂多条线）：
 
 ```json
 {
   "monitor": "https://<状态监控站>",
   "window": "1h",
   "defaults": {
-    "claude": "<claude 侧模型 id>",
-    "gpt":    "<gpt 侧模型 id>",
-    "gemini": "<gemini 侧模型 id>"
+    "gemini":   { "provider": "opencode-go", "model": "gemini-4-argon",      "vendor": "Google" },
+    "kimi":     { "provider": "opencode-go", "model": "kimi-k3.1-pro",       "vendor": "Moonshot AI" },
+    "deepseek": { "provider": "opencode-go", "model": "deepseek-v4.1-flash", "vendor": "DeepSeek" }
   }
 }
 ```
+
+> 2026-10-26 起默认会审 = **Gemini 4 Argon + Kimi K3.1 Pro**（DeepSeek 留作第三视角）。
+> 依据见 `fact-review-model-policy`。`opencode-go` 的模型来自 pi-ai 内置目录、patch 里没列清单，
+> 所以 `--gate` 对它只能标「清单未列（需现测）」——真能不能调，以一次真实调用为准。
 
 - `monitor`：可选。支持 New API 风格监控站的三条 embed 接口
   （`/api/model-status/embed/status/batch?window=1h`、`/config/selected`、`/token-groups`）。

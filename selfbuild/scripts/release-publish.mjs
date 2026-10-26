@@ -45,8 +45,10 @@ export async function publishVerifiedRelease({ request, artifact, tag, commit, t
 }
 
 async function main() {
-  const artifactFile = arg('artifact', path.join(sb, 'out/release-v1.38-code70.json')), artifact = checkArtifact(artifactFile);
-  const baseline = checkBaseline(arg('baseline', path.join(sb, 'out/baseline-v1.37.json')));
+  insist(/^[0-9]+(?:\.[0-9]+)*$/.test(process.env.DSH_DIST_VERSION || '') && /^[1-9][0-9]*$/.test(process.env.DSH_DIST_CODE || ''), 'Set explicit DSH_DIST_VERSION and DSH_DIST_CODE');
+  const artifactFile = arg('artifact', path.join(sb, `out/release-v${VERSION}-code${CODE}.json`)), artifact = checkArtifact(artifactFile);
+  const baselineTag = arg('baseline-tag');
+  const baseline = checkBaseline(arg('baseline', path.join(sb, `out/baseline-${baselineTag || 'unselected'}.json`)), baselineTag);
   checkEvidence(arg('privacy', artifact.apk + '.privacy.json'), 'privacy', artifact.apkSha256);
   checkEvidence(arg('isolated', artifact.apk + '.isolated.json'), 'isolated', artifact.apkSha256);
   const clone = arg('clone', `${process.env.DSH_VERIFY_DIR || '/data/user/0/com.deepseek.harness/files/_verify'}/ws-GitHub`);
@@ -70,8 +72,8 @@ async function main() {
     return response.json();
   }
   const remote = await request(`${API}/git/ref/heads/main`); insist(remote.object?.sha === commit, 'Source HEAD has not reached remote main; push source before tag');
-  const currentBaseline = await request(`${API}/releases/tags/v1.37`);
-  insist(currentBaseline.id === baseline.releaseId && currentBaseline.published_at && !currentBaseline.draft, 'Published v1.37 baseline changed');
+  const currentBaseline = await request(`${API}/releases/tags/${baseline.tag}`);
+  insist(currentBaseline.id === baseline.releaseId && currentBaseline.published_at && !currentBaseline.draft, `Published ${baseline.tag} baseline changed`);
   for (const a of baseline.assets) insist(currentBaseline.assets.some(x => x.id === a.id && x.digest === 'sha256:' + a.sha256), 'Published baseline asset changed');
   const tag = 'v' + VERSION;
   const tagRef = await request(`${API}/git/ref/tags/${tag}`, {}, true);

@@ -139,9 +139,17 @@ if (GATE) {
     console.error(`✗ 没有配默认会审通道：${CFG}\n  先决定每条线用哪个模型（写进 "defaults"），再跑 --gate。`);
     process.exit(2);
   }
-  for (const [vendor, model] of Object.entries(defaults)) {
-    const p = providers.find((x) => x.id === vendor);
-    entries.push({ vendor, model, entitled: !!(p && p.models.includes(model)), provider: p || null });
+  // defaults 两种写法都认：字符串 = 单通道（provider 名即 key）；
+  // 对象 = {provider, model}，支持同一 provider 挂多条线（2026-10-26 Gemini+Kimi 都在 opencode-go）。
+  for (const [key, val] of Object.entries(defaults)) {
+    const providerId = typeof val === 'string' ? key : (val && val.provider) || key;
+    const model = typeof val === 'string' ? val : val && val.model;
+    if (!model) { entries.push({ vendor: providerId, model: '(缺 model)', entitled: false, provider: null }); continue; }
+    const p = providers.find((x) => x.id === providerId);
+    // patch 里没列模型的 provider（如 opencode-go 走 pi-ai 内置目录）静态查不了，
+    // 标成 'unlisted' 而不是「不在授权清单」—— 需用真实调用现测。
+    const entitled = !p ? false : (p.models.length ? p.models.includes(model) : 'unlisted');
+    entries.push({ vendor: providerId, model, entitled, provider: p || null });
   }
 } else {
   for (const p of providers) entries.push({ vendor: p.id, model: null, entitled: true, provider: p });
@@ -163,7 +171,8 @@ for (const e of entries) {
   // ⚠️ 没查到状态（unknown / 未在监控清单）**不能算通过** ——
   //    那只是「未验证」。只有明确 green 才算过；没配监控站时是「静态通过」，
   //    结论里必须写明「运行状态未验证」。
-  e.ok = e.entitled && (!hasMonitor || e.status === 'green');
+  // 'unlisted' = provider 静态清单为空（内置目录），静态查不到 ≠ 不存在，不能判死。
+  e.ok = e.entitled !== false && (!hasMonitor || e.status === 'green');
 }
 
 /* ---------------- 输出 ---------------- */
@@ -181,7 +190,9 @@ if (JSON_OUT) {
     const mark = e.ok ? '✅' : '❌';
     const bits = [
       `${e.vendor.padEnd(7)} ${e.model}`,
-      e.entitled ? '在授权清单' : '⛔ 不在授权清单（必然调不通）',
+      e.entitled === true ? '在授权清单'
+        : e.entitled === 'unlisted' ? '清单未列（内置目录，需现测）'
+        : '⛔ 不在授权清单（必然调不通）',
       e.status,
       e.fail != null ? `失败${e.fail}/空${e.empty}` : '',
       e.perCall != null ? `标称≈¥${e.perCall}/次` : '',
