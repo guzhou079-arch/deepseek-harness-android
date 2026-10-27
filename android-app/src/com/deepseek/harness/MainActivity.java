@@ -619,6 +619,23 @@ public class MainActivity extends Activity {
                         + "push();setTimeout(push,800);setTimeout(push,2500);}catch(e){}})()",
                         null);
                 } catch (Throwable ignored) {}
+                // v1.45 壳层导航：**不在 onPageFinished 里清历史**。
+                // 会审（Gemini 4 Argon / Kimi K3.1 Pro，2026-10-27）两条独立指控：
+                //   1) Chromium 对同文档导航（pushState/replaceState/hash）也可能回调 onPageFinished，
+                //      无条件 clearHistory() 会把 SPA 刚推进去的路由项当场抹平，history.back() 永远失效；
+                //   2) 重载、加载中的早期 pushState 也会被清，路由史丢失。
+                // 结论：白屏问题在 onBackUnhandled 里解决（prev 不是 loopback 就不 goBack，直接 confirmExit），
+                // 不清历史也不会有机会落到 data: 文档上。
+                //
+                // 侧边栏/浮层要靠前端自己吃返回，这里补一个窗口级桥；前端没有就别答（返回 false 走兜底）。
+                try {
+                    view.evaluateJavascript(DSH_BACK_JS, null);
+                } catch (Throwable ignored) {}
+                // 升级后首次启动时插件 bundle 的 rev 会在启动途中变化（rev 由 client.js 的 mtime 派生），
+                // 早开的页面会停在「Failed to load plugins」——这里自愈：探测到就 reload，最多两次。
+                try {
+                    schedulePluginFailureProbe(view);
+                } catch (Throwable ignored) {}
             }
         });
 
@@ -1582,7 +1599,11 @@ public class MainActivity extends Activity {
         conDialog("退出 DeepSeek Harness", "确定要退出吗？界面会关闭，服务器将在后台继续运行。", "退出", new Runnable() {
             @Override public void run() {
                 stopKeepAliveService(); // 用户主动退出：停止保活服务
-                finish();
+                // v1.45：不 finish()，改成退到后台。
+                // finish() 会销毁 Activity，再进时重建 → 走「兜底动画 + 重新 loadUrl」，
+                // 而重载很可能命中 WebView 里的旧 HTML（旧插件 rev），于是必现「Failed to load plugins」。
+                // 退到后台保留视图，再进走 onResume 恢复，既不重载也不会 rev 失配。
+                moveTaskToBack(true);
             }
         }, "取消");
     }
@@ -9982,6 +10003,75 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
+        handleBack();
+    }
+
+    /**
+     * 返回唯一入口（v1.45）：原生浮层 → 控制台 → 问网页 → 根页。
+     * 绝不无脑 goBack()：历史里可能躺着片子留下的 data:/blob: 文档，退上去 Chromium 直接报错页。
+     */
+    /** 升级后插件 bundle 缺失的自愈重试次数（正常页面永不触发，最多 2 次）。 */
+    private int pluginReloads = 0;
+
+    /**
+     * 窗口级返回桥（注入到页面）。前端若实现 window.__dshBack 就由它吃掉返回；
+     * 没实现则壳层兜底。模态框、侧边栏展开都按「看得见的关闭按钮」去找，找不到就返回 false，
+     * 绝不猜着点 —— 宁可退化成弹退出框，也不要误点。
+     *
+     * v2 修的是手机侧栏：手机端抽屉展开时 DOM 里是 div.dsh-mobile-scrim（透明遮罩，点了就收起），
+     * 收起时才是 [data-sidebar-collapsed]（属性存在即收起）。旧版判据写反了，手机侧栏永远匹配不到。
+     */
+    private static final String DSH_BACK_JS =
+        "(function(){if(window.__dshBack&&window.__dshBack.__v===3)return;"
+      + "function lab(re){var a=document.querySelectorAll('button,[role=button]');"
+      + "for(var i=0;i<a.length;i++){var s=(a[i].getAttribute('aria-label')||'')+' '+(a[i].getAttribute('title')||'');"
+      + "if(re.test(s))return a[i];}return null;}"
+      + "var f=function(){try{"
+      + "var d=document.querySelector('[role=dialog][aria-modal=\"true\"],dialog[open]');"
+      + "if(d){var b=d.querySelectorAll('button');for(var i=0;i<b.length;i++){"
+      + "var s=(b[i].getAttribute('aria-label')||'');"
+      + "if(/close|cancel|dismiss|关闭|取消/i.test(s)){b[i].click();return true;}}return false;}"
+      + "var sc=document.querySelector('.dsh-mobile-scrim');"
+      + "if(sc){sc.click();return true;}"
+      + "if(window.innerWidth>700)return false;"
+      + "var r=document.querySelector('[data-sidebar-collapsed]');"
+      + "if(!r){var t=lab(/sidebar|侧栏|侧边栏/i);if(t&&t.offsetParent!==null){t.click();return true;}}"
+      + "return false;}catch(e){return false;}};f.__v=3;window.__dshBack=f;})()";
+
+    /**
+     * 插件 bundle 自愈。升级后 payload 重解包会让 client.js 的 mtime 变化，而 combo rev 是从
+     * mtime/ctime/size 派生的（见 dsh-client-modules README）：启动途中 rev 会换一次，
+     * 早开的页面就会停在「Failed to load plugins」。探测到该文案就 reload，最多两次。
+     */
+    private void schedulePluginFailureProbe(final android.webkit.WebView view) {
+        for (final long d : new long[] { 2500L, 6500L }) {
+            view.postDelayed(new Runnable() {
+                @Override public void run() {
+                    if (pluginReloads >= 2) return;
+                    try {
+                        view.evaluateJavascript(
+                            "(function(){try{var t=document.body?document.body.innerText:'';"
+                          + "return t.indexOf('Failed to load plugins')>=0?'1':'0';}catch(e){return '0';}})()",
+                            new android.webkit.ValueCallback<String>() {
+                                @Override public void onReceiveValue(String v) {
+                                    if ("\"1\"".equals(v)) {
+                                        if (pluginReloads < 2) {
+                                            pluginReloads++;
+                                            diagLog("NAV", "plugin bundle missing -> reload #" + pluginReloads);
+                                            try { view.reload(); } catch (Throwable ignored) {}
+                                        }
+                                    } else {
+                                        pluginReloads = 0;
+                                    }
+                                }
+                            });
+                    } catch (Throwable ignored) {}
+                }
+            }, d);
+        }
+    }
+
+    private void handleBack() {
         // 自绘弹窗优先吃掉返回键（等同“取消”），避免返回键穿透到下层
         if (dialogOverlay != null) { closeDialogOverlay(); return; }
         // v1.12：控制台内的返回先回控制台首页，再退出
@@ -9990,11 +10080,61 @@ public class MainActivity extends Activity {
             confirmExit();
             return;
         }
-        // 有历史先回退（可关掉侧边栏/返回上一页）；没有历史则询问是否退出
-        if (webView != null && webView.canGoBack()) {
-            webView.goBack();
+        if (webView == null) { confirmExit(); return; }
+
+        // 先问网页：侧边栏/浮层打开时由前端自己吃掉返回（返回 "1" = 已处理）。
+        // 会审两轮（2026-10-27，Gemini 4 Argon + Kimi K3.1 Pro）合并结论：
+        //   · 要一次性仲裁：回调与超时互斥，只走一次（answered CAS），否则网页卡顿时会双退；
+        //   · 但也不能没有兜底 —— 一刀砍掉会让页面卡死时返回键彻底失灵（两家都点了这条）。
+        // 所以：超时 + CAS，两路谁先到谁结清，另一路作废。
+        // 第三轮会审（同两家，审 v1.45 发行包）指出 250ms 太紧：页面在渲染大段 Markdown 时主线程
+        // 阻塞超过 250ms，壳层会先走 onBackUnhandled，等 JS 空出来 __dshBack() 仍会执行一次
+        // ——「退出/回退」和「关侧栏」可能叠在一起。提大到 900ms 降低该竞态触发概率；
+        // 彻底消除需要前端把返回语义做成真契约（见 PATCH-NOTES 已知限制）。
+        final java.util.concurrent.atomic.AtomicBoolean answered =
+                new java.util.concurrent.atomic.AtomicBoolean(false);
+        try {
+            webView.evaluateJavascript(
+                "(function(){try{return (window.__dshBack && window.__dshBack()) ? '1' : '0';}"
+              + "catch(e){return '0';}})()",
+                new android.webkit.ValueCallback<String>() {
+                    @Override public void onReceiveValue(String value) {
+                        if (!answered.compareAndSet(false, true)) return;
+                        if (!"\"1\"".equals(value)) onBackUnhandled();
+                    }
+                });
+        } catch (Throwable t) {
+            if (answered.compareAndSet(false, true)) onBackUnhandled();
             return;
         }
+        webView.postDelayed(new Runnable() {
+            @Override public void run() {
+                if (answered.compareAndSet(false, true)) onBackUnhandled();
+            }
+        }, 900L);
+    }
+
+    /** 网页处理不了：只允许退回主界面这一条历史，data:/blob:/外链一律不认。 */
+    private void onBackUnhandled() {
+        try {
+            if (webView != null) {
+                android.webkit.WebBackForwardList h = webView.copyBackForwardList();
+                if (h != null) {
+                    int idx = h.getCurrentIndex();
+                    if (idx > 0) {
+                        String prev = String.valueOf(h.getItemAtIndex(idx - 1).getUrl());
+                        // 只认 loopback：片子那份文档是 loadDataWithBaseURL(null,…)，URL 恒为 about:blank，
+                        // 退到它 Chromium 就报 ERR_HTTP_RESPONSE_CODE_FAILURE（issue 里那张白屏）。
+                        // 不再比较 cur 与 prev：SPA 会 pushState({}, '', location.href) 压入「同 URL 不同 state」
+                        // 的条目（侧栏/抽屉层），按字符串相等判会把这些合法回退误杀（会审两家一致）。
+                        if (com.deepseek.harness.vscreen.LocalHttpFence.isLoopbackUrl(prev, enginePort)) {
+                            webView.goBack();
+                            return;
+                        }
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
         confirmExit();
     }
 }

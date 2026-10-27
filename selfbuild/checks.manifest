@@ -143,7 +143,7 @@ dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-experime
 # 2026-10-26 v1.42.13：双人会议、PPT 生成/渲染、侧栏功能收纳和会审通道兼容。
 # 2026-10-27 v1.43：当前会话多模型顺序回答、重复配置、成员污染与注入消息误判修复；31 项测试通过后重算入口哈希。
 dshhome/profiles/web/node_modules/dsh-plugin-roundtable/lib/index.js|455f16005d9b494ba20c5701c2fa2066|roundtable
-dshhome/profiles/web/node_modules/dsh-plugin-roundtable/lib/multi.js|e9d02c9283b281a7b2b18b76ae8df9c7|currentUserMessage
+dshhome/profiles/web/node_modules/dsh-plugin-roundtable/lib/multi.js|1aea380f78d12bdbeaf005f0cad679cf|currentUserMessage
 dshhome/profiles/web/node_modules/dsh-ppt/lib/index.js|8a169f375ea6d158da4a99f50f210846|dsh-ppt
 # PPT 渲染的调用 SDK（0.1.5，含 Android 两行补丁）随 dsh-ppt 走；146MB 的 WASM 引擎
 # 仍按 v1.39.5 的设计由「设置 → 文档预览」按需下载到 $DSH_HOME/office-kit，不进安装包。

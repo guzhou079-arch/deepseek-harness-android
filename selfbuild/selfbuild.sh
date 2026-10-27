@@ -89,7 +89,14 @@ patch)
   # 没有它，即使同步跑了，fast/add 也只写 REVISION + 免检前缀，改过的旧文件永远不更新。
   mkdir -p "$WORK"
   # 归一化：overlay 里既有 lib/... 也有 dshroot/... 两种布局，统一成 payload 内的 dshroot/... 路径
-  ( cd "$SB/../v118/dsh-patches/overlay" && find . -type f | sed 's|^\./||; s|^dshroot/||' | sed 's|^|dshroot/|' | sort ) > "$WORK/dshroot_forced.txt"
+  # 2026-10-27：清单来源补上 build-overlay/dshroot（真正的出包输入）。旧实现只扫
+  # v118/dsh-patches/overlay（30 条历史补丁，部分路径在 payload 里早已不存在）——
+  # build-overlay 里的内核文件改得再对，设备上 fast 同步也不会覆盖，新包等于白打。
+  # 两个来源取并集，重复由 sort -u 收敛。
+  ( cd "$SB/build-overlay" && find dshroot -type f | sed 's|^dshroot/||' ) > "$WORK/forced-a.txt"
+  ( cd "$SB/../v118/dsh-patches/overlay" && find . -type f | sed 's|^\./||; s|^dshroot/||' ) > "$WORK/forced-b.txt"
+  cat "$WORK/forced-a.txt" "$WORK/forced-b.txt" | sed '/^$/d' | sed 's|^|dshroot/|' | sort -u > "$WORK/dshroot_forced.txt"
+  rm -f "$WORK/forced-a.txt" "$WORK/forced-b.txt"
   echo "  REVISION(构建号)=$REV_STAMP；overlay 强制清单 $(wc -l < "$WORK/dshroot_forced.txt") 条"
   "$NODE" "$SB/lib/selfbuild.js" payload-patch "$PAY_OLD" "$PAY_NEW" "$SB/build-overlay"
 
