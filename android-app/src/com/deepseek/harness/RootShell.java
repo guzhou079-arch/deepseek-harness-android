@@ -14,11 +14,13 @@ public final class RootShell {
 
     public static final class Probe {
         public final boolean ok;
+        public final boolean detected;
         public final String suPath;
         public final String detail;
 
-        private Probe(boolean ok, String suPath, String detail) {
+        private Probe(boolean ok, boolean detected, String suPath, String detail) {
             this.ok = ok;
+            this.detected = detected;
             this.suPath = suPath;
             this.detail = detail;
         }
@@ -28,7 +30,8 @@ public final class RootShell {
 
     public static Probe probe() {
         StringBuilder failures = new StringBuilder();
-        Probe missing = new Probe(false, "su", "su not found");
+        boolean detected = false;
+        Probe missing = new Probe(false, false, "su", "su not found");
         String[] candidates = new String[FALLBACKS.length + 1];
         candidates[0] = "su";
         System.arraycopy(FALLBACKS, 0, candidates, 1, FALLBACKS.length);
@@ -37,6 +40,7 @@ public final class RootShell {
             if (executable == null) continue;
             Probe result = probeOne(executable);
             if (result.ok) return result;
+            detected = detected || result.detected;
             if (result.detail.startsWith("start failed:")) {
                 missing = result;
                 if (failures.length() > 0) failures.append("; ");
@@ -47,7 +51,7 @@ public final class RootShell {
             return result;
         }
         return failures.length() == 0 ? missing
-                : new Probe(false, missing.suPath, failures.toString());
+                : new Probe(false, detected, missing.suPath, failures.toString());
     }
 
     private static String resolve(String candidate) {
@@ -83,17 +87,17 @@ public final class RootShell {
             }
             if (exitCode == null) {
                 process.destroy();
-                return new Probe(false, executable, "timeout after " + TIMEOUT_MS + "ms: " + executable);
+                return new Probe(false, true, executable, "timeout after " + TIMEOUT_MS + "ms: " + executable);
             }
             String output = readLimited(process.getInputStream()).trim();
             String compact = output.replaceAll("\\s+", " ");
             if (compact.length() > 500) compact = compact.substring(0, 500);
             boolean ok = exitCode == 0 && compact.contains("uid=0");
-            return new Probe(ok, executable,
+            return new Probe(ok, true, executable,
                     "exit=" + exitCode + ", su=" + executable + (compact.length() > 0 ? ", output=" + compact : ""));
         } catch (Throwable t) {
             String message = t.getMessage();
-            return new Probe(false, executable, "start failed: " + executable
+            return new Probe(false, !"su".equals(executable), executable, "start failed: " + executable
                     + (message == null ? "" : " (" + message + ")"));
         } finally {
             if (process != null) {

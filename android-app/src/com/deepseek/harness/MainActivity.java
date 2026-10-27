@@ -1163,9 +1163,8 @@ public class MainActivity extends Activity {
         }
     }
 
-    // ============ 启动过渡动画与 Logo View（极简·现代·精致·流光圆环进度） ============
+    // ============ 启动过渡动画（光晕 + 流光圆环进度） ============
     private class SplashLogoView extends View {
-        private final Drawable logo;
         private final Paint glowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint trackPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint progressPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -1189,13 +1188,6 @@ public class MainActivity extends Activity {
 
         public SplashLogoView(Context context) {
             super(context);
-            Drawable d = null;
-            try {
-                d = getResources().getDrawable(R.drawable.ic_launcher, getTheme());
-            } catch (Throwable t) {
-                try { d = getResources().getDrawable(R.drawable.ic_launcher); } catch (Throwable ignored) {}
-            }
-            logo = d;
 
             trackPaint.setStyle(Paint.Style.STROKE);
             trackPaint.setStrokeWidth(dpF(2.5f));
@@ -1346,21 +1338,6 @@ public class MainActivity extends Activity {
                 }
             }
 
-            // ③ 鲸鱼 Logo（自适应深浅色 Tint + 104dp 微缩放呼吸）
-            if (logo != null) {
-                int tintColor = isDark() ? cText() : Color.parseColor("#1F2328");
-                logo.setTint(tintColor);
-                logo.setAlpha((int) (255f * appear));
-
-                float logoSize = dp(104) * (0.90f + 0.10f * appear) * (1.0f + 0.028f * breath);
-                int half = Math.round(logoSize / 2f);
-                int l = Math.round(cx - half);
-                int t = Math.round(cy - half);
-                int r = Math.round(cx + half);
-                int b = Math.round(cy + half);
-                logo.setBounds(l, t, r, b);
-                logo.draw(canvas);
-            }
         }
     }
 
@@ -1381,7 +1358,7 @@ public class MainActivity extends Activity {
         box.setTranslationY(-dp(24)); // 居中微抬，视觉重心更舒展
         splashBox = box;
 
-        // 1. 鲸鱼 Logo + 呼吸光晕
+        // 1. 呼吸光晕 + 流光圆环
         splashLogoView = new SplashLogoView(this);
         splashLogo = splashLogoView;
         LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(dp(168), dp(168));
@@ -3304,6 +3281,7 @@ public class MainActivity extends Activity {
 
     /** 结果缓存，onResume 时重置；执行端使用同一次探测得到的 su 绝对路径。 */
     private volatile Boolean rootOk = null;
+    private volatile boolean rootDetected = false;
     private volatile String rootSuPath = "su";
     private boolean rootAvailable() {
         Boolean cached = rootOk;
@@ -3315,6 +3293,7 @@ public class MainActivity extends Activity {
 
     private boolean probeRoot() {
         RootShell.Probe result = RootShell.probe();
+        rootDetected = result.detected;
         rootSuPath = result.suPath;
         Log.i(TAG, "root probe: " + result.detail);
         return result.ok;
@@ -7068,7 +7047,7 @@ public class MainActivity extends Activity {
             for (int i = 0; i < CON_PERMS.length; i++) {
                 String pid = CON_PERMS[i][0];
                 boolean ok = conPermOk(pid);
-                boolean noRoot = "root".equals(pid) && !conRootOk;
+                boolean noRoot = "root".equals(pid) && !rootDetected;
                 org.json.JSONObject row = new org.json.JSONObject();
                 row.put("id", pid);
                 row.put("title", CON_PERMS[i][1]);
@@ -8450,7 +8429,10 @@ public class MainActivity extends Activity {
             boolean ok = false;
             try { ok = rootAvailable(); } catch (Throwable ignored) {}
             conRootOk = ok;
-            ui.post(new Runnable() { @Override public void run() { refreshConsole(); } });
+            ui.post(new Runnable() { @Override public void run() {
+                refreshConsolePermIfShown();
+                refreshConsole();
+            }});
         }}, "root-probe").start();
     }
 
@@ -8515,7 +8497,7 @@ public class MainActivity extends Activity {
 
     private void addPermRow(LinearLayout col, String title, String desc, final String id) {
         boolean ok = conPermOk(id);
-        boolean noRoot = "root".equals(id) && !conRootOk;
+        boolean noRoot = "root".equals(id) && !rootDetected;
         String state = ok ? "已授权" : (noRoot ? "本机无 root" : "未授权");
         int color = ok ? cGreen() : (noRoot ? cSub() : cRed());
         LinearLayout left = new LinearLayout(this);
@@ -8569,7 +8551,10 @@ public class MainActivity extends Activity {
                 return;
             }
             if ("root".equals(id)) {
-                conToast("请在 root 管理器（Magisk / KernelSU）里给本应用授予 root");
+                rootOk = null;
+                conRootProbeTs = 0L;
+                conRefreshRootAsync();
+                conToast("正在请求 root 授权，请在管理器弹窗中允许");
                 return;
             }
             if ("shizuku".equals(id)) {

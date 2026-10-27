@@ -3,8 +3,32 @@
 > Chinese original (authoritative and most up to date): [CHANGELOG.md](CHANGELOG.md).
 > This English page mirrors it; if the two ever disagree, the Chinese one wins.
 
-> Current release: `1.42.4`. Every release installs **straight over the previous one** — same signing key,
+> Current release: `1.43`. Every release installs **straight over the previous one** — same signing key,
 > in-place upgrade, no uninstall (uninstalling wipes all app-private data).
+
+---
+
+## v1.43 — in-chat multi-model answers and root authorization fixes
+
+**Multi-model answers in the current chat**
+
+- The multi-model picker now lives in the chat header. Select 2–6 models and keep using the current composer; models answer sequentially in one reply.
+- Fixes the actual send path, getter-only RPC wrapping, and repeated configuration prefixes.
+- Fixes the real `toolHistory` shape silently falling back to ordinary chat.
+- Fixes empty answers and leaked tool protocol caused by participants inheriting the main agent's task: participants now receive only the current user message plus a dedicated system prompt.
+- Fixes engine-injected time/instruction messages being mistaken for the user's text, which left participants answering a bare timestamp.
+- All 31 unit/integration tests pass; real paid multi-model requests still need acceptance testing.
+
+**Root authorization**
+
+- A detected `su` that has not been authorized is no longer misreported as “no root on this device”; the authorization button stays enabled.
+- Tapping the button starts a fresh authorization request, and the permission page refreshes after the probe finishes.
+- Devices without a detected `su` keep the button disabled instead of offering an ineffective authorization entry.
+- Actual authorization on ReSukiSU still requires on-device verification.
+
+**Native fallback splash**
+
+- Removes the whale mark inside the progress ring while keeping the glow, ring, DSH text and status message. The app icon is unchanged.
 
 ---
 
