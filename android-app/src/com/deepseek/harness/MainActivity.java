@@ -1186,8 +1186,15 @@ public class MainActivity extends Activity {
         private float lastGlowRadius = 0f;
         private final RectF arcRect = new RectF();
 
+        // 官方 DSH 鲸鱼矢量：ic_whale_black 与 ic_launcher 的同一条 pathData（3394 字符，逐字节相同），
+        // 只少了 ic_launcher 的白底板 —— 白底板在深色启动页上就是那块「方形」；不能用 ic_launcher + setTint。
+        private Drawable whale;
+        private int lastWhaleColor = 0;
+
         public SplashLogoView(Context context) {
             super(context);
+
+            whale = getResources().getDrawable(R.drawable.ic_whale_black, getTheme());
 
             trackPaint.setStyle(Paint.Style.STROKE);
             trackPaint.setStrokeWidth(dpF(2.5f));
@@ -1287,6 +1294,22 @@ public class MainActivity extends Activity {
             if (w <= 0 || h <= 0) return;
             float cx = w / 2f, cy = h / 2f;
             int accent = cAccent();
+
+            // ③ 官方 DSH 鲸鱼（ic_launcher 里那条矢量路径，同一条 pathData；只去掉白底板，
+            //    因为白底板在深色启动页上就是那块「方形」）。先画鲸鱼，光晕与圆环叠在其上。
+            if (whale != null) {
+                int whaleColor = isDark() ? 0xFFFFFFFF : 0xFF101014;
+                if (whaleColor != lastWhaleColor) {
+                    whale.setTint(whaleColor);
+                    lastWhaleColor = whaleColor;
+                }
+                float ws = dp(72) * (1f + 0.03f * breath);
+                int half = (int) (ws / 2f);
+                whale.setBounds((int) (cx - half), (int) (cy - half),
+                        (int) (cx + half), (int) (cy + half));
+                whale.setAlpha((int) (255f * appear * (0.86f + 0.14f * breath)));
+                whale.draw(canvas);
+            }
 
             // ① 柔和径向渐变光晕
             float glowR = dp(84) * (1f + 0.08f * breath);

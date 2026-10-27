@@ -3,10 +3,16 @@
 > Chinese original (authoritative and most up to date): [CHANGELOG.md](CHANGELOG.md).
 > This English page mirrors it; if the two ever disagree, the Chinese one wins.
 
-> Current release: `1.43`. Every release installs **straight over the previous one** — same signing key,
+> Current release: `1.44`. Every release installs **straight over the previous one** — same signing key,
 > in-place upgrade, no uninstall (uninstalling wipes all app-private data).
 
 ---
+
+## v1.44 — the whale is back on the splash
+
+- The fallback splash shows the official DSH whale again, drawn from the same vector path the launcher icon uses (`ic_whale_black`): white on dark backgrounds, ink-black on light ones.
+- Fixes the black square: `ic_launcher` carries its own white plate, and `setTint` recoloured plate and whale alike into one solid block — which is why the whale never appeared.
+- The whale breathes very slightly with the halo; the progress ring and dot still draw on top. The app icon and the WebView boot film are unchanged.
 
 ## v1.43 — in-chat multi-model answers and root authorization fixes
 
