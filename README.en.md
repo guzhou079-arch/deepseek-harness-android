@@ -45,7 +45,7 @@ On top of the upstream Android shell, this build ships 25 Android adaptation pat
 
 ### Install in three steps
 
-1. Open **[Releases](https://github.com/guzhou079-arch/deepseek-harness-android/releases/latest)** and download the latest `DeepSeekHarness-vX.Y-dist.apk` (~95 MB, Android 8.0 and up).
+1. Open **[Releases](https://github.com/guzhou079-arch/deepseek-harness-android/releases/latest)** and download the latest `DeepSeekHarness-vX.Y-dist.apk` (~192 MB, Android 8.0 and up).
 2. Install it, then follow the first-run permission guide (accessibility, notifications, floating window — every one of them can be revoked in system settings later).
 3. Paste your own model API key in the settings page and start talking to it. No Termux, no root, no computer.
 

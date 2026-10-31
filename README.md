@@ -47,7 +47,7 @@
 
 ### 三步装好
 
-1. 打开 **[Releases](https://github.com/guzhou079-arch/deepseek-harness-android/releases/latest)**，下载最新的 `DeepSeekHarness-vX.Y-dist.apk`（约 95 MB，Android 8.0 及以上）；
+1. 打开 **[Releases](https://github.com/guzhou079-arch/deepseek-harness-android/releases/latest)**，下载最新的 `DeepSeekHarness-vX.Y-dist.apk`（约 192 MB，Android 8.0 及以上）；
 2. 安装后按首次引导给权限（无障碍、通知、悬浮窗等，可随时在系统设置里收回）；
 3. 在设置页填入自己的模型 API Key 就能开聊 —— 不用装 Termux、不用 root、不用连电脑。
 
