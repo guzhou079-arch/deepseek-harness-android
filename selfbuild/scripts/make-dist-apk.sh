@@ -7,7 +7,7 @@ F=/data/user/0/com.deepseek.harness/files
 R="${DSH_PROJECT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 SB="$R/selfbuild"; OVL="$SB/build-overlay"
 DIST="$OVL/dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist"
-NODE="$F/payload/runtime/bin/node"
+NODE="$F/.bin/node"
 RUN="$F/work/linux/run.sh"
 export LD_LIBRARY_PATH="$F/payload/runtime/lib:${LD_LIBRARY_PATH:-}"
 export DSH_PROJECT="$R"
@@ -78,7 +78,7 @@ fi
 # 防止把开发机上的用户插件 .pnpm / 个人状态打进发行包 —— 多一个条目就失败退出。
 PROF_MOD="$OVL/dshhome/profiles/web/node_modules"
 if [ -d "$PROF_MOD" ]; then
-  PROF_ALLOW="dsh-android-console dsh-plugin-auto-summary-policy dsh-plugin-session-rewind dsh-plugin-turn-notify dsh-session-delete dsh-codex-power-slider dsh-doc-media dsh-doc-actions dsh-smart-search dsh-plugin-roundtable dsh-ppt fflate @deepseek-ai @office-kit"
+  PROF_ALLOW="dsh-android-console dsh-plugin-auto-summary-policy dsh-plugin-session-rewind dsh-plugin-turn-notify dsh-session-delete dsh-codex-power-slider dsh-doc-media dsh-doc-actions dsh-smart-search dsh-plugin-roundtable dsh-ppt fflate @deepseek-ai @office-kit dsh-memory-ui dsh-user-profile dsh-plugin-another-me dsh-plugin-neuron-hub dsh-tool-gate dsh-plugin-food-card"
   for child in "$PROF_MOD"/* "$PROF_MOD"/.[!.]* "$PROF_MOD"/..?*; do
     [ -e "$child" ] || continue
     pname=$(basename "$child")

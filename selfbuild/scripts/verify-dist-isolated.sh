@@ -34,7 +34,7 @@ set -u
 F=/data/user/0/com.deepseek.harness/files
 R="${DSH_PROJECT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 SB="$R/selfbuild"
-NODE=$F/payload/runtime/bin/node
+NODE=$F/.bin/node
 CURL=$F/payload/runtime/bin/curl
 APK="$1"
 # 2026-10-15：本脚本全靠 $NODE / $CURL 抽 payload 与探活，而它们需要 runtime 的 .so。

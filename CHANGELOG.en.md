@@ -3,10 +3,46 @@
 > Chinese original (authoritative and most up to date): [CHANGELOG.md](CHANGELOG.md).
 > This English page mirrors it; if the two ever disagree, the Chinese one wins.
 
-> Current release: `1.44`. Every release installs **straight over the previous one** — same signing key,
+> Current release: `1.46`. Every release installs **straight over the previous one** — same signing key,
 > in-place upgrade, no uninstall (uninstalling wipes all app-private data).
 
 ---
+
+## v1.46 — delete sessions, roll back a conversation, progressive tool loading
+
+**Sessions**
+
+- Delete a session: **long-press** the row in the sidebar (right-click on desktop) → confirm → gone.
+- Roll back a conversation: **long-press one of your own messages** → confirm → fork back to just before it. This goes through the official fork path, so model context and UI both return to that point.
+- Both confirm dialogs are drawn in-page (the App WebView has no `window.confirm`); after deleting, the row is only visually dimmed and left for React to remove — no white screen.
+
+**Tool gate — progressive tool declarations (on by default)**
+
+- Instead of pushing every tool declaration into context at the start of a turn, the model first sees only `tool_load` and requests what it needs, effective on the next request. This saves the tool-table tokens paid on every turn.
+- `bash` stays resident and is never gated.
+- To restore the old behaviour: put `{"enabled": false}` in `$DSH_HOME/tool-gate.json`; takes effect in a new session, no need to remove the plugin.
+
+**Memory system ships with the app**
+
+- A memory panel in the sidebar (`/memory`): hot memories, lessons, user profile and search in one page.
+- Neuron hub: every user message first triggers a related-memory lookup; only hits are injected for that turn.
+- On first run the memory tools are laid down under `/sdcard/DeepSeekHarness/tools` and the database is created if missing; existing files are never overwritten. Data lives in `/sdcard/DeepSeekHarness/memory` and survives uninstalling the app.
+
+**New panels and skills**
+
+- User profile (nickname / how to address you / tone), Another Me (a second identity fully isolated from the memory DB), food recommendation cards.
+- New skills: `dsh-video` (photos/clips → finished mp4), `dsh-flashgou` (Taobao Flash Sale ordering, payment still done by you), `doc-tidy` scripts.
+
+**Kernel upgraded to `0.2.1-rc.5`**
+
+- Includes the attachment-layer EINVAL fix: a failed attachment is no longer misread as a network error and retried silently.
+
+## v1.45 — workspace picker, layered back button
+
+- The workspace directory picker can see real internal storage, and browses from the filesystem root once root is granted; fixes the default-argument fallback to `os.homedir()` and `opendir("/")` failing with `EACCES`.
+- Layered back button: collapses the sidebar first when open; self-heals the plugin error page; "exit" now sends the app to the background without restarting the engine or losing sessions; in-page back only calls `goBack` when the previous entry is a local URL.
+- Wide windows (>700px) no longer guess the sidebar state from button text.
+- Build chain: the forced-overlay list now includes the real build input `selfbuild/build-overlay/dshroot`, and both `lib/...` and `dshroot/...` overlay layouts are normalised.
 
 ## v1.44 — the whale is back on the splash
 

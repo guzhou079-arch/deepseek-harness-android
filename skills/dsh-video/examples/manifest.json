@@ -1,0 +1,47 @@
+{
+  "output": "/sdcard/DeepSeekHarness/videos/example.mp4",
+  "width": 1080,
+  "height": 1920,
+  "fps": 30,
+  "scenes": [
+    {
+      "src": "/sdcard/素材/封面.jpg",
+      "type": "image",
+      "duration": 2.4,
+      "motion": "in",
+      "text": "一句话说清这条片子讲什么"
+    },
+    {
+      "src": "/sdcard/素材/片段01.mp4",
+      "type": "video",
+      "duration": 3.0,
+      "trim": 1.5,
+      "text": "视频素材：从 1.5 秒开始截 3 秒"
+    },
+    {
+      "src": "/sdcard/素材/细节.jpg",
+      "type": "image",
+      "duration": 2.0,
+      "motion": "left",
+      "text": "第二句\n可以手动换行"
+    },
+    {
+      "src": "/sdcard/素材/结尾.jpg",
+      "type": "image",
+      "duration": 2.2,
+      "motion": "out",
+      "text": "结尾字幕"
+    }
+  ],
+  "transition": { "type": "fade", "duration": 0.5 },
+  "audio": {
+    "bgm": "/sdcard/素材/bgm.mp3",
+    "volume": 0.4,
+    "duck": true
+  },
+  "style": {
+    "fontSize": 46,
+    "marginV": 96
+  },
+  "srt": true
+}

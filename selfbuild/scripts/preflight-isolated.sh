@@ -19,7 +19,7 @@
 F=/data/user/0/com.deepseek.harness/files
 R="${DSH_PROJECT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 SB="$R/selfbuild"
-NODE=$F/payload/runtime/bin/node
+NODE=$F/.bin/node
 CURL=$F/payload/runtime/bin/curl
 # 2026-10-15：自己导出库路径 + 自证在跑。以前靠调用方 export，
 # 忘了就 `CANNOT LINK … libcares.so not found`（看着像引擎/包坏了，其实是门禁没起来）；

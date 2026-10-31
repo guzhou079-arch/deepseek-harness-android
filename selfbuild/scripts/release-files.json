@@ -1,39 +1,194 @@
 [
-  {"repo":"android-app/src/com/deepseek/harness/ScheduledTaskStore.java","local":"v118/android-app/src/com/deepseek/harness/ScheduledTaskStore.java"},
-  {"repo":"android-app/src/com/deepseek/harness/ScheduleAlarms.java","local":"v118/android-app/src/com/deepseek/harness/ScheduleAlarms.java"},
-  {"repo":"android-app/src/com/deepseek/harness/ScheduleBridge.java","local":"v118/android-app/src/com/deepseek/harness/ScheduleBridge.java"},
-  {"repo":"android-app/src/com/deepseek/harness/ShareInbox.java","local":"v118/android-app/src/com/deepseek/harness/ShareInbox.java"},
-  {"repo":"android-app/src/com/deepseek/harness/DraftInputBridge.java","local":"v118/android-app/src/com/deepseek/harness/DraftInputBridge.java"},
-  {"repo":"android-app/src/com/deepseek/harness/RootShell.java","local":"v118/android-app/src/com/deepseek/harness/RootShell.java"},
-  {"repo":"selfbuild/scripts/release.sh","local":"selfbuild/scripts/release.sh"},
-  {"repo":"selfbuild/scripts/release-checks.mjs","local":"selfbuild/scripts/release-checks.mjs"},
-  {"repo":"selfbuild/scripts/release-receipts.mjs","local":"selfbuild/scripts/release-receipts.mjs"},
-  {"repo":"selfbuild/scripts/release-sync.mjs","local":"selfbuild/scripts/release-sync.mjs"},
-  {"repo":"selfbuild/scripts/release-publish.mjs","local":"selfbuild/scripts/release-publish.mjs"},
-  {"repo":"selfbuild/scripts/release-files.json","local":"selfbuild/scripts/release-files.json"},
-  {"repo":"selfbuild/scripts/gh-stats.mjs","local":"selfbuild/scripts/gh-stats.mjs"},
-  {"repo":"selfbuild/scripts/make-dist-apk.sh","local":"selfbuild/scripts/make-dist-apk.sh"},
-  {"repo":"selfbuild/scripts/javac-app.sh","local":"selfbuild/scripts/javac-app.sh"},
-  {"repo":"selfbuild/scripts/set-apk-version.js","local":"selfbuild/scripts/set-apk-version.js"},
-  {"repo":"selfbuild/scripts/scan-dist-privacy.py","local":"selfbuild/scripts/scan-dist-privacy.py"},
-  {"repo":"selfbuild/scripts/diff-dist-payloads.py","local":"selfbuild/scripts/diff-dist-payloads.py"},
-  {"repo":"selfbuild/patch-check.sh","local":"selfbuild/patch-check.sh"},
-  {"repo":"selfbuild/scripts/verify-dist-isolated.sh","local":"selfbuild/scripts/verify-dist-isolated.sh"},
-  {"repo":"selfbuild/lib/android-manifest.js","local":"selfbuild/lib/android-manifest.js"},
-  {"repo":"selfbuild/lib/ziptool.js","local":"selfbuild/lib/ziptool.js"},
-  {"repo":"selfbuild/lib/selfbuild.js","local":"selfbuild/lib/selfbuild.js"},
-  {"repo":"selfbuild/selfbuild.sh","local":"selfbuild/selfbuild.sh"},
-  {"repo":"selfbuild/checks.manifest","local":"selfbuild/checks.manifest"},
-  {"repo":"plugins/dsh-plugin-session-rewind/package.json","local":"selfbuild/build-overlay/dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-plugin-session-rewind/package.json"},
-  {"repo":"plugins/dsh-plugin-session-rewind/lib/index.js","local":"selfbuild/build-overlay/dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-plugin-session-rewind/lib/index.js"},
-  {"repo":"plugins/dsh-plugin-session-rewind/lib/core.js","local":"selfbuild/build-overlay/dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-plugin-session-rewind/lib/core.js"},
-  {"repo":"plugins/dsh-plugin-session-rewind/lib/client.js","local":"selfbuild/build-overlay/dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-plugin-session-rewind/lib/client.js"},
-  {"repo":"plugins/dsh-plugin-session-rewind/cordis.patch.yml","local":"selfbuild/build-overlay/dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-plugin-session-rewind/cordis.patch.yml"},
-  {"repo":"plugins/dsh-plugin-session-rewind/README.md","local":"selfbuild/build-overlay/dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-plugin-session-rewind/README.md"},
-  {"repo":"plugins/dsh-plugin-turn-notify/package.json","local":"selfbuild/build-overlay/dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-plugin-turn-notify/package.json"},
-  {"repo":"plugins/dsh-plugin-turn-notify/lib/index-v3.js","local":"selfbuild/build-overlay/dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-plugin-turn-notify/lib/index-v3.js"},
-  {"repo":"plugins/dsh-plugin-turn-notify/cordis.patch.yml","local":"selfbuild/build-overlay/dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-plugin-turn-notify/cordis.patch.yml"},
-  {"repo":"plugins/dsh-plugin-turn-notify/README.md","local":"selfbuild/build-overlay/dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-plugin-turn-notify/README.md"},
-  {"repo":"plugins/dsh-plugin-auto-summary-policy/package.json","local":"plugins/dsh-plugin-auto-summary-policy/package.json"},
-  {"repo":"plugins/dsh-plugin-auto-summary-policy/lib/index.js","local":"plugins/dsh-plugin-auto-summary-policy/lib/index.js"}
+ {
+  "repo": "android-app/src/com/deepseek/harness/ScheduledTaskStore.java",
+  "local": "v118/android-app/src/com/deepseek/harness/ScheduledTaskStore.java"
+ },
+ {
+  "repo": "android-app/src/com/deepseek/harness/ScheduleAlarms.java",
+  "local": "v118/android-app/src/com/deepseek/harness/ScheduleAlarms.java"
+ },
+ {
+  "repo": "android-app/src/com/deepseek/harness/ScheduleBridge.java",
+  "local": "v118/android-app/src/com/deepseek/harness/ScheduleBridge.java"
+ },
+ {
+  "repo": "android-app/src/com/deepseek/harness/ShareInbox.java",
+  "local": "v118/android-app/src/com/deepseek/harness/ShareInbox.java"
+ },
+ {
+  "repo": "android-app/src/com/deepseek/harness/DraftInputBridge.java",
+  "local": "v118/android-app/src/com/deepseek/harness/DraftInputBridge.java"
+ },
+ {
+  "repo": "android-app/src/com/deepseek/harness/RootShell.java",
+  "local": "v118/android-app/src/com/deepseek/harness/RootShell.java"
+ },
+ {
+  "repo": "selfbuild/scripts/release.sh",
+  "local": "selfbuild/scripts/release.sh"
+ },
+ {
+  "repo": "selfbuild/scripts/release-checks.mjs",
+  "local": "selfbuild/scripts/release-checks.mjs"
+ },
+ {
+  "repo": "selfbuild/scripts/release-receipts.mjs",
+  "local": "selfbuild/scripts/release-receipts.mjs"
+ },
+ {
+  "repo": "selfbuild/scripts/release-sync.mjs",
+  "local": "selfbuild/scripts/release-sync.mjs"
+ },
+ {
+  "repo": "selfbuild/scripts/release-publish.mjs",
+  "local": "selfbuild/scripts/release-publish.mjs"
+ },
+ {
+  "repo": "selfbuild/scripts/release-files.json",
+  "local": "selfbuild/scripts/release-files.json"
+ },
+ {
+  "repo": "selfbuild/scripts/gh-stats.mjs",
+  "local": "selfbuild/scripts/gh-stats.mjs"
+ },
+ {
+  "repo": "selfbuild/scripts/make-dist-apk.sh",
+  "local": "selfbuild/scripts/make-dist-apk.sh"
+ },
+ {
+  "repo": "selfbuild/scripts/javac-app.sh",
+  "local": "selfbuild/scripts/javac-app.sh"
+ },
+ {
+  "repo": "selfbuild/scripts/set-apk-version.js",
+  "local": "selfbuild/scripts/set-apk-version.js"
+ },
+ {
+  "repo": "selfbuild/scripts/scan-dist-privacy.py",
+  "local": "selfbuild/scripts/scan-dist-privacy.py"
+ },
+ {
+  "repo": "selfbuild/scripts/diff-dist-payloads.py",
+  "local": "selfbuild/scripts/diff-dist-payloads.py"
+ },
+ {
+  "repo": "selfbuild/patch-check.sh",
+  "local": "selfbuild/patch-check.sh"
+ },
+ {
+  "repo": "selfbuild/scripts/verify-dist-isolated.sh",
+  "local": "selfbuild/scripts/verify-dist-isolated.sh"
+ },
+ {
+  "repo": "selfbuild/lib/android-manifest.js",
+  "local": "selfbuild/lib/android-manifest.js"
+ },
+ {
+  "repo": "selfbuild/lib/ziptool.js",
+  "local": "selfbuild/lib/ziptool.js"
+ },
+ {
+  "repo": "selfbuild/lib/selfbuild.js",
+  "local": "selfbuild/lib/selfbuild.js"
+ },
+ {
+  "repo": "selfbuild/selfbuild.sh",
+  "local": "selfbuild/selfbuild.sh"
+ },
+ {
+  "repo": "selfbuild/checks.manifest",
+  "local": "selfbuild/checks.manifest"
+ },
+ {
+  "repo": "plugins/dsh-plugin-session-rewind/package.json",
+  "local": "selfbuild/build-overlay/dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-plugin-session-rewind/package.json"
+ },
+ {
+  "repo": "plugins/dsh-plugin-session-rewind/lib/index.js",
+  "local": "selfbuild/build-overlay/dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-plugin-session-rewind/lib/index.js"
+ },
+ {
+  "repo": "plugins/dsh-plugin-session-rewind/lib/core.js",
+  "local": "selfbuild/build-overlay/dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-plugin-session-rewind/lib/core.js"
+ },
+ {
+  "repo": "plugins/dsh-plugin-session-rewind/lib/client.js",
+  "local": "selfbuild/build-overlay/dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-plugin-session-rewind/lib/client.js"
+ },
+ {
+  "repo": "plugins/dsh-plugin-session-rewind/cordis.patch.yml",
+  "local": "selfbuild/build-overlay/dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-plugin-session-rewind/cordis.patch.yml"
+ },
+ {
+  "repo": "plugins/dsh-plugin-session-rewind/README.md",
+  "local": "selfbuild/build-overlay/dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-plugin-session-rewind/README.md"
+ },
+ {
+  "repo": "plugins/dsh-plugin-turn-notify/package.json",
+  "local": "selfbuild/build-overlay/dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-plugin-turn-notify/package.json"
+ },
+ {
+  "repo": "plugins/dsh-plugin-turn-notify/lib/index-v3.js",
+  "local": "selfbuild/build-overlay/dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-plugin-turn-notify/lib/index-v3.js"
+ },
+ {
+  "repo": "plugins/dsh-plugin-turn-notify/cordis.patch.yml",
+  "local": "selfbuild/build-overlay/dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-plugin-turn-notify/cordis.patch.yml"
+ },
+ {
+  "repo": "plugins/dsh-plugin-turn-notify/README.md",
+  "local": "selfbuild/build-overlay/dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-plugin-turn-notify/README.md"
+ },
+ {
+  "repo": "plugins/dsh-plugin-auto-summary-policy/package.json",
+  "local": "plugins/dsh-plugin-auto-summary-policy/package.json"
+ },
+ {
+  "repo": "plugins/dsh-plugin-auto-summary-policy/lib/index.js",
+  "local": "plugins/dsh-plugin-auto-summary-policy/lib/index.js"
+ },
+ {
+  "repo": "skills/dsh-claude-style/SKILL.md",
+  "local": "selfbuild/build-overlay/dshhome/skills/dsh-claude-style/SKILL.md"
+ },
+ {
+  "repo": "skills/dsh-flashgou/SKILL.md",
+  "local": "selfbuild/build-overlay/dshhome/skills/dsh-flashgou/SKILL.md"
+ },
+ {
+  "repo": "skills/dsh-video/SKILL.md",
+  "local": "selfbuild/build-overlay/dshhome/skills/dsh-video/SKILL.md"
+ },
+ {
+  "repo": "skills/dsh-video/examples/manifest.json",
+  "local": "selfbuild/build-overlay/dshhome/skills/dsh-video/examples/manifest.json"
+ },
+ {
+  "repo": "skills/dsh-video/scripts/inventory.mjs",
+  "local": "selfbuild/build-overlay/dshhome/skills/dsh-video/scripts/inventory.mjs"
+ },
+ {
+  "repo": "skills/dsh-video/scripts/render.mjs",
+  "local": "selfbuild/build-overlay/dshhome/skills/dsh-video/scripts/render.mjs"
+ },
+ {
+  "repo": "skills/dsh-video/scripts/selftest.sh",
+  "local": "selfbuild/build-overlay/dshhome/skills/dsh-video/scripts/selftest.sh"
+ },
+ {
+  "repo": "skills/dsh-write-craft/SKILL.md",
+  "local": "selfbuild/build-overlay/dshhome/skills/dsh-write-craft/SKILL.md"
+ },
+ {
+  "repo": "skills/dsh-write-craft/scripts/ai-flavor-check.mjs",
+  "local": "selfbuild/build-overlay/dshhome/skills/dsh-write-craft/scripts/ai-flavor-check.mjs"
+ },
+ {
+  "repo": "skills/doc-tidy/SKILL.md",
+  "local": "selfbuild/build-overlay/dshhome/skills/doc-tidy/SKILL.md"
+ },
+ {
+  "repo": "skills/doc-tidy/scripts/doc_tidy.py",
+  "local": "selfbuild/build-overlay/dshhome/skills/doc-tidy/scripts/doc_tidy.py"
+ }
 ]

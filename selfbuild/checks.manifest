@@ -54,8 +54,8 @@ dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-app/
 #       e6eb41e7 → 88ea18c3），而 verify 里的 `|| true` 又把它吞了 → 四版没人发现。
 #       内容对不对由发版前人工过目保证，不由 md5 保证（md5 在此只制造假警报）。
 #    ⚠ 顺带一条：只换 dex 的包（不动 payload）里这份日志来自骨架版本，本来就比 overlay 旧。
-dshroot/CHANGELOG.md|-|更新日志
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/CHANGELOG.md|-|更新日志
+dshroot/CHANGELOG.md|fd3c1b3f9bf27f7a0740c5cb684f4200|更新日志
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/CHANGELOG.md|fd3c1b3f9bf27f7a0740c5cb684f4200|更新日志
 # ⑭ v1.36：账户 UI —— 放开上游「桌面独占」门禁（apply 首行 dshDesktop 检查）
 #    刻意不注入全局 dshDesktop，以免挤掉 settings-models 的 API Key 引导。
 #    ⚠ 2026-10-17 换 0.2.1 时发现：上游自己把这道门禁去掉了（apply 里只剩
@@ -69,7 +69,6 @@ dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-fron
 #    ② 登录流程不开弹窗：`window.open("about:blank")` → null，拿到授权地址后
 #       用 `window.location.assign()` 走主框架导航（App 的 shouldOverrideUrlLoading 交给系统浏览器）。
 #    关键字改成 `target: "_self"`：本补丁一旦丢就判失败，别让「没反应」再回来。
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-settings-account/lib/client.js|02254e4e1859643d5a5b94e096045c8c|target: "_self"
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/node-addon-require-builtin/lib/index.js|23c1201e436009f11de735dae37cd763|Android 适配
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/node-addon-system/lib/flock.js|03d8a933a6b2c34790539ca3fd1818b4|noopBinding
 # ⑮ v1.37（rc.2 修复·问题3）：bash-local 的 sandboxMode 覆盖必须进 overlay。
@@ -84,14 +83,14 @@ dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-bash-loc
 #    改为引擎直接调 App 特权桥执行 am start（shell uid 2000）。
 #    补丁脚本：selfbuild/scripts/patch-bring-to-front.js
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-deepseek-account-platform/lib/index.js|c83acb5ad065aa1e80ecd651731a64bb|dsh-android-patch v4 (bring-to-front)
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/index.html|3c56a8f6f72fa1a122970536353f20ce|/mobile.css
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/index.html|e9618f5235598ccd3b2dc45ae80d3808|/mobile.css
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/mobile.js|ad907fd1fc84e4da84501e45c7eb2f50|dsh-update-banner
 # ④ Android 运行环境适配（2026-10-03 rc.2 事故后补录：这 6 个文件的补丁原先只手工塞在 payload 里，
 #    换内核时随上游改动一起被覆盖 → 每轮 EACCES。纳入清单后，装机前的 verify 就能拦住）
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/index.js|4c0b92b8f85f030b51aa7da75ce46b27|open(currentPath, "wx")
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-fs-local/lib/index.js|9612532ae447891802d15fb144862fc6|isHardlinkUnsupported
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-attachment-local/lib/index.js|786c67c021c111485c80d4ed9eaa6363|sharp-shim
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-llm-deepseek/lib/index.js|7ca9f56a6c9bacc230e61ad74b37fed6|isAttachmentError
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-attachment-local/lib/index.js|b5e9b6cb09ef34747c6e9449cfaf2f94|sharp-shim
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-llm-deepseek/lib/index.js|5dcbccf6481423d825eeee58752326f7|isAttachmentError
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-ptc-runtime-node/lib/index.js|2222f584f928ed1c056bd193d38d8d7f|LD_LIBRARY_PATH
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-fs-search/lib/index.js|a4e290d7e60914351f0173c9ed0941eb|ripgrep is unavailable
 
@@ -114,7 +113,7 @@ dshhome/profiles/web/node_modules/dsh-plugin-turn-notify/lib/index-v3.js|3e40e4c
 #    同 id 条目会替换前一层并**静默丢掉它的 config**，1.38 的"新建会话失败"就是这么来的
 # 2026-10-24 更新 md5：新增 dsh-smart-search，并把 web.searchProvider 设为 auto-search。
 # 原 auto-summary-policy、dsh-doc-media 等条目保留；强制搜索仍由 web_search_with 显式选择。
-dshhome/cordis.patch.yml|9caa19b5bef807e26a5ca9bd0d8c4c13|dsh-doc-media
+dshhome/cordis.patch.yml|f5b0b1a0fb722af22a168636d399bae6|dsh-doc-media
 
 # 2026-10-21 v1.42：文件预览视频播放 + 安卓文件动作。两个都是纯客户端插件，
 # Node 半边（lib/index.js）只为让 Loader 能解析包入口，必须随包，否则启动日志报
@@ -142,12 +141,5 @@ dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-experime
 
 # 2026-10-26 v1.42.13：双人会议、PPT 生成/渲染、侧栏功能收纳和会审通道兼容。
 # 2026-10-27 v1.43：当前会话多模型顺序回答、重复配置、成员污染与注入消息误判修复；31 项测试通过后重算入口哈希。
-dshhome/profiles/web/node_modules/dsh-plugin-roundtable/lib/index.js|455f16005d9b494ba20c5701c2fa2066|roundtable
-dshhome/profiles/web/node_modules/dsh-plugin-roundtable/lib/multi.js|1aea380f78d12bdbeaf005f0cad679cf|currentUserMessage
-dshhome/profiles/web/node_modules/dsh-ppt/lib/index.js|8a169f375ea6d158da4a99f50f210846|dsh-ppt
-# PPT 渲染的调用 SDK（0.1.5，含 Android 两行补丁）随 dsh-ppt 走；146MB 的 WASM 引擎
-# 仍按 v1.39.5 的设计由「设置 → 文档预览」按需下载到 $DSH_HOME/office-kit，不进安装包。
-dshhome/profiles/web/node_modules/dsh-ppt/node_modules/@deepseek-ai/libreoffice-kit/package.json|fa53aa46b68bd015b0742bf7ef49e723|libreoffice-kit
-dshhome/profiles/web/node_modules/dsh-ppt/node_modules/@deepseek-ai/libreoffice-kit/lib/index.js|d49f793e204669d0eab29b718e2ad44e|platform !== "android"
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-sidebar/lib/client.js|1d01e5e007809a39e7e353f0bbd50731|dsh.sidebar.featurePanelsOpen
 dshhome/skills/dsh-review/scripts/review-channels.mjs|44a6de8ae7525a06b8d23a22a73325db|unlisted

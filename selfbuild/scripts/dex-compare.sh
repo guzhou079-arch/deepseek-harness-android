@@ -19,7 +19,7 @@ esac
 DIR="${SELF%/*}"
 LIB="$DIR/../lib/dexinfo.js"
 
-NODE="${DEX_NODE:-/data/user/0/com.deepseek.harness/files/payload/runtime/bin/node}"
+NODE="${DEX_NODE:-/data/user/0/com.deepseek.harness/files/.bin/node}"
 if [ ! -x "$NODE" ]; then
   NODE="$(command -v node 2>/dev/null || true)"
 fi

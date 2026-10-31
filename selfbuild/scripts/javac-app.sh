@@ -44,7 +44,7 @@ BUILD=$SB/work/appbuild/out
 GEN_A=$SB/work/gen/com/deepseek/harness/R.java
 RUN=/data/user/0/com.deepseek.harness/files/work/linux/run.sh
 RG=/data/user/0/com.deepseek.harness/files/payload/runtime/bin/rg
-NODE=/data/user/0/com.deepseek.harness/files/payload/runtime/bin/node
+NODE=/data/user/0/com.deepseek.harness/files/.bin/node
 export LD_LIBRARY_PATH="/data/user/0/com.deepseek.harness/files/payload/runtime/lib:${LD_LIBRARY_PATH:-}"
 INNER=$BUILD/inner-javac.sh
 

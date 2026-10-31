@@ -34,7 +34,7 @@ case "$1" in
     L=$(latest)
     if [ -n "$L" ]; then
       # 最新备份的年龄（秒）；mksh 没有 stat -c %Y 的稳定保证，用 node 算
-      AGE=$(/data/user/0/com.deepseek.harness/files/payload/runtime/bin/node -e "
+      AGE=$(/data/user/0/com.deepseek.harness/files/.bin/node -e "
         const fs=require('fs');const p=process.argv[1];
         console.log(Math.floor((Date.now()-fs.statSync(p).mtimeMs)/1000));" "$L" 2>/dev/null)
       if [ -n "$AGE" ] && [ "$AGE" -lt 72000 ]; then

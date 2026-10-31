@@ -14,7 +14,7 @@
 # ============================================================================
 set -u
 F=/data/user/0/com.deepseek.harness/files
-NODE=$F/payload/runtime/bin/node
+NODE=$F/.bin/node
 CURL=$F/payload/runtime/bin/curl
 LIVE=$F/payload/dshroot
 ISO=$F/tmp/console-plugin-check

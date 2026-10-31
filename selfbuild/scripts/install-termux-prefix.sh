@@ -13,7 +13,7 @@ set -e
 F=/data/user/0/com.deepseek.harness/files
 ROOT=$F/payload/termux-usr
 PY=$F/payload/python/bin/python3.14
-NODE=$F/payload/runtime/bin/node
+NODE=$F/.bin/node
 CURL=$F/payload/runtime/bin/curl
 CA=$F/payload/runtime/etc/cacert.pem
 T=$F/tmp

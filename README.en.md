@@ -1,24 +1,36 @@
-# DeepSeek Harness · Android port (enhanced)
+# DeepSeek Harness for Android
 
 <div align="center">
 
-**English** | [中文](README.md)
+**English** ｜ [中文](README.md)
 
-<br>
+[![Download the latest APK](https://img.shields.io/badge/%E2%AC%87_Download_APK-2ea44f?style=for-the-badge)](https://github.com/guzhou079-arch/deepseek-harness-android/releases/latest)
+[![Install & requirements](https://img.shields.io/badge/Install_%26_requirements-3_steps-0b6bcb?style=for-the-badge)](docs/en/install.md)
+[![FAQ](https://img.shields.io/badge/FAQ-common_questions-6e40c9?style=for-the-badge)](docs/en/faq.md)
 
-[![Stars](https://img.shields.io/github/stars/guzhou079-arch/deepseek-harness-android?style=flat&label=stars)](https://github.com/guzhou079-arch/deepseek-harness-android/stargazers)
-[![Release](https://img.shields.io/github/v/release/guzhou079-arch/deepseek-harness-android?label=latest%20release)](https://github.com/guzhou079-arch/deepseek-harness-android/releases/latest)
 ![Platform](https://img.shields.io/badge/Platform-Android%208.0%2B-brightgreen)
+[![Release](https://img.shields.io/github/v/release/guzhou079-arch/deepseek-harness-android?label=latest%20release)](https://github.com/guzhou079-arch/deepseek-harness-android/releases/latest)
+[![Stars](https://img.shields.io/github/stars/guzhou079-arch/deepseek-harness-android?style=flat&label=stars)](https://github.com/guzhou079-arch/deepseek-harness-android/stargazers)
 [![Last commit](https://img.shields.io/github/last-commit/guzhou079-arch/deepseek-harness-android)](https://github.com/guzhou079-arch/deepseek-harness-android/commits/main)
 
 </div>
 
-**DeepSeek Harness, installable as an Android APK — no Termux, no root, no computer.**
+**DeepSeek Harness as a ready-to-install Android APK — no Termux, no root, no PC.**
 
-Screen reading, taps, typing, a virtual display and scheduled tasks all run inside the app; 21 skills ship bundled; paste your own model API key and go.
-**What sets it apart: the app builds itself** — edit code on the phone and run `javac → dex → repackage → sign → release` without a PC.
+Paste your own model API key and it is working: screen reading, taps, typing, a virtual display to drive other apps, scheduled tasks, 21 bundled skills.
+**What makes it different: it builds itself** — edit code on the phone and run `javac → d8 → repackage → sign → release` without ever touching a computer.
 
-**[⬇ Download the latest APK](https://github.com/guzhou079-arch/deepseek-harness-android/releases/latest)** (~95 MB, Android 8.0+) · [Install & requirements](docs/en/install.md) · [FAQ](docs/en/faq.md) · [Upgrade & rescue](docs/en/upgrade-and-rescue.md)
+## What you skip
+
+| | Rolling your own | This APK |
+|---|---|---|
+| Setup | Termux, Node, clone the repo, wire up the config | Download, install |
+| First run | A pile of commands and docs | Paste one API key |
+| Skills | Install them one by one | 21 bundled |
+| Your screen while the AI works | Occupied | It works on a virtual display; your screen stays yours |
+| Build / release | Back to the PC | The phone builds, signs and ships it |
+
+## What it does
 
 | Highlight | Detail |
 |---|---|
@@ -26,10 +38,12 @@ Screen reading, taps, typing, a virtual display and scheduled tasks all run insi
 | 🐳 **Floating ball / desktop pet** | Tap the ball and it "speaks": lines, balance, usage today, last-turn cost, peak/off-peak hints |
 | ☁️ **Reply capsule** | While the AI writes, a capsule appears under the status bar; tap it for a scrollable card |
 | 🎛️ **Console inside settings** | Engine control, rescue mode, permission overview, plugin switches, time-machine backup |
-| 🧩 **21 bundled skills** | Diagrams · slide decks · storyboards · memory hub · Office batch · Word/公文 · Excel · meeting notes · business mail · local RAG · full-site backup · cross-vendor review · web crawling · code craft · data insight · deep research · scrum planning · life hub · voice |
+| 🧩 **21 bundled skills** | Diagrams · slide decks · storyboards · memory hub · Office batch · Word / formal docs · Excel · meeting notes · business mail · local RAG · full-site backup · cross-vendor review · web crawling · code craft · data insight · deep research · scrum planning · life hub · voice |
 | 🔧 **Builds itself on the phone** | `javac → d8 → repackage → sign → release`; the build environment is downloaded on demand (~193 MB) |
 
-## Install in three steps
+On top of the upstream Android shell, this build ships 25 Android adaptation patches (system capability / engine / hardening / UI / login) plus self-authored plugins. Provenance and licenses are at the end of this file.
+
+### Install in three steps
 
 1. Open **[Releases](https://github.com/guzhou079-arch/deepseek-harness-android/releases/latest)** and download the latest `DeepSeekHarness-vX.Y-dist.apk` (~95 MB, Android 8.0 and up).
 2. Install it, then follow the first-run permission guide (accessibility, notifications, floating window — every one of them can be revoked in system settings later).
@@ -71,7 +85,7 @@ dsh plugin --profile web add https://github.com/guzhou079-arch/dsh-plugin-androi
 
 ## What was changed vs upstream
 
-- Android adaptation patches (45+): app shell, single-process engine, storage/permission handling, engine startup and HTTP dispatch.
+- Android adaptation patches (25): app shell, single-process engine, storage/permission handling, engine startup and HTTP dispatch.
 - **On-device build chain**: the app can build, sign and publish itself; project sources and scripts are in this repository.
 - Bundled skills and self-authored patches (see the repository tree).
 

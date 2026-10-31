@@ -5,7 +5,7 @@ set -eu
 R="${DSH_PROJECT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 SB="$R/selfbuild"
 F=/data/user/0/com.deepseek.harness/files
-NODE="$F/payload/runtime/bin/node"
+NODE="$F/.bin/node"
 export LD_LIBRARY_PATH="$F/payload/runtime/lib:${LD_LIBRARY_PATH:-}"
 export DSH_PROJECT="$R"
 BASE="$SB/work/base-current-175.apk"

@@ -12,7 +12,7 @@
 # ============================================================================
 R="${DSH_PROJECT:-$(cd "$(dirname "$0")/.." && pwd)}"
 SB="$R/selfbuild"
-NODE=/data/user/0/com.deepseek.harness/files/payload/runtime/bin/node
+NODE=/data/user/0/com.deepseek.harness/files/.bin/node
 TARGET=${DSH_PAYLOAD:-/data/user/0/com.deepseek.harness/files/payload}
 MANIFEST=$SB/checks.manifest
 

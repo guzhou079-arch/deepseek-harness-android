@@ -14,7 +14,7 @@
 R="${DSH_PROJECT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 SB="$R/selfbuild"
 CURL=/data/user/0/com.deepseek.harness/files/payload/runtime/bin/curl
-NODE=/data/user/0/com.deepseek.harness/files/payload/runtime/bin/node
+NODE=/data/user/0/com.deepseek.harness/files/.bin/node
 PREFS=/data/user/0/com.deepseek.harness/shared_prefs/dsh_prefs.xml
 TOKEN=$(sed -n 's/.*name="local_token"[^>]*>\([^<]*\)<.*/\1/p' "$PREFS" | head -1)
 PORT=$(sed -n 's/.*name="engine_port"[^>]*>\([0-9]*\)<.*/\1/p' "$PREFS" | head -1)

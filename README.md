@@ -1,27 +1,36 @@
-# DeepSeek Harness · 安卓移植增强版
+# DeepSeek Harness · 安卓版
 
 <div align="center">
 
-<img src="docs/assets/readme/banner.svg" width="100%" alt="DeepSeek Harness · 安卓移植增强版">
+**中文** ｜ [English](README.en.md)
 
-**中文** | [English](README.en.md)
+[![下载最新 APK](https://img.shields.io/badge/%E2%AC%87_%E4%B8%8B%E8%BD%BD%E6%9C%80%E6%96%B0_APK-2ea44f?style=for-the-badge)](https://github.com/guzhou079-arch/deepseek-harness-android/releases/latest)
+[![安装与要求](https://img.shields.io/badge/%E5%AE%89%E8%A3%85%E4%B8%8E%E8%A6%81%E6%B1%82-3_%E6%AD%A5%E8%A3%85%E5%A5%BD-0b6bcb?style=for-the-badge)](docs/安装与要求.md)
+[![常见问题](https://img.shields.io/badge/%E5%B8%B8%E8%A7%81%E9%97%AE%E9%A2%98-FAQ-6e40c9?style=for-the-badge)](docs/常见问题.md)
 
-<br>
-
-[![Stars](https://img.shields.io/github/stars/guzhou079-arch/deepseek-harness-android?style=flat&label=stars)](https://github.com/guzhou079-arch/deepseek-harness-android/stargazers)
-[![Release](https://img.shields.io/github/v/release/guzhou079-arch/deepseek-harness-android?label=latest%20release)](https://github.com/guzhou079-arch/deepseek-harness-android/releases/latest)
 ![Platform](https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-Android%208.0%2B-brightgreen)
+[![Release](https://img.shields.io/github/v/release/guzhou079-arch/deepseek-harness-android?label=latest%20release)](https://github.com/guzhou079-arch/deepseek-harness-android/releases/latest)
+[![Stars](https://img.shields.io/github/stars/guzhou079-arch/deepseek-harness-android?style=flat&label=stars)](https://github.com/guzhou079-arch/deepseek-harness-android/stargazers)
 [![Last commit](https://img.shields.io/github/last-commit/guzhou079-arch/deepseek-harness-android)](https://github.com/guzhou079-arch/deepseek-harness-android/commits/main)
 
 </div>
 
+**DeepSeek Harness 装进安卓：一个 APK，不用 Termux、不用 root、不用电脑。**
 
-**把 DeepSeek Harness 装进安卓：一个 APK，不用 Termux、不用 root、不用电脑。**
+装完填个 API Key 就能聊：能读屏、点按、输入、在虚拟屏里操作别的 App，能跑定时任务，21 款技能随包。
+**最不一样的一点：它能在手机上给自己出包** —— 改完代码直接在手机里 `javac → d8 → 重打包 → 签名 → 发版`，全程不碰电脑。
 
-读屏、点击、输入、虚拟屏、定时任务都在 App 内跑，21 款技能随包，装上填个 API Key 就能用。
-**最不一样的地方：它能在手机上给自己出包** —— 改完代码直接在手机里 `javac → dex → 重打包 → 签名 → 发版`。
+## 装起来到底省了什么
 
-**[⬇ 下载最新 APK](https://github.com/guzhou079-arch/deepseek-harness-android/releases/latest)**（约 95 MB，Android 8.0+） · [安装与要求](docs/安装与要求.md) · [常见问题](docs/常见问题.md) · [升级与救援](docs/升级与救援.md)
+| | 自己动手装 | 这个 APK |
+|---|---|---|
+| 准备环境 | 装 Termux、装 Node、拉仓库、改配置 | 下载 APK，安装 |
+| 首次配置 | 对着一堆命令和文档 | 填一个 API Key |
+| 技能 | 一个个单独装 | 21 款随包 |
+| AI 干活时你的屏 | 被占着，没法干别的 | 虚拟屏里跑，主屏照常用 |
+| 出包 / 发版 | 得回电脑 | 手机自己构建、签名、发版 |
+
+## 装完能干什么
 
 | 亮点 | 说明 |
 |---|---|
@@ -32,6 +41,8 @@
 | 🧩 **21 款技能随包** | 架构图 · 演示稿 · 短视频分镜 · 记忆中枢 · Office 批处理 · Word/公文 · Excel 多表 · 会议纪要 · 邮件公函 · 本地 RAG · 全站备份 · 跨厂商会审 · 网页抓取 · 代码工程 · 数据洞察 · 深度调研 · 敏捷排期 · 生活中枢 · 语音交互 |
 | 🔧 **手机上自己出包** | `javac → d8 → 重打包 → 签名 → 发版`，构建环境按需下载（约 193MB） |
 
+> 在上游安卓壳骨架之上，本版本带 25 条安卓适配补丁（系统能力 / 引擎适配 / 安全加固 / 界面 / 登录）与自研插件，来源与许可见文末。
+>
 > **English** — DeepSeek Harness as an installable Android APK: no Termux, no root, no PC. Screen reading, taps, typing, virtual display and scheduled tasks all run inside the app; 21 skills are bundled; and the app **builds, signs and releases its own APK on the phone**.
 
 ### 三步装好
