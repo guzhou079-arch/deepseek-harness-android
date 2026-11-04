@@ -1,5 +1,7 @@
 # DeepSeek Harness for Android
 
+<img src="docs/assets/readme/banner-en.svg" width="100%" alt="DeepSeek Harness for Android">
+
 <div align="center">
 
 **English** ｜ [中文](README.md)
