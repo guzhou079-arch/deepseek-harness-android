@@ -24,6 +24,10 @@
   "local": "v118/android-app/src/com/deepseek/harness/RootShell.java"
  },
  {
+  "repo": "android-app/src/com/deepseek/harness/KernelStore.java",
+  "local": "v118/android-app/src/com/deepseek/harness/KernelStore.java"
+ },
+ {
   "repo": "selfbuild/scripts/release.sh",
   "local": "selfbuild/scripts/release.sh"
  },
