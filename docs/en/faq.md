@@ -95,3 +95,6 @@ reports are welcome.
 **Q: Does it secretly upload my data?**
 A: This project runs no servers and has no analytics or telemetry; only what you send to the AI goes to the model
 service you configured. See [Permissions & privacy](permissions.md).
+
+**Q: It will not install, or I am stuck — where do I ask?**
+A: Search this page and the [issues](https://github.com/guzhou079-arch/deepseek-harness-android/issues) first; if that does not help, join the **QQ group `1050918023`** — no GitHub account needed. In the app, Settings → Console → QQ group opens the group card in one tap. (The group is Chinese-speaking.)
