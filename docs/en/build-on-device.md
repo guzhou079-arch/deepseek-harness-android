@@ -9,7 +9,7 @@
 
 | | Where | Size |
 |---|---|---|
-| Main package (APK) | This repository's Releases | about **95 MB** |
+| Main package (APK) | This repository's Releases | about **192 MB** |
 | **Build environment** | **Downloaded on demand inside the app** | about **193 MB** (342 MB extracted) |
 | Source code | This repository | tiny |
 

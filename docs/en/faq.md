@@ -86,7 +86,7 @@ read [Build environment and packaging](build-on-device.md) first.
 ## Other
 
 **Q: How much space does it take?**
-A: The APK is about 95 MB; app data about 0.6 GB; the optional build environment about 340 MB.
+A: The APK is about 192 MB; app data about 0.6 GB; the optional build environment about 340 MB.
 
 **Q: Are tablets / landscape supported?**
 A: Phone portrait is the primary target. Landscape and tablets work but are not specifically adapted — layout

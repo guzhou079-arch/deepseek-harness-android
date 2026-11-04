@@ -7,7 +7,7 @@
 | Item | Requirement |
 |---|---|
 | **Android version** | **7.0 (API 24) or newer.** ⚠️ Accessibility **screenshots**, the **virtual display** and similar advanced features need **Android 11+**. On older versions you can still chat, but some automation features are unavailable. |
-| **Storage** | The APK is about **95 MB**; after installing, app data is about **0.6 GB** (runtime + engine + sessions). The optional build environment is another **~340 MB**. |
+| **Storage** | The APK is about **192 MB**; after installing, app data is about **0.6 GB** (runtime + engine + sessions). The optional build environment is another **~340 MB**. |
 | **Network** | Required (the models run remotely). LAN access is **off by default**. |
 | **Hardware** | **No root needed.** NFC tag reading needs a phone with NFC. |
 | **Permissions** | Chat itself only needs network access; every other permission is optional — see [Permissions & privacy](permissions.md). |
