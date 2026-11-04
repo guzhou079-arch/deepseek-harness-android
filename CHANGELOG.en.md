@@ -8,13 +8,12 @@
 
 ---
 
-## v1.47 — divination grown to 16 disciplines, a plugin & skills settings page, hot kernel switching
+## v1.47 — sixteen divination disciplines, a plugins & skills settings page, hot kernel switching
 
-**`dsh-yijing` is now `dsh-zhanbu`, from seven disciplines to sixteen**
+**Divination skill `dsh-zhanbu`: sixteen disciplines**
 
-- The original seven are all still there: liuyao, meihua, qimen, liuren, taiyi, bazi and star observation. Nine are new: ziwei (with major/minor limits), jinkou, huangji jingshi, xiao liuren, Zhuge shenshu, five-grid name analysis, xuankong feng shui plus bayzhai, jinsuo yuguan and yinzhai orientation. Each new one documents its usage, its source and what it cannot do.
-- The old name `dsh-yijing` is retired: a normal upgrade moves that directory into `skills-retired/`, so there is nothing to delete by hand. If your own scripts or prompts referenced `dsh-yijing`, change them to `dsh-zhanbu`.
-- Classical cases are checked against the source books: liuyao 84/84, liuren 15/15, qimen 38/42. The four misses are known school differences, documented in the skill rather than fudged. This is reconciliation, not a claim of 100% accuracy.
+- Liuyao, meihua, qimen, liuren, taiyi, bazi, star observation, ziwei (with major/minor limits), jinkou, huangji jingshi, xiao liuren, Zhuge shenshu, five-grid name analysis, xuankong feng shui plus bazhai, jinsuo yuguan and yinzhai orientation.
+- Everything is computed on the phone: no network, no API calls, works with no signal. Each discipline documents how to use it, which source book it follows, and what it cannot do.
 
 **New "Plugins & skills" settings page**
 
@@ -23,39 +22,31 @@
 
 **Search now uses the official standalone Search API**
 
-- `web_search` calls `/v1/tools/search` directly instead of routing through the model context — cheaper in tokens.
+- No longer routed through the model context, so it is cheaper in tokens and answers faster.
 - Fallback chain `deepseek → tavily → bing`, the next provider takes over when one fails. Once it falls back, the query goes to that provider instead.
 
 **Hot kernel switching**
 
-- Ships with `0.2.1-rc.5`; switching to `0.2.1-rc.2` needs you to supply that kernel package yourself. Once installed you can switch back and forth: one tap in settings, one restart.
-- The pointer lives in `files/kernels/active.json`; delete that file and restart once to fall back to the built-in tree.
-- A kernel package is sha256-verified and its frontend hashes compared before the tree is accepted; anything off falls back automatically.
+- Ships with `0.2.1-rc.5`. Drop a kernel package in, one tap in settings and one restart to switch.
+- The package is verified before it is accepted; anything off is refused and the built-in tree is used instead. To go back deliberately, delete `files/kernels/active.json` and restart once.
 
-**Install hardening**
+**Steadier installs**
 
-- Kernel tarballs with `../` entries are rejected on extract, while execute bits and in-package symlinks are kept.
-- Kernel version strings and build-env manifest filenames are whitelisted and contained to their directory.
+- Kernel packages and build-env manifests are contained, so a malformed one cannot write outside its directory.
 
 **Panels and screen reading**
 
 - The sidebar "Who am I" panel now shows an empty state instead of a blank page on a fresh install.
-- The accessibility service now registers as an accessibility tool, so third-party app views are readable at all — this is what screen reading and automation depend on. You have to enable it yourself in system settings; whatever UI text it reads enters the current conversation just like a screenshot, so keep it off on chat, banking and payment screens. Turn it off whenever you want.
+- The accessibility service can now read inside third-party apps. You have to enable it yourself in system settings; whatever UI text it reads enters the current conversation just like a screenshot, so keep it off on chat, banking and payment screens. Turn it off whenever you want.
 
-**Ledger and sessions**
+**Sharper ledger**
 
-- Ledger dedup window widened to 12 hours: the same transaction arriving through two channels is recorded once.
-- CMB inbound transfers don't count as income; pre-charge filtering, ignore list and refund allowlist are enforced in code.
-- Deleting a session whose file never landed no longer errors.
+- The same transaction arriving through two channels is recorded once, with no double charge.
 
 **Virtual screen and screenless control**
 
-- The preview window can be turned off; when collapsed it docks left or right.
-- New `dsh-apx` skill: **requires a rooted phone with the grant**. Without root it just says it cannot work. With root it goes straight at the target app's components, Providers and databases, and falls back to a headless virtual screen (no preview window, no touching the main screen). Whether it can insert directly depends on the app and the Android version; database writes touch someone else's data, so back up first. It operates other apps in the background — not "imperceptibly".
-
-**Background**
-
-- The background image no longer disappears after a restart: shipped as a packaged asset and included in the forced-overwrite list.
+- The preview window can be turned off; when collapsed it docks to the left or right edge.
+- New `dsh-apx` skill: **requires a rooted phone with the grant**. Without root it simply says it cannot work. With root it operates the target app in the background — no preview window, no touching your main screen; database writes touch someone else's data, so back up first.
 
 ---
 
