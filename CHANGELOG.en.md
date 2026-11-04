@@ -39,7 +39,7 @@
 
 **Panels and screen reading**
 
-- The Tianguang panel became the generic `dsh-self-card`: fresh installs see an empty state, never a blank page.
+- The sidebar "Who am I" panel now shows an empty state instead of a blank page on a fresh install.
 - The accessibility service now registers as an accessibility tool, so third-party app views are readable at all — this is what screen reading and automation depend on. You have to enable it yourself in system settings; whatever UI text it reads enters the current conversation just like a screenshot, so keep it off on chat, banking and payment screens. Turn it off whenever you want.
 
 **Ledger and sessions**
