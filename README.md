@@ -9,6 +9,7 @@
 [![下载最新 APK](https://img.shields.io/badge/%E2%AC%87_%E4%B8%8B%E8%BD%BD%E6%9C%80%E6%96%B0_APK-2ea44f?style=for-the-badge)](https://github.com/guzhou079-arch/deepseek-harness-android/releases/latest)
 [![安装与要求](https://img.shields.io/badge/%E5%AE%89%E8%A3%85%E4%B8%8E%E8%A6%81%E6%B1%82-3_%E6%AD%A5%E8%A3%85%E5%A5%BD-0b6bcb?style=for-the-badge)](docs/安装与要求.md)
 [![常见问题](https://img.shields.io/badge/%E5%B8%B8%E8%A7%81%E9%97%AE%E9%A2%98-FAQ-6e40c9?style=for-the-badge)](docs/常见问题.md)
+![QQ 群](https://img.shields.io/badge/QQ%E7%BE%A4-1050918023-12b7f5?style=for-the-badge)
 
 ![Platform](https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-Android%208.0%2B-brightgreen)
 [![Release](https://img.shields.io/github/v/release/guzhou079-arch/deepseek-harness-android?label=latest%20release)](https://github.com/guzhou079-arch/deepseek-harness-android/releases/latest)
@@ -61,10 +62,11 @@
 
 > ⭐ 如果它帮你省了时间，给个 Star 是最好的反馈 —— 也让我知道继续维护值不值得。
 > 装不上 / 怎么用 / 升级出问题 → [Discussions](https://github.com/guzhou079-arch/deepseek-harness-android/discussions)；Bug 与建议 → [Issue](https://github.com/guzhou079-arch/deepseek-harness-android/issues)。
+> 没 GitHub 账号或者想直接问 → **QQ 群 `1050918023`**（App 内「设置 → 控制台 → QQ 交流群」点「加入」直接拉起群名片，不用手打群号）。
 
 **文档**：[安装与系统要求](docs/安装与要求.md) · [权限与隐私](docs/权限与隐私.md) · [常见问题](docs/常见问题.md) · [升级与救援](docs/升级与救援.md) · [自建环境与出包](docs/自建环境与出包.md)
 
-**相关**：[提问与交流（Discussions）](https://github.com/guzhou079-arch/deepseek-harness-android/discussions)
+**相关**：[提问与交流（Discussions）](https://github.com/guzhou079-arch/deepseek-harness-android/discussions) · **QQ 群 `1050918023`**
 
 **配套插件**：[dsh-plugin-android-vscreen](https://github.com/guzhou079-arch/dsh-plugin-android-vscreen) —— 让 AI 在**虚拟显示器**上操作别的 App（读屏、点击、滑动、截图），你自己的主屏照常用，互不打扰。同样的能力在这个 APK 里已经内置；电脑上的 DSH 想用同一套工具，可以单独装这个插件（走 adb）：
 

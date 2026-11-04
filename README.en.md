@@ -9,6 +9,7 @@
 [![Download the latest APK](https://img.shields.io/badge/%E2%AC%87_Download_APK-2ea44f?style=for-the-badge)](https://github.com/guzhou079-arch/deepseek-harness-android/releases/latest)
 [![Install & requirements](https://img.shields.io/badge/Install_%26_requirements-3_steps-0b6bcb?style=for-the-badge)](docs/en/install.md)
 [![FAQ](https://img.shields.io/badge/FAQ-common_questions-6e40c9?style=for-the-badge)](docs/en/faq.md)
+![QQ group](https://img.shields.io/badge/QQ_group-1050918023-12b7f5?style=for-the-badge)
 
 ![Platform](https://img.shields.io/badge/Platform-Android%208.0%2B-brightgreen)
 [![Release](https://img.shields.io/github/v/release/guzhou079-arch/deepseek-harness-android?label=latest%20release)](https://github.com/guzhou079-arch/deepseek-harness-android/releases/latest)
@@ -55,6 +56,7 @@ Each release note carries the APK's **SHA-256**, so you can verify the file befo
 
 > ⭐ If this saves you time, a star is the best way to say thanks — it also tells me the maintenance is worth it.
 > Install / usage / upgrade problems → [Discussions](https://github.com/guzhou079-arch/deepseek-harness-android/discussions); bugs and ideas → [Issues](https://github.com/guzhou079-arch/deepseek-harness-android/issues).
+> No GitHub account, or just want to ask directly → **QQ group `1050918023`** (in the app: Settings → Console → QQ group, one tap to open the group card; the group is Chinese-speaking).
 
 > **In mainland China, where `github.com` often will not open?** The first line of every release note is an
 > accelerator link (`ghproxy`-style prefix + the official URL). You can also prefix the official URL yourself:
@@ -64,7 +66,7 @@ Each release note carries the APK's **SHA-256**, so you can verify the file befo
 
 > 中文文档（最新原文）：[安装与要求](docs/安装与要求.md) · [权限与隐私](docs/权限与隐私.md) · [常见问题](docs/常见问题.md) · [升级与救援](docs/升级与救援.md) · [自建环境与出包](docs/自建环境与出包.md)
 
-**Related**: [Discussions](https://github.com/guzhou079-arch/deepseek-harness-android/discussions) — install / upgrade / usage questions
+**Related**: [Discussions](https://github.com/guzhou079-arch/deepseek-harness-android/discussions) — install / upgrade / usage questions · **QQ group `1050918023`**
 
 **Companion plugin** — [dsh-plugin-android-vscreen](https://github.com/guzhou079-arch/dsh-plugin-android-vscreen):
 drive *other* apps on a **virtual display** (screen reading, taps, swipes, frames) while your own screen
