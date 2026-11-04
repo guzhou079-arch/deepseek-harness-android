@@ -378,8 +378,11 @@ public class MainActivity extends Activity {
         if (u == null) return true;
         String scheme = u.getScheme();
         if (com.deepseek.harness.vscreen.LocalHttpFence.isLoopbackUrl(u.toString(), enginePort)) return false;
+        // QQ 群卡片：mqqapi:// 由 QQ 自己接管，放行但不进浏览器选择器。
+        boolean mqq = "mqqapi".equalsIgnoreCase(scheme);
         if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)
-                && !"mailto".equalsIgnoreCase(scheme) && !"tel".equalsIgnoreCase(scheme)) return true;
+                && !"mailto".equalsIgnoreCase(scheme) && !"tel".equalsIgnoreCase(scheme)
+                && !mqq) return true;
         try {
             Intent ext = new Intent(Intent.ACTION_VIEW, u);
             ext.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -393,6 +396,10 @@ public class MainActivity extends Activity {
             // 直接 startActivity 会强制用默认浏览器，用户被默认浏览器坑了也无从选择。
             // 改成选择器后，用户可以换一个能跑通的浏览器重试。
             // 回滚：把下面三行 chooser 换回 startActivity(ext)。
+            if (mqq) {
+                startActivity(ext);
+                return true;
+            }
             Intent chooser = Intent.createChooser(ext, "选择浏览器完成登录");
             chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             startActivity(chooser);
@@ -7324,7 +7331,8 @@ public class MainActivity extends Activity {
                 return;
             }
             if ("open.url".equals(id)) {
-                if (arg != null && (arg.startsWith("https://") || arg.startsWith("http://"))) {
+                if (arg != null && (arg.startsWith("https://") || arg.startsWith("http://")
+                        || arg.startsWith("mqqapi://"))) {
                     try {
                         startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(arg)));
                     } catch (Throwable t) {

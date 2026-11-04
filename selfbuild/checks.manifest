@@ -54,8 +54,8 @@ dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-app/
 #       e6eb41e7 → 88ea18c3），而 verify 里的 `|| true` 又把它吞了 → 四版没人发现。
 #       内容对不对由发版前人工过目保证，不由 md5 保证（md5 在此只制造假警报）。
 #    ⚠ 顺带一条：只换 dex 的包（不动 payload）里这份日志来自骨架版本，本来就比 overlay 旧。
-dshroot/CHANGELOG.md|a5ad6ca45f95ed908a9e0a6a7716e757|更新日志
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/CHANGELOG.md|a5ad6ca45f95ed908a9e0a6a7716e757|更新日志
+dshroot/CHANGELOG.md|-|更新日志
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/CHANGELOG.md|-|更新日志
 # ⑭ v1.36：账户 UI —— 放开上游「桌面独占」门禁（apply 首行 dshDesktop 检查）
 #    刻意不注入全局 dshDesktop，以免挤掉 settings-models 的 API Key 引导。
 #    ⚠ 2026-10-17 换 0.2.1 时发现：上游自己把这道门禁去掉了（apply 里只剩
@@ -97,8 +97,9 @@ dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-fs-
 # ② 分享进来的可见性与落盘副本（2026-10-15 事故：两份副本里服务的是"瘦"的那份，
 #    且"到货卡片"只挂在会话页 → 用户分享进来的文件收下了却没人看见。
 #    这两条把「带 shell.overlay 到货横幅的那一份」钉死，两份副本都必须一致）
-dshhome/profiles/web/node_modules/dsh-android-console/lib/client.js|b3426fe7eddb063c92be0e0b14f0606c|android-share-notice
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-android-console/lib/client.js|b3426fe7eddb063c92be0e0b14f0606c|android-share-notice
+# 2026-11-04：设置页「控制台」加 QQ 群入口（群号 1050918023），md5 随改动更新。
+dshhome/profiles/web/node_modules/dsh-android-console/lib/client.js|42b014a7a1386f7f26ea47e1ef08bf48|android-share-notice
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-android-console/lib/client.js|42b014a7a1386f7f26ea47e1ef08bf48|android-share-notice
 # ⚠️ 2026-10-15 之前这条清单**没覆盖**这两个文件，于是"源码改了、包里带的还是旧的"
 #    能一路通过 verify。装 1.39 之前，patch-check 对这两条会报漂移（装机副本还是旧的）——那是**正确**的。
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-plugin-auto-summary-policy/lib/index.js|d0beb2db51a199d1d7b4a45b5cc74936|0.1.2-effective-policy

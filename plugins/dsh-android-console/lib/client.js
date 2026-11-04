@@ -1972,6 +1972,36 @@ window.__ModuleLoader__.load({
           right: jsx(Button, { variant: 'outline', size: 'sm', onClick: () => run('update.check', ''), children: '检查' }),
         }),
         jsx(Row, {
+          title: 'QQ 交流群',
+          desc: '群号 1050918023 · 装不上、想问两句都可以来',
+          right: jsx(Button, {
+            variant: 'outline',
+            size: 'sm',
+            onClick: (ev) => {
+              ev.stopPropagation();
+              const uri = 'mqqapi://card/show_pslcard?src_type=internal&version=1&uin=1050918023&card_type=group&source=qrcode';
+              const s = shell();
+              if (s) {
+                s.ctlAct('open.url', uri);
+                say('正在打开 QQ 群…');
+              } else {
+                say('群号 1050918023，复制到 QQ 里搜索即可');
+              }
+            },
+            children: '加入',
+          }),
+          onClick: () => {
+            const uri = 'mqqapi://card/show_pslcard?src_type=internal&version=1&uin=1050918023&card_type=group&source=qrcode';
+            const s = shell();
+            if (s) {
+              s.ctlAct('open.url', uri);
+              say('正在打开 QQ 群…');
+            } else {
+              say('群号 1050918023，复制到 QQ 里搜索即可');
+            }
+          },
+        }),
+        jsx(Row, {
           title: '开源主页与 Star 支持',
           desc: '欢迎前往 GitHub 给作者点一颗 ⭐ 支持！',
           right: jsx(Button, {
