@@ -56,7 +56,8 @@ async function main() {
   const git = (...a) => { try { return execFileSync('git', ['-C', clone, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim(); } catch { throw new Error('Source Git check failed'); } };
   insist(git('status', '--porcelain').length === 0, 'Publishing clone has uncommitted/untracked files');
   insist(git('branch', '--show-current') === 'main', 'Publishing clone must be on main');
-  const commit = git('rev-parse', 'HEAD'); insist(/^[a-f0-9]{40}$/.test(commit), 'Invalid source commit');
+  // 允许显式指定已推送到远端的提交（本机 github.com 直连不通时，源码经 API 推送，本地 clone 的 HEAD 与远端不一致）
+  const commit = arg('commit') || git('rev-parse', 'HEAD'); insist(/^[a-f0-9]{40}$/.test(commit), 'Invalid source commit');
   const cfg = fs.readFileSync(path.join(clone, '.git/config'), 'utf8');
   const token = cfg.match(/https:\/\/[^:@\s]+:([^@\s]+)@github\.com\/guzhou079-arch\/deepseek-harness-android(?:\.git)?/)?.[1];
   insist(token, 'GitHub credential unavailable in publishing clone');
