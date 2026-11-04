@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300" viewBox="0 0 1200 300" role="img" aria-label="DeepSeek Harness for Android">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0b1622"/>
+      <stop offset="55%" stop-color="#122436"/>
+      <stop offset="100%" stop-color="#0d1c2b"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#5b8cff"/>
+      <stop offset="100%" stop-color="#3fd6c0"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="300" fill="url(#bg)"/>
+  <circle cx="1080" cy="60" r="150" fill="#5b8cff" opacity="0.10"/>
+  <circle cx="120" cy="270" r="120" fill="#3fd6c0" opacity="0.08"/>
+  <text x="70" y="120" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif" font-size="46" font-weight="700" fill="#eaf2ff">DeepSeek Harness for Android</text>
+  <text x="70" y="165" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif" font-size="22" fill="#9fb6d0">One APK. No Termux, no root, no setup, no PC.</text>
+  <text x="70" y="200" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif" font-size="20" fill="#6f8aa6">Screen control, virtual display, scheduled tasks and 27 bundled skills — and it builds, signs and ships its own APK on the phone.</text>
+  <g font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif" font-size="18" fill="#cfe0f5">
+    <rect x="70" y="225" width="196" height="42" rx="21" fill="#14314a"/>
+    <text x="168" y="252" text-anchor="middle">Self-releasing</text>
+    <rect x="282" y="225" width="186" height="42" rx="21" fill="#14314a"/>
+    <text x="375" y="252" text-anchor="middle">Phone automation</text>
+    <rect x="484" y="225" width="176" height="42" rx="21" fill="#14314a"/>
+    <text x="572" y="252" text-anchor="middle">Floating orb</text>
+    <rect x="676" y="225" width="176" height="42" rx="21" fill="#14314a"/>
+    <text x="764" y="252" text-anchor="middle">27 built-in skills</text>
+  </g>
+  <rect x="0" y="296" width="1200" height="4" fill="url(#accent)"/>
+</svg>
