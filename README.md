@@ -1,5 +1,7 @@
 # DeepSeek Harness · 安卓版
 
+<img src="docs/assets/readme/banner.svg" width="100%" alt="DeepSeek Harness · 安卓移植增强版">
+
 <div align="center">
 
 **中文** ｜ [English](README.en.md)
