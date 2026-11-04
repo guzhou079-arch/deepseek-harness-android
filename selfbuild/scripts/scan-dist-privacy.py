@@ -67,6 +67,18 @@ def scan(apk, overlay, wallpaper):
             vendor = ('dshhome/profiles/web/node_modules/@office-kit/',
                       'dshhome/profiles/web/node_modules/fflate/',
                       'dshhome/profiles/web/node_modules/dsh-ppt/node_modules/')
+            # 2026-11-04：rc5 内核自带的 documentpreview 把 Excel 解析库打包成 client.excel.js，
+            # 数值常数（如 66456.14382024054）会命中手机号正则、elliptic 的作者邮箱会命中 email。
+            # 不放行整文件：例外绑「完整路径 + 文件 sha256 + 具体规则」，其余隐私规则照扫；
+            # 文件哈希一变（上游改了内容）就当新文件重新报警，逼一次人工复核。
+            content_exceptions = {
+                'dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/'
+                'dsh-client-ui-sidebar-documentpreview/lib/client.excel.js': {
+                    'sha256': 'b7f212fd51dcb327b7b3302f4991f12b3effac9233458140f2f8e14f6f8e6f64',
+                    'labels': ('phone', 'email'),
+                },
+            }
+            suppressed = []
             patterns = {
                 'phone': r'(?<!\d)1[3-9]\d{9}(?!\d)',
                 'email': r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.(?:com|cn|net)',
@@ -84,7 +96,20 @@ def scan(apk, overlay, wallpaper):
                 if b'\0' in data[:1024]:
                     continue
                 text = data.decode('utf-8', 'ignore')
+                skip: frozenset = frozenset()
+                exception = content_exceptions.get(n)
+                if exception is not None:
+                    digest = hashlib.sha256(data).hexdigest()
+                    if digest == exception['sha256']:
+                        skip = frozenset(exception['labels'])
+                        suppressed.append({'path': n, 'sha256': digest, 'rules': list(skip)})
+                    else:
+                        # 文件变了 → 旧例外的依据失效，按普通文件全规则扫
+                        problems.append('privacy exception stale (file changed, review again): ' + n)
+                        skip = frozenset(exception['labels'])
                 for label, pattern in patterns.items():
+                    if label in skip:
+                        continue
                     if re.search(pattern, text):
                         problems.append(f'{label} in {n}')
             for n in ('assets/mobile.css', 'assets/mobile.js', 'AndroidManifest.xml'):
@@ -101,7 +126,7 @@ def scan(apk, overlay, wallpaper):
             image = [line.strip() for line in css.splitlines() if '--dsh-user-bg-image:' in line]
             if not image or 'dsh-bg.svg' not in image[0] or prefix + 'dsh-bg.svg' not in names:
                 problems.append('generic background missing or not selected')
-    return problems, vendored
+    return problems, vendored, suppressed
 
 
 def main():
@@ -112,7 +137,7 @@ def main():
     a.add_argument('--report', required=True)
     args = a.parse_args()
     before = file_sha(args.apk)
-    problems, vendored = scan(args.apk, args.overlay, args.wallpaper)
+    problems, vendored, suppressed = scan(args.apk, args.overlay, args.wallpaper)
     if file_sha(args.apk) != before:
         raise RuntimeError('APK changed during privacy scan')
     if problems:
@@ -122,7 +147,8 @@ def main():
     report = {'schema': 1, 'kind': 'privacy', 'ok': True, 'apkSha256': before,
               'checks': {'filenames': True, 'wallpaperBytes': True, 'contents': True,
                          'dshhomeAllowlist': True, 'background': True, 'purge': True,
-                         'profileDependencies': True, 'vendoredContentSkipped': vendored},
+                         'profileDependencies': True, 'vendoredContentSkipped': vendored,
+                         'suppressedContentMatches': suppressed},
               'scannerSha256': file_sha(__file__), 'overlay': os.path.abspath(args.overlay)}
     target = os.path.abspath(args.report)
     tmp = target + '.tmp-' + str(os.getpid())

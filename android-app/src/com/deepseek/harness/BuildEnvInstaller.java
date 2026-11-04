@@ -37,9 +37,8 @@ import java.util.Map;
  *    tarball 本身是纯文件，所以**放在 /sdcard 没问题** —— 于是"下载一次"能成立：
  *    重装 App 丢了私有目录，但 tarball 还在，**只需重新解压、不用重新下载**。
  *
- * ② **解压必须用 payload 里的 python3，且 filter='fully_trusted'**
- *    Python 3.14 起 tarfile.extractall 默认 filter='data'，**会剥掉符号链接和权限位**
- *    → 解出来是个废 rootfs。必须显式传 fully_trusted。
+ * ② **解压必须用 payload 里的 python3，且 filter='data'**
+ *    data 会拒绝越出 staging 的路径和链接，同时保留 rootfs 需要的内部软链与执行位。
  *    （Android 自带的 toybox tar 同样会丢符号链接，别用。）
  *
  * ③ **分卷是逼出来的**：实测 Gitee 附件上限 **100MB**（HTTP 400 明说），
@@ -194,6 +193,17 @@ public final class BuildEnvInstaller {
         }, "buildenv-install").start();
     }
 
+    /** 清单来源不可信：所有由清单给出的名字必须是单段文件名，不允许带路径。 */
+    private static File safeChild(File dir, String name) throws IOException {
+        if (name == null || name.length() == 0 || name.length() > 128 || ".".equals(name) || "..".equals(name)
+                || name.indexOf('/') >= 0 || name.indexOf('\\') >= 0) {
+            throw new IOException("清单里的文件名不合法：" + name);
+        }
+        File out = new File(dir, name);
+        if (!out.getCanonicalFile().getParentFile().equals(dir.getCanonicalFile())) throw new IOException("清单文件名越界：" + name);
+        return out;
+    }
+
     private static void doInstall(Context ctx, Source src, Cb cb) throws Exception {
         final File base = filesDir(ctx);
         if (base == null) throw new IOException("拿不到 App 私有目录");
@@ -203,7 +213,7 @@ public final class BuildEnvInstaller {
         if (mfName == null) throw new IOException("这个来源里没有清单文件（*.parts.json）");
         File store = new File(STORE);
         if (!store.isDirectory() && !store.mkdirs()) throw new IOException("建不了目录 " + STORE);
-        File mfFile = new File(store, mfName);
+        File mfFile = safeChild(store, mfName);
         cb.onStage("取清单", 2);
         downloadTo(src.assets.get(mfName), mfFile, null, 0, 100);
         JSONObject man = new JSONObject(readText(mfFile));
@@ -218,7 +228,7 @@ public final class BuildEnvInstaller {
             String name = p.getString("name");
             long bytes = p.getLong("bytes");
             String want = p.getString("sha256");
-            File f = new File(store, name);
+            File f = safeChild(store, name);
             if (f.isFile() && f.length() == bytes && want.equalsIgnoreCase(sha256(f))) {
                 cb.onStage("第 " + (i + 1) + "/" + parts.length() + " 卷已就绪（跳过）", pct(i, parts.length()));
                 continue;
@@ -454,7 +464,7 @@ public final class BuildEnvInstaller {
 
     /**
      * 调 payload 里的 python3 解压。
-     * ⚠️ filter='fully_trusted' 必须显式给 —— Python 3.14 默认 'data' 会把符号链接和权限位剥掉。
+     * 必须显式使用 data：拒绝路径穿越和逃逸链接，不误删 rootfs 内部软链与执行位。
      */
     private static void extract(File tar, File stage) throws IOException {
         File base = stage.getParentFile().getParentFile();   // …/files
@@ -467,7 +477,7 @@ public final class BuildEnvInstaller {
         String script =
                 "import tarfile,sys\n" +
                 "tf=tarfile.open(sys.argv[1])\n" +
-                "tf.extractall(sys.argv[2], filter='fully_trusted')\n" +   // 关键
+                "tf.extractall(sys.argv[2], filter='data')\n" +   // 关键
                 "tf.close()\n";
         ProcessBuilder pb = new ProcessBuilder(py.getAbsolutePath(), "-c", script,
                 tar.getAbsolutePath(), stage.getAbsolutePath());

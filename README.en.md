@@ -17,7 +17,7 @@
 
 **DeepSeek Harness as a ready-to-install Android APK — no Termux, no root, no PC.**
 
-Paste your own model API key and it is working: screen reading, taps, typing, a virtual display to drive other apps, scheduled tasks, 21 bundled skills.
+Paste your own model API key and it is working: screen reading, taps, typing, a virtual display to drive other apps, scheduled tasks, 27 bundled skills.
 **What makes it different: it builds itself** — edit code on the phone and run `javac → d8 → repackage → sign → release` without ever touching a computer.
 
 ## What you skip
@@ -26,7 +26,7 @@ Paste your own model API key and it is working: screen reading, taps, typing, a 
 |---|---|---|
 | Setup | Termux, Node, clone the repo, wire up the config | Download, install |
 | First run | A pile of commands and docs | Paste one API key |
-| Skills | Install them one by one | 21 bundled |
+| Skills | Install them one by one | 27 bundled |
 | Your screen while the AI works | Occupied | It works on a virtual display; your screen stays yours |
 | Build / release | Back to the PC | The phone builds, signs and ships it |
 
@@ -38,7 +38,7 @@ Paste your own model API key and it is working: screen reading, taps, typing, a 
 | 🐳 **Floating ball / desktop pet** | Tap the ball and it "speaks": lines, balance, usage today, last-turn cost, peak/off-peak hints |
 | ☁️ **Reply capsule** | While the AI writes, a capsule appears under the status bar; tap it for a scrollable card |
 | 🎛️ **Console inside settings** | Engine control, rescue mode, permission overview, plugin switches, time-machine backup |
-| 🧩 **21 bundled skills** | Diagrams · slide decks · storyboards · memory hub · Office batch · Word / formal docs · Excel · meeting notes · business mail · local RAG · full-site backup · cross-vendor review · web crawling · code craft · data insight · deep research · scrum planning · life hub · voice |
+| 🧩 **27 bundled skills** | Divination · headless app control · Diagrams · slide decks · storyboards · memory hub · Office batch · Word / formal docs · Excel · meeting notes · business mail · local RAG · full-site backup · cross-vendor review · web crawling · code craft · data insight · deep research · scrum planning · life hub · voice |
 | 🔧 **Builds itself on the phone** | `javac → d8 → repackage → sign → release`; the build environment is downloaded on demand (~193 MB) |
 
 On top of the upstream Android shell, this build ships 25 Android adaptation patches (system capability / engine / hardening / UI / login) plus self-authored plugins. Provenance and licenses are at the end of this file.

@@ -1115,6 +1115,71 @@ window.__ModuleLoader__.load({
         ] });
       }
 
+      // ---------------- 引擎内核页（实验：切换运行时内核）
+      if (page === 'kernel') {
+        const kn = state.kernel || {};
+        const inst = kn.installed || [];
+        const store = kn.store || [];
+        const active = kn.active || '';
+        const storeDir = kn.storeDir || '/sdcard/DeepSeekHarness/kernels';
+        const sizeText = (n) => {
+          if (!n) return '';
+          const mb = n / 1048576;
+          return (mb >= 100 ? Math.round(mb) : Math.round(mb * 10) / 10) + ' MB';
+        };
+        const fresh = store.filter((b) => !b.installed);
+        return jsxs('div', { className: 'ctl-root', children: [
+          jsx(Back, { title: '引擎内核', onBack: () => setPage('main') }),
+          jsx(Note, { children: '内核就是引擎跑的那棵 node 包（bin.js + node_modules）。内核包是 tar.gz + manifest.json，从 /sdcard 装进应用私有目录（内部 ext4），不占主屏可见空间。内置 rc5 永远在 APK 里：切换失败、内核坏掉、启动超时，都会自动回落，不会有起不来的风险。' }),
+          jsx('div', { className: 'ctl-sep' }),
+          jsx(Row, {
+            title: '当前：' + (kn.activeText || '内置内核'),
+            desc: active ? '从应用私有目录加载 · 切换会重启一次引擎' : '从 APK 的 payload/dshroot 加载 · 永远兜底',
+          }),
+          jsx('div', { className: 'ctl-sep' }),
+          inst.length ? inst.map((b, i) => jsx(Row, {
+            title: b.version + (b.label ? ' · ' + b.label : '') + (b.active ? '（使用中）' : ''),
+            desc: sizeText(b.sizeBytes),
+            right: jsxs(Fragment, { children: [
+              b.active ? null : jsx(Button, {
+                variant: 'outline',
+                size: 'sm',
+                onClick: () => ask('切换到 ' + b.version, '会重启一次引擎（几秒）。记忆和会话都在 dshhome，不受影响。如果这个内核起不来，90 秒内会自动回退到内置内核。', 'kernel.switch', b.version, '切换中，引擎会重启…'),
+                children: '切换',
+              }),
+              jsx(Button, {
+                variant: 'ghost',
+                size: 'sm',
+                disabled: b.active,
+                onClick: () => ask('删除内核 ' + b.version, '删掉这份已解压的内核，不影响内置 rc5。', 'kernel.remove', b.version, '已删除'),
+                children: '删除',
+              }),
+            ] }),
+          }, 'kinst' + i)) : jsx(Row, { title: '已安装', desc: '还没装过内核包。「可安装」里的包点一下就装进来。' }),
+          jsx('div', { className: 'ctl-sep' }),
+          fresh.length ? fresh.map((b, i) => jsx(Row, {
+            title: b.version + (b.label ? ' · ' + b.label : ''),
+            desc: sizeText(b.sizeBytes) + (b.note ? ' · ' + b.note : ''),
+            right: jsx(Button, {
+              variant: 'outline',
+              size: 'sm',
+              onClick: () => ask('安装内核 ' + b.version, '先校验 sha256，再解压到应用私有目录（约十几秒到一分钟），不会重启引擎。', 'kernel.install', b.version, '安装中…'),
+              children: '安装',
+            }),
+          }, 'kstore' + i)) : jsx(Row, { title: '可安装', desc: '目录：' + storeDir + '（放 kernel-*.tar.gz 和 manifest.json）· 现在没有新包' }),
+          jsx('div', { className: 'ctl-sep' }),
+          jsx('div', { className: 'ctl-bar', children: jsx(Button, {
+            variant: 'ghost',
+            size: 'sm',
+            disabled: !active,
+            onClick: () => ask('回退到内置内核', '删掉激活记录，下次启动引擎用 APK 里的 rc5。受管内核出问题时用。', 'kernel.deactivate', '', '已回退，下次启动引擎生效'),
+            children: '回退到内置内核',
+          }) }),
+          confirmBar,
+          flashBar,
+        ] });
+      }
+
       // ---------------- 语音设置与 TTS 调音台页
       if (page === 'voice') {
         const vo = state.voice || {};
@@ -1859,7 +1924,17 @@ window.__ModuleLoader__.load({
             jsx('span', { className: 'ctl-state', children: (state.buildEnv && state.buildEnv.summary) || '' }),
             jsx(primitives.IconChevronRightOutlineRegular, { size: 14 }),
           ] }),
+
           onClick: () => setPage('buildenv'),
+        }),
+        jsx(Row, {
+          title: '引擎内核',
+          desc: '换运行时内核版本（实验）；内置 rc5 永远兜底',
+          right: jsxs(Fragment, { children: [
+            jsx('span', { className: 'ctl-state', children: (state.kernel && state.kernel.activeText) || '内置内核' }),
+            jsx(primitives.IconChevronRightOutlineRegular, { size: 14 }),
+          ] }),
+          onClick: () => setPage('kernel'),
         }),
         jsx(Row, {
           title: '日志',

@@ -65,9 +65,11 @@ $NODE <本技能目录>/scripts/review-channels.mjs --gate     # 体检默认会
 用 **`workflow` 工具**（它支持 provider / model 覆盖）跑 `scripts/review-workflow.template.js`：
 把它读出来、按里面的 `TODO` 填好产物与问题，再一次提交。要点：
 
-- 每条通道一个 `agent(...)`，**同一份产物 + 同一份问题清单**，各自独立上下文；
-- `agent(prompt, { provider: 'claude'|'gpt'|'gemini', model: '<模型 id>' })`；
-- ⛔ **`subagent` 工具不支持 provider / model 覆盖** —— 别用它做会审（跑了也是同一个模型）。
+- 每条通道一个 `subagent(...)` 调用（或 workflow 里的 `agent(...)`），**同一份产物 + 同一份问题清单**，各自独立上下文；
+- 换厂商靠 `subagent` 的三件套：`provider` + `model` + `reasoning_effort`（snake_case）。**`reasoning_effort` 必须显式写**：只换 route 不给 effort，会清掉继承来的档位、退回该模型默认档，等于偷偷降智。k3.1-pro 支持 low/high/max，glm-5.3-flash 支持 off/low/medium/high/max。
+- 路由受白名单约束：`cordis.patch.yml` 的 `subagent-model-selection-settings.allowedModels`。不在表里会直接报 `child LLM route "<provider>/<model>" is not allowed for this Session`——先查表再派活，别硬试。
+- ⛔ `workflow` 的 `agent(prompt, opts)` **只有 provider / model / label / phase / schema，没有 reasoning_effort**。要多通道并行 + 显式推理档，就用逐个 `subagent` 并发；要它一口气跑几十个用例，才用 workflow。
+- 便宜通道报问题=强信号，**它沉默不等于通过**：glm-5.3-flash 曾两次只回一句交接话、正文空着，且历史盲测只过 1/10 —— 拿它复检逻辑要另配一条贵通道兜底。
 
 ### ③ 合并（这步是判断，不是拼接）
 

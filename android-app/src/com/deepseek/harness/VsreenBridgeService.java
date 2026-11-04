@@ -104,16 +104,66 @@ public class VsreenBridgeService extends Service {
     private volatile int vdDisplayId = -1;
     /** 已应用的宽高比，用于只在变屏/旋转时重算窗口高度，不干扰用户手动拖动/缩放。 */
     private volatile float lastAspect = 0f;
+    // v2.15：展开后画面能直接操作（学 Operit：窗里那一屏是能点的，不是一张图）
+    private boolean previewTouchMode = true;
+    private View previewControls = null;
+    private Runnable previewHideControls = null;
+    private boolean previewFullscreen = false;   // Operit 那套：小窗 / 全屏 两态
+    private int smallX = 0, smallY = 0, smallW = 0, smallH = 0;
+    private View previewControlsFull = null;
+    private float[] fwdPt0 = null;
+    private volatile boolean vdFrozen = false;
+    private FrameLayout.LayoutParams previewFullPillLp = null;
+    private volatile long lastForwardAt = 0;
+    private volatile long lastHealAt = 0;
+
+    /**
+     * v3.2：虚拟屏会被"整机息屏"冻死 —— 画面停在最后一帧，tap 全被吞掉（实测 frameAge 十几分钟不变、
+     * suspectFrozen=true）。以前就是这里让人以为"点了没用"。现在检测到冻结就重建那块屏并重开原来的 App。
+     */
+    private void healVscreen() {
+        if (System.currentTimeMillis() - lastHealAt < 15000) return;
+        lastHealAt = System.currentTimeMillis();
+        final String pkg = previewBallPkg;
+        toast("虚拟屏冻住了，正在重连…");
+        new Thread(new Runnable() { @Override public void run() {
+            try {
+                int w = vdW > 0 ? vdW : 1152, h = vdH > 0 ? vdH : 2048;
+                coreGet("/vscreen/close", 8000);
+                Thread.sleep(500);
+                coreGet("/vscreen/create?width=" + w + "&height=" + h + "&dpi=480", 12000);
+                Thread.sleep(1500);
+                if (pkg != null && pkg.length() > 0) coreGet("/vscreen/launch?pkg=" + pkg, 12000);
+                vdFrozen = false;
+            } catch (Throwable ignored) {}
+        }}, "vscreen-heal").start();
+    }
+    private boolean previewInteract = false;   // false = 移动模式（拖哪都挪窗），true = 操作模式
+    private boolean dragArmed = false;
+    private boolean touchStartInImage = false;
+    private boolean touchMoved = false;
+    private long touchDownAt = 0L;
+    private float[] touchPt0 = null;
     /** v1.36：预览窗缩放倍数（1.0 = 基准 260dp 宽），持久化在 dsh_prefs。 */
     private volatile float previewScale = 1f;
     /** v1.36：预览窗处于「缩到一旁」的小标签态（虚拟屏继续跑）。 */
     private volatile boolean previewSideCollapsed = false;
+    /**
+     * v3.4：收起后小球贴**哪一边** —— 跟着你收起前卡片所在的那一侧走（左收左、右收右），
+     * 并持久化；拖动小球松手后也会吸附回最近的一边。
+     * 旧实现把 x 硬编码成「屏宽 - 球宽 + 塞出去」，所以卡片在左边收起也会被丢到右边。
+     */
+    private volatile boolean previewDockLeft = false;
     /** v1.36：画面区容器（里面有画面 + 浮在角落的按钮）。 */
     private FrameLayout previewImageArea = null;
+    private TextView previewTouchLabel = null;
     /** v1.39：外层卡片（要换圆角/圆形背景，所以留个引用）。 */
     private LinearLayout previewShell = null;
     /** v1.39：收成小球时显示的内容（画出来的手机轮廓，可点=展开）。 */
     private FrameLayout previewBallGlyph = null;
+    private FrameLayout previewPhoneBox = null;      // v2.14：旧的手绘手机轮廓（有 App 图标时藏起来）
+    private android.widget.ImageView previewBallIcon = null; // v2.14：小球上显示的 App 图标
+    private String previewBallPkg = null;
     /** v1.37：开屏占位（收到第一帧前替代黑屏）。 */
     private TextView previewPlaceholder = null;
     /** v1.37：刚建屏、还没画面 —— 先显示占位。 */
@@ -188,10 +238,16 @@ public class VsreenBridgeService extends Service {
                 return;
             }
             if (previewRootView != null) return;
+            if (vdFrozen) healVscreen();
             previewWm = (WindowManager) getSystemService(WINDOW_SERVICE);
             // v1.36：宽度按用户上次的缩放倍数算（缩放按钮持久化）
             previewScale = loadPreviewScale();
+            try { previewInteract = getSharedPreferences("dsh_prefs", MODE_PRIVATE).getBoolean("vscreen_interact", true); }
+            catch (Throwable ignored) {}
+            try { previewTouchMode = getSharedPreferences("dsh_prefs", MODE_PRIVATE).getBoolean("vscreen_touch_mode", true); }
+            catch (Throwable ignored) {}
             previewSideCollapsed = false;
+            loadDockLeft();   // v3.4：上次收在哪边，这次还收哪边
             int w = Math.round(dp(260) * previewScale), h = dp(430);
             previewLp = new WindowManager.LayoutParams(
                     w, h,
@@ -201,8 +257,10 @@ public class VsreenBridgeService extends Service {
                     android.graphics.PixelFormat.TRANSLUCENT);
             // 用 LEFT 绝对坐标（不用 END：END 的 x 是"距右边缘"，左右拖动会异常）
             previewLp.gravity = Gravity.TOP | Gravity.START;
-            // 初始位置：右上角（留边距，不贴边）；用户可自由拖动到任意位置
-            previewLp.x = getResources().getDisplayMetrics().widthPixels - w - dp(24);
+            // 初始位置：留边距不贴边；用户可自由拖动到任意位置
+            // v3.4：初始卡片就摆在你上次收起的那一侧，收/展两态不会跨屏跳
+            previewLp.x = previewDockLeft ? dp(24)
+                    : getResources().getDisplayMetrics().widthPixels - w - dp(24);
             previewLp.y = dp(120);
 
             // v1.39（按用户反馈重做）：删掉"黑底 + 中间一道蓝杠"的顶栏（用户：那是个什么东西），
@@ -227,6 +285,20 @@ public class VsreenBridgeService extends Service {
             FrameLayout.LayoutParams phoneLp = new FrameLayout.LayoutParams(dp(16), dp(26));
             phoneLp.gravity = Gravity.CENTER;
             previewBallGlyph.addView(phoneBox, phoneLp);
+            previewPhoneBox = phoneBox;
+            // v2.14（学 Operit）：小球正面显示**虚拟屏里那个 App 的图标**，比手绘手机好看得多
+            previewBallIcon = new android.widget.ImageView(this);
+            previewBallIcon.setScaleType(android.widget.ImageView.ScaleType.FIT_CENTER);
+            FrameLayout.LayoutParams iconLp = new FrameLayout.LayoutParams(dp(30), dp(30));
+            iconLp.gravity = Gravity.CENTER;
+            GradientDrawable iconClip = new GradientDrawable();
+            iconClip.setColor(0x00000000);
+            iconClip.setCornerRadius(dp(8));
+            previewBallIcon.setBackground(iconClip);
+            previewBallIcon.setClipToOutline(true);
+            previewBallIcon.setVisibility(View.GONE);
+            previewBallGlyph.addView(previewBallIcon, iconLp);
+            setBallIcon(getPackageName());
             View phoneHome = new View(this);
             GradientDrawable homeBg = new GradientDrawable();
             homeBg.setCornerRadius(dp(1));
@@ -280,41 +352,93 @@ public class VsreenBridgeService extends Service {
             previewImageArea.addView(previewPlaceholder, new FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
-            LinearLayout zoomGroup = new LinearLayout(this);
-            zoomGroup.setOrientation(LinearLayout.HORIZONTAL);
-            zoomGroup.addView(makeIconBtn(IconView.MINUS, new View.OnClickListener() { @Override public void onClick(View v) { zoomPreview(1f / 1.12f); } }), circleLp());
-            zoomGroup.addView(makeIconBtn(IconView.PLUS, new View.OnClickListener() { @Override public void onClick(View v) { zoomPreview(1.12f); } }), circleLp());
-            FrameLayout.LayoutParams zoomLp = new FrameLayout.LayoutParams(
+            // v2.18（照 Operit 的浮层控件）：
+            //   · 画面上不常驻按钮 —— 一颗 999dp 圆角的半透明胶囊，点一下/拖动时才出现，3 秒后自己消失
+            //   · 里面 32dp 触区 + 18dp 图标，间距 2dp，padding 横向 6dp 纵向 2dp，跟 Operit 一致
+            // v2.20（照 Operit）：两态两套控件，都是底部一颗浅色胶囊；点一下才出来，3 秒淡出。
+            //   小窗：[−][+][⛶ 全屏][› 收起][✕ 关]   全屏：[⤡ 退出全屏][✕ 关]
+            // ===== v3.0（照 Operit 重写）：小窗点一下 → 正中竖排三键，3 秒自己消失 =====
+            FrameLayout centerWrap = new FrameLayout(this);
+            centerWrap.setVisibility(View.GONE);
+            LinearLayout centerPill = new LinearLayout(this);
+            centerPill.setOrientation(LinearLayout.VERTICAL);
+            centerPill.setBackground(lightPillBg());
+            centerPill.setElevation(dp(6));
+            centerPill.setPadding(dp(3), dp(6), dp(3), dp(6));
+            View c1 = makeDarkBtn(IconView.MINUS, new View.OnClickListener() { @Override public void onClick(View v) { collapsePreviewToSide(); } });
+            View c2 = makeDarkBtn(IconView.EXPAND, new View.OnClickListener() { @Override public void onClick(View v) { enterPreviewFullscreen(); } });
+            View c3 = makeDarkBtn(IconView.CROSS, new View.OnClickListener() { @Override public void onClick(View v) { closePreviewWindowOnly(); } });
+            c3.setOnLongClickListener(new View.OnLongClickListener() { @Override public boolean onLongClick(View v) { destroyVscreen(); return true; } });
+            FrameLayout.LayoutParams clp = new FrameLayout.LayoutParams(dp(40), dp(40));
+            clp.setMargins(0, dp(3), 0, dp(3));
+            centerPill.addView(c1, clp);
+            centerPill.addView(c2, clp);
+            centerPill.addView(c3, clp);
+            FrameLayout.LayoutParams cpLp = new FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
-            zoomLp.gravity = Gravity.TOP | Gravity.START;
-            zoomLp.setMargins(dp(6), dp(6), 0, 0);
-            previewImageArea.addView(zoomGroup, zoomLp);
+            cpLp.gravity = Gravity.CENTER;
+            centerWrap.addView(centerPill, cpLp);
+            previewControls = centerWrap;
 
-            LinearLayout winGroup = new LinearLayout(this);
-            winGroup.setOrientation(LinearLayout.HORIZONTAL);
-            // v1.42：收进侧边 = 右向箭头（画出来的）；关闭 = 交叉线（画出来的）
-            winGroup.addView(makeIconBtn(IconView.CHEVRON_RIGHT, new View.OnClickListener() { @Override public void onClick(View v) { collapsePreviewToSide(); } }), circleLp());
-            View closeBtn = makeIconBtn(IconView.CROSS, new View.OnClickListener() { @Override public void onClick(View v) { closePreviewWindowOnly(); } });
-            closeBtn.setOnLongClickListener(new View.OnLongClickListener() { @Override public boolean onLongClick(View v) { destroyVscreen(); return true; } });
-            winGroup.addView(closeBtn, circleLp());
-            FrameLayout.LayoutParams winLp = new FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
-            winLp.gravity = Gravity.TOP | Gravity.END;
-            winLp.setMargins(0, dp(6), dp(6), 0);
-            previewImageArea.addView(winGroup, winLp);
+            // ===== 全屏：右上角常驻胶囊（Operit 那套 45% 黑 + 999dp 圆角），退出键**绝不隐藏** =====
+            LinearLayout fullPill = new LinearLayout(this);
+            fullPill.setOrientation(LinearLayout.HORIZONTAL);
+            fullPill.setGravity(Gravity.CENTER_VERTICAL);
+            fullPill.setBackground(lightPillBg());
+            fullPill.setElevation(dp(6));
+            fullPill.setPadding(dp(5), dp(4), dp(5), dp(4));
+            View f1 = makeDarkBtn(IconView.MINUS, new View.OnClickListener() { @Override public void onClick(View v) {
+                previewHandler.post(new Runnable() { @Override public void run() { exitPreviewFullscreen(); collapsePreviewToSide(); } });
+            } });
+            View f2 = makeDarkBtn(IconView.SHRINK, new View.OnClickListener() { @Override public void onClick(View v) { exitPreviewFullscreen(); } });
+            View f3 = makeDarkBtn(IconView.CROSS, new View.OnClickListener() { @Override public void onClick(View v) { closePreviewWindowOnly(); } });
+            LinearLayout.LayoutParams bigLp = new LinearLayout.LayoutParams(dp(40), dp(40));
+            bigLp.setMargins(dp(4), 0, dp(4), 0);
+            fullPill.addView(f1, bigLp);
+            fullPill.addView(f2, bigLp);
+            fullPill.addView(f3, bigLp);
+            fullPill.setVisibility(View.GONE);
+            previewControlsFull = fullPill;
+            // 旧的 smallBar 变量不再使用；占位避免后面引用报错
+            LinearLayout smallBar = null;
 
+
+
+
+
+            // 画面不贴窗口边：留一圈 8dp 的框，既是 Operit 那种观感，也是拖动/唤出按钮的抓取区
+            previewImageArea.setPadding(dp(8), dp(8), dp(8), dp(8));
+            GradientDrawable imgClip = new GradientDrawable();
+            imgClip.setColor(0x00000000);
+            imgClip.setCornerRadius(dp(12));
+            previewImageArea.setBackground(imgClip);
+            previewImageArea.setClipToOutline(true);
             shell.addView(previewImageArea, new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
 
-            previewRootView = new FrameLayout(this);
-            previewRootView.addView(shell, new FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.MATCH_PARENT));
+            // v2.19：**没有顶部抓取条了** —— 长按窗口任意位置就能拖（配两指拖）
 
 
             // 建窗即按当前虚拟屏比例算尺寸（否则要等下一次比例"变化"才生效）
             lastAspect = 0f;
             previewLp.height = expandedHeightPx(previewLp.width);
+
+            // v2.20.1：窗口根节点（shell = 圆角外壳，ball/画面都挂在它里面）
+            previewRootView = new FrameLayout(this);
+            previewRootView.addView(shell, new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT));
+            if (previewControls != null) previewRootView.addView(previewControls,
+                    new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
+                            FrameLayout.LayoutParams.MATCH_PARENT));
+            if (previewControlsFull != null) {
+                FrameLayout.LayoutParams fpLp = new FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
+                fpLp.gravity = Gravity.TOP | Gravity.END;
+                fpLp.setMargins(0, dp(12), dp(12), 0);
+                previewFullPillLp = fpLp;
+                previewRootView.addView(previewControlsFull, fpLp);
+            }
 
             scaleDetector = new ScaleGestureDetector(this, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
                 @Override public boolean onScale(ScaleGestureDetector detector) {
@@ -338,7 +462,7 @@ public class VsreenBridgeService extends Service {
             });
             previewRootView.setOnTouchListener(new View.OnTouchListener() {
                 @Override public boolean onTouch(View v, MotionEvent e) {
-                    // 小条区域自己消费点击（收起）；拖动/缩放/长按在画面区域做
+                    if (previewFullscreen) return forwardTouchToVscreen(e);
                     scaleDetector.onTouchEvent(e);
                     switch (e.getActionMasked()) {
                         case MotionEvent.ACTION_DOWN:
@@ -346,43 +470,39 @@ public class VsreenBridgeService extends Service {
                             downY = e.getRawY();
                             startLpX = previewLp.x;
                             startLpY = previewLp.y;
-                            // v1.43：长按（按住不动 ~550ms）= 手动把「上次成功用过的 App（没有就 设置）」
-                            //   启动到虚拟屏。以前这件事挂在占位卡片上，代价是拖动被吃掉。
-                            cancelLongPressPending();
-                            longPressRunnable = new Runnable() { @Override public void run() {
-                                longPressRunnable = null;
-                                try { launchOnVscreen(vscreenTargetOrDefault(lastVscreenPkg())); }
-                                catch (Throwable ignored) {}
-                            }};
-                            previewHandler.postDelayed(longPressRunnable, 550);
+                            touchMoved = false;
+                            touchDownAt = System.currentTimeMillis();
+                            hidePreviewControls();
                             return true;
-                        case MotionEvent.ACTION_MOVE:
-                            if (!scaleDetector.isInProgress()) {
-                                float dx = e.getRawX() - downX;
-                                float dy = e.getRawY() - downY;
-                                // 手指一挪就撤掉长按（避免"拖动时顺手弹出一个 App"）
-                                if (Math.abs(dx) > dp(10) || Math.abs(dy) > dp(10)) cancelLongPressPending();
+                        case MotionEvent.ACTION_MOVE: {
+                            if (e.getPointerCount() >= 2 && scaleDetector.isInProgress()) return true;
+                            float dx = e.getRawX() - downX, dy = e.getRawY() - downY;
+                            if (Math.abs(dx) > dp(4) || Math.abs(dy) > dp(4)) touchMoved = true;
+                            if (touchMoved) {
                                 previewLp.x = Math.round(startLpX + dx);
                                 previewLp.y = Math.round(startLpY + dy);
-                                // 统一夹边界（含状态栏让位后的可用高度），保证小条永远可点
                                 clampPreviewBounds();
                                 updatePreviewLayout();
                             }
                             return true;
+                        }
                         case MotionEvent.ACTION_UP:
+                            if (!touchMoved) { togglePreviewControls(); return true; }
+                            // v3.4：拖动小球松手 → 吸附到最近的一边（以前松手就停在半空）
+                            if (previewSideCollapsed) snapBallToSide();
+                            return true;
                         case MotionEvent.ACTION_CANCEL:
-                            cancelLongPressPending();
                             return true;
                     }
                     return false;
                 }
             });
-
             clampPreviewBounds();          // 建窗即夹，避免初始就超出屏幕
             previewWm.addView(previewRootView, previewLp);
             previewWindowVisible = true;
-            // v1.39：按上次的选择决定初始形态（首次默认收成小球，不挡屏幕）
-            if (startCollapsed()) collapsePreviewToSide();
+            // v2.13：**一律先收成边上的小球**，不再参考"上次是什么样子"。
+            // 上次展开过一次就永远按展开弹，这是最烦人的那个坑（用户原话：每次一开就弹我屏幕上）。
+            if (!previewSideCollapsed) collapsePreviewToSide();
             Log.i(TAG, "虚拟屏预览窗已显示（画面区拖动/缩放，顶部小条点击收起到小鲸鱼）");
         } catch (Throwable t) {
             Log.w(TAG, "showPreviewWindow failed: " + t.getMessage());
@@ -670,21 +790,66 @@ public class VsreenBridgeService extends Service {
         previewHandler.post(new Runnable() { @Override public void run() {
             try {
                 if (previewLp == null || previewSideCollapsed) return;
+                previewFullscreen = false;
+                // v3.4：收起前先看你把卡片放在哪一侧 —— 左边收就收左边、右边收就收右边
+                int screenW0 = getResources().getDisplayMetrics().widthPixels;
+                if (previewLp.width > ballWidthPx() * 2) {
+                    previewDockLeft = (previewLp.x + previewLp.width / 2) < (screenW0 / 2);
+                }
                 previewSideCollapsed = true;
                 saveCollapsed(true);
+                saveDockLeft(previewDockLeft);
                 if (previewImageArea != null) previewImageArea.setVisibility(View.GONE);
+                if (previewControls != null) previewControls.setVisibility(View.GONE);
+                if (previewControlsFull != null) previewControlsFull.setVisibility(View.GONE);
                 if (previewBallGlyph != null) previewBallGlyph.setVisibility(View.VISIBLE);
                 applyShellShape(true);
-                previewLp.width = ballSizePx();
-                previewLp.height = ballSizePx();
-                previewLp.x = getResources().getDisplayMetrics().widthPixels - ballSizePx() - dp(8);
+                previewLp.width = ballWidthPx();
+                previewLp.height = ballHeightPx();
+                // v2.13：**真贴边**（照 Operit 的做法）—— 球往屏幕外塞 12dp，屏上只露一部分，
+                // 看着就是吸在边线上；旧实现在右边留了 8dp 空隙，是"浮着"的观感。
+                // v3.4：左右都支持 —— 贴着哪侧，就往哪侧的屏外塞。
+                previewLp.flags |= WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS;
+                previewLp.x = ballXForDock();
                 clampPreviewBounds();
                 updatePreviewLayout();
             } catch (Throwable ignored) {}
         }});
     }
 
-    /** 从「缩到一旁」还原成展开态（球 → 卡片）。 */
+    /** v3.4：收起小球贴边后的 x（左 = 负值塞到屏外，右 = 屏宽减球宽再塞出去）。 */
+    private int ballXForDock() {
+        int screenW = getResources().getDisplayMetrics().widthPixels;
+        return previewDockLeft ? -ballTuckPx() : screenW - ballWidthPx() + ballTuckPx();
+    }
+
+    /** v3.4：拖动小球松手 —— 吸附到最近的一边，并记住这一侧。 */
+    private void snapBallToSide() {
+        previewHandler.post(new Runnable() { @Override public void run() {
+            try {
+                if (previewLp == null || !previewSideCollapsed) return;
+                int screenW = getResources().getDisplayMetrics().widthPixels;
+                previewDockLeft = (previewLp.x + previewLp.width / 2) < (screenW / 2);
+                saveDockLeft(previewDockLeft);
+                previewLp.x = ballXForDock();
+                clampPreviewBounds();
+                updatePreviewLayout();
+            } catch (Throwable ignored) {}
+        }});
+    }
+
+    /** v3.4：记住小球贴哪边（下次开虚拟屏还贴那边）。 */
+    private void saveDockLeft(boolean left) {
+        try { getSharedPreferences("dsh_prefs", MODE_PRIVATE).edit().putBoolean("vscreen_dock_left", left).apply(); }
+        catch (Throwable ignored) {}
+    }
+
+    private void loadDockLeft() {
+        try { previewDockLeft = getSharedPreferences("dsh_prefs", MODE_PRIVATE).getBoolean("vscreen_dock_left", false); }
+        catch (Throwable ignored) {}
+    }
+
+    /** 从「缩到一旁」还原成展开态（球 → 卡片），卡片回到小球所贴的那一侧。 */
     private void expandPreviewFromSide() {
         previewHandler.post(new Runnable() { @Override public void run() {
             try {
@@ -694,19 +859,28 @@ public class VsreenBridgeService extends Service {
                 if (previewBallGlyph != null) previewBallGlyph.setVisibility(View.GONE);
                 applyShellShape(false);
                 applyExpandedSize();
+                // v3.4：从哪边收起的就从哪边展开（旧实现两态不在同一边，看着像自己跳过去）
+                int screenW = getResources().getDisplayMetrics().widthPixels;
+                previewLp.x = previewDockLeft ? dp(8) : screenW - previewLp.width - dp(8);
+                clampPreviewBounds();
+                updatePreviewLayout();
+                if (previewControls != null) previewControls.setVisibility(View.GONE);   // v3.3：展开时不预先摆按钮，点一下才出来
             } catch (Throwable ignored) {}
         }});
     }
 
     /** v1.42：按钮图标 —— 全部用画布画，不用文字、不用 emoji（用户：要简单图形）。 */
     private static class IconView extends View {
-        static final int MINUS = 1, PLUS = 2, CHEVRON_RIGHT = 3, CROSS = 4;
+        static final int MINUS = 1, PLUS = 2, CHEVRON_RIGHT = 3, CROSS = 4, EXPAND = 5, SHRINK = 6,
+                MOVE = 7, TOUCH = 8;
         private final int kind;
+        static int COLOR_DARK = 0xFF12171E;
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        IconView(Context c, int kind, float strokePx) {
+        IconView(Context c, int kind, float strokePx) { this(c, kind, strokePx, 0xFFFFFFFF); }
+        IconView(Context c, int kind, float strokePx, int color) {
             super(c);
             this.kind = kind;
-            paint.setColor(0xFFFFFFFF);
+            paint.setColor(color);
             paint.setStrokeWidth(strokePx);
             paint.setStyle(Paint.Style.STROKE);
             paint.setStrokeCap(Paint.Cap.ROUND);
@@ -730,22 +904,238 @@ public class VsreenBridgeService extends Service {
                     canvas.drawLine(cx - r, cy - r, cx + r, cy + r, paint);
                     canvas.drawLine(cx - r, cy + r, cx + r, cy - r, paint);
                     break;
+                case EXPAND: {   // 四个外拐角：全屏
+                    float a2 = r * 1.25f, b2 = r * 0.55f;
+                    canvas.drawLine(cx - a2, cy - a2 + b2, cx - a2, cy - a2, paint);
+                    canvas.drawLine(cx - a2, cy - a2, cx - a2 + b2, cy - a2, paint);
+                    canvas.drawLine(cx + a2 - b2, cy - a2, cx + a2, cy - a2, paint);
+                    canvas.drawLine(cx + a2, cy - a2, cx + a2, cy - a2 + b2, paint);
+                    canvas.drawLine(cx + a2, cy + a2 - b2, cx + a2, cy + a2, paint);
+                    canvas.drawLine(cx + a2, cy + a2, cx + a2 - b2, cy + a2, paint);
+                    canvas.drawLine(cx - a2 + b2, cy + a2, cx - a2, cy + a2, paint);
+                    canvas.drawLine(cx - a2, cy + a2, cx - a2, cy + a2 - b2, paint);
+                    break;
+                }
+                case MOVE: {   // 四向箭头 = 现在能拖窗口
+                    float a4 = r * 1.3f, hd = r * 0.42f;
+                    canvas.drawLine(cx - a4, cy, cx + a4, cy, paint);
+                    canvas.drawLine(cx, cy - a4, cx, cy + a4, paint);
+                    canvas.drawLine(cx - a4, cy, cx - a4 + hd, cy - hd, paint);
+                    canvas.drawLine(cx - a4, cy, cx - a4 + hd, cy + hd, paint);
+                    canvas.drawLine(cx + a4, cy, cx + a4 - hd, cy - hd, paint);
+                    canvas.drawLine(cx + a4, cy, cx + a4 - hd, cy + hd, paint);
+                    canvas.drawLine(cx, cy - a4, cx - hd, cy - a4 + hd, paint);
+                    canvas.drawLine(cx, cy - a4, cx + hd, cy - a4 + hd, paint);
+                    canvas.drawLine(cx, cy + a4, cx - hd, cy + a4 - hd, paint);
+                    canvas.drawLine(cx, cy + a4, cx + hd, cy + a4 - hd, paint);
+                    break;
+                }
+                case TOUCH: {  // 指尖点按 = 现在能操作虚拟屏
+                    paint.setStyle(Paint.Style.STROKE);
+                    canvas.drawCircle(cx, cy - r * 0.15f, r * 0.62f, paint);
+                    Paint fill = new Paint(paint);
+                    fill.setStyle(Paint.Style.FILL);
+                    canvas.drawCircle(cx, cy - r * 0.15f, r * 0.26f, fill);
+                    break;
+                }
+                case SHRINK: {   // 四个内拐角：退出全屏
+                    float a3 = r * 1.25f, b3 = r * 0.55f;
+                    canvas.drawLine(cx - a3, cy - a3, cx - a3 + b3, cy - a3, paint);
+                    canvas.drawLine(cx - a3, cy - a3, cx - a3, cy - a3 + b3, paint);
+                    canvas.drawLine(cx + a3, cy - a3, cx + a3 - b3, cy - a3, paint);
+                    canvas.drawLine(cx + a3, cy - a3, cx + a3, cy - a3 + b3, paint);
+                    canvas.drawLine(cx + a3, cy + a3, cx + a3 - b3, cy + a3, paint);
+                    canvas.drawLine(cx + a3, cy + a3, cx + a3, cy + a3 - b3, paint);
+                    canvas.drawLine(cx - a3, cy + a3, cx - a3 + b3, cy + a3, paint);
+                    canvas.drawLine(cx - a3, cy + a3, cx - a3, cy + a3 - b3, paint);
+                    break;
+                }
             }
         }
     }
 
     /** v1.42：圆形底 + 画出来的图标。 */
+    /** v2.18：点一下才出现，3 秒后自动淡出（Operit 的 controlsVisible 逻辑）。 */
+    private void showPreviewControls() {
+        if (previewControlsFull != null) {
+            previewControlsFull.setVisibility(previewFullscreen ? View.VISIBLE : View.GONE);
+        }
+        if (previewControls == null) return;
+        if (previewFullscreen) { previewControls.setVisibility(View.GONE); return; }
+        previewControls.setVisibility(View.VISIBLE);
+        if (previewHideControls != null) previewHandler.removeCallbacks(previewHideControls);
+        previewHideControls = new Runnable() { @Override public void run() {
+            if (previewFullscreen) return;
+            if (previewControls != null) previewControls.setVisibility(View.GONE);
+        }};
+        previewHandler.postDelayed(previewHideControls, 3000);
+    }
+
+    private void hidePreviewControls() {
+        if (previewHideControls != null) previewHandler.removeCallbacks(previewHideControls);
+        if (previewControls != null && !previewFullscreen) previewControls.setVisibility(View.GONE);
+    }
+
+    private void togglePreviewControls() {
+        if (previewControls != null && previewControls.getVisibility() == View.VISIBLE) hidePreviewControls();
+        else showPreviewControls();
+    }
+
+    /** v3.0：全屏时把手势原样送进虚拟屏（点=点，拖=滑）。 */
+    private boolean forwardTouchToVscreen(MotionEvent e) {
+        switch (e.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+                lastForwardAt = System.currentTimeMillis();
+                if (vdFrozen) { healVscreen(); return true; }
+                downX = e.getRawX();
+                downY = e.getRawY();
+                touchMoved = false;
+                touchDownAt = System.currentTimeMillis();
+                fwdPt0 = toDisplayXY(e);
+                return true;
+            case MotionEvent.ACTION_MOVE:
+                if (Math.abs(e.getRawX() - downX) > dp(8) || Math.abs(e.getRawY() - downY) > dp(8)) touchMoved = true;
+                return true;
+            case MotionEvent.ACTION_UP:
+            case MotionEvent.ACTION_CANCEL: {
+                float[] p1 = toDisplayXY(e);
+                if (e.getActionMasked() == MotionEvent.ACTION_UP && p1 != null && fwdPt0 != null) {
+                    if (!touchMoved) {
+                        Log.i(TAG, "vscreen tap " + Math.round(p1[0]) + "," + Math.round(p1[1]));
+                        coreGetAsync("/vscreen/tap?x=" + Math.round(p1[0]) + "&y=" + Math.round(p1[1]));
+                    } else {
+                        long dur = Math.min(1200, Math.max(80, System.currentTimeMillis() - touchDownAt));
+                        Log.i(TAG, "vscreen swipe " + Math.round(fwdPt0[0]) + "," + Math.round(fwdPt0[1])
+                                + " -> " + Math.round(p1[0]) + "," + Math.round(p1[1]));
+                        coreGetAsync("/vscreen/swipe?x1=" + Math.round(fwdPt0[0]) + "&y1=" + Math.round(fwdPt0[1])
+                                + "&x2=" + Math.round(p1[0]) + "&y2=" + Math.round(p1[1]) + "&dur=" + dur);
+                    }
+                }
+                fwdPt0 = null;
+                return true;
+            }
+        }
+        return true;
+    }
+
+    /** v2.20：进全屏 —— 整屏归虚拟屏，手势直接转发。 */
+    private void enterPreviewFullscreen() {
+        previewHandler.post(new Runnable() { @Override public void run() {
+            try {
+                if (previewLp == null) return;
+                smallX = previewLp.x; smallY = previewLp.y;
+                smallW = previewLp.width; smallH = previewLp.height;
+                previewFullscreen = true;
+                android.util.DisplayMetrics m = getResources().getDisplayMetrics();
+                previewLp.flags &= ~WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS;
+                if (previewFullPillLp != null) previewFullPillLp.topMargin = statusBarInset() + dp(10);
+                if (previewImageView != null) previewImageView.setScaleType(ImageView.ScaleType.FIT_XY);
+                if (previewImageArea != null) {
+                    previewImageArea.setPadding(0, 0, 0, 0);
+                    GradientDrawable fsBg = new GradientDrawable();
+                    fsBg.setColor(0xFF000000);
+                    fsBg.setCornerRadius(0);
+                    previewImageArea.setBackground(fsBg);
+                }
+                if (previewShell != null) {
+                    GradientDrawable shBg = new GradientDrawable();
+                    shBg.setColor(0xFF000000);
+                    shBg.setCornerRadius(0);
+                    previewShell.setBackground(shBg);
+                }
+                if (previewControls != null) previewControls.setVisibility(View.GONE);
+                if (previewControlsFull != null) previewControlsFull.setVisibility(View.VISIBLE);
+                previewLp.width = m.widthPixels;
+                previewLp.height = m.heightPixels;
+                previewLp.x = 0;
+                previewLp.y = 0;
+                updatePreviewLayout();
+                showPreviewControls();
+            } catch (Throwable ignored) {}
+        }});
+    }
+
+    /** v2.20：退全屏 —— 回到原来那个小窗的位置和大小。 */
+    private void exitPreviewFullscreen() {
+        previewHandler.post(new Runnable() { @Override public void run() {
+            try {
+                if (previewLp == null) return;
+                previewFullscreen = false;
+                if (previewImageView != null) previewImageView.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                if (previewImageArea != null) {
+                    previewImageArea.setPadding(dp(8), dp(8), dp(8), dp(8));
+                    GradientDrawable smBg = new GradientDrawable();
+                    smBg.setColor(0x00000000);
+                    smBg.setCornerRadius(dp(12));
+                    previewImageArea.setBackground(smBg);
+                }
+                if (smallW > 0) {
+                    previewLp.width = smallW;
+                    previewLp.height = smallH;
+                    previewLp.x = smallX;
+                    previewLp.y = smallY;
+                }
+                applyShellShape(false);
+                if (previewControlsFull != null) previewControlsFull.setVisibility(View.GONE);
+                clampPreviewBounds();
+                updatePreviewLayout();
+            } catch (Throwable ignored) {}
+        }});
+    }
+
+    /** v2.19：底部控制条用浅色玻璃片 + 深色图标 —— 压在深色画面上不会糊成一坨黑。 */
+    private GradientDrawable lightPillBg() {
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(0xF2F2F5F9);
+        bg.setCornerRadius(dp(999));
+        return bg;
+    }
+
+    /** v2.17：按钮组的胶囊底（照 Operit 的 999dp 圆角、45% 黑）。 */
+    private GradientDrawable pillBg() {
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(0x73000000);
+        bg.setCornerRadius(dp(999));
+        return bg;
+    }
+
+    /** 换掉按钮里的图标（移动 ↔ 操作）。 */
+    private void rebuildModeBtn(View holder, boolean interact) {
+        try {
+            android.view.ViewGroup g = (android.view.ViewGroup) holder;
+            g.removeAllViews();
+            IconView icon = new IconView(this, interact ? IconView.TOUCH : IconView.MOVE, dp(2.4f),
+                    interact ? 0xFF1B6EF3 : IconView.COLOR_DARK);
+            FrameLayout.LayoutParams ilp = new FrameLayout.LayoutParams(dp(17), dp(17));
+            ilp.gravity = Gravity.CENTER;
+            g.addView(icon, ilp);
+        } catch (Throwable ignored) {}
+    }
+
+    /** v2.19：浅底上的深色图标按钮。 */
+    private View makeDarkBtn(int kind, View.OnClickListener l) {
+        FrameLayout box = new FrameLayout(this);
+        box.setClickable(true);
+        box.setFocusable(false);
+        box.setOnClickListener(l);
+        IconView icon = new IconView(this, kind, dp(2.4f), IconView.COLOR_DARK);
+        FrameLayout.LayoutParams ilp = new FrameLayout.LayoutParams(dp(17), dp(17));
+        ilp.gravity = Gravity.CENTER;
+        box.addView(icon, ilp);
+        return box;
+    }
+
     private View makeIconBtn(int kind, View.OnClickListener l) {
         FrameLayout box = new FrameLayout(this);
         GradientDrawable bg = new GradientDrawable();
         bg.setShape(GradientDrawable.OVAL);
-        bg.setColor(0x59000000);
+        bg.setColor(0x00000000);   // v2.17：胶囊里不需要每个按钮再套一层圆片
         box.setBackground(bg);
         box.setClickable(true);
         box.setFocusable(false);
         box.setOnClickListener(l);
         IconView icon = new IconView(this, kind, dp(2));
-        FrameLayout.LayoutParams ilp = new FrameLayout.LayoutParams(dp(16), dp(16));
+        FrameLayout.LayoutParams ilp = new FrameLayout.LayoutParams(dp(18), dp(18));
         ilp.gravity = Gravity.CENTER;
         box.addView(icon, ilp);
         return box;
@@ -756,12 +1146,71 @@ public class VsreenBridgeService extends Service {
         try {
             if (previewShell == null) return;
             GradientDrawable bg = new GradientDrawable();
-            bg.setColor(circle ? 0xF21B2A3B : 0xE60B1622);
-            if (circle) bg.setShape(GradientDrawable.OVAL);
-            else bg.setCornerRadius(dp(16));
+            // v2.18：收起态完全照 Operit —— **灰色 85%**、12dp 圆角、无描边、36x48；
+            //   展开是深色卡片，只露一圈 8dp 的框。
+            bg.setColor(circle ? 0xD9808080 : 0xF00B1017);
+            if (circle) { bg.setCornerRadius(dp(12)); }
+            else { bg.setCornerRadius(dp(16)); }
             previewShell.setBackground(bg);
             try { previewShell.setClipToOutline(true); } catch (Throwable ignored) {}
         } catch (Throwable ignored) {}
+    }
+
+    /** v2.14：把小球图标换成某个 App 的图标（拿不到就保留原来的样子，绝不报错）。 */
+    private void setBallIcon(final String pkg) {
+        if (pkg == null || pkg.length() == 0) return;
+        if (pkg.equals(previewBallPkg)) return;
+        previewBallPkg = pkg;
+        previewHandler.post(new Runnable() { @Override public void run() {
+            try {
+                android.graphics.drawable.Drawable d = getPackageManager().getApplicationIcon(pkg);
+                if (previewBallIcon != null) {
+                    previewBallIcon.setImageDrawable(d);
+                    previewBallIcon.setVisibility(View.VISIBLE);
+                }
+                if (previewPhoneBox != null) previewPhoneBox.setVisibility(View.GONE);
+            } catch (Throwable t) {
+                // 图标拿不到（App 卸了 / 被冻结）：退回收起状态，不显示怪物
+            }
+        }});
+    }
+
+    /** v2.15：触点是否落在画面区（按钮不算）。 */
+    private boolean insideImageArea(MotionEvent e) {
+        try {
+            if (previewImageArea == null) return false;
+            float x = e.getX() - previewImageArea.getLeft(), y = e.getY() - previewImageArea.getTop();
+            return x >= 0 && y >= 0 && x <= previewImageArea.getWidth() && y <= previewImageArea.getHeight();
+        } catch (Throwable t) { return false; }
+    }
+
+    /** v2.15：窗口坐标 → 虚拟屏坐标（按 FIT_CENTER 的实际成像框换算，点黑边返回 null）。 */
+    private float[] toDisplayXY(MotionEvent e) {
+        try {
+            if (previewImageArea == null || vdW <= 0 || vdH <= 0) return null;
+            int iw = previewImageArea.getWidth(), ih = previewImageArea.getHeight();
+            if (iw <= 0 || ih <= 0) return null;
+            float vx = e.getX() - previewImageArea.getLeft(), vy = e.getY() - previewImageArea.getTop();
+            if (previewFullscreen) {   // 全屏 = 拉伸铺满
+                float dxf = vx * vdW / Math.max(1f, iw), dyf = vy * vdH / Math.max(1f, ih);
+                if (dxf < 0 || dyf < 0 || dxf > vdW || dyf > vdH) return null;
+                return new float[]{dxf, dyf};
+            }
+            float scale = Math.min(iw / (float) vdW, ih / (float) vdH);
+            if (scale <= 0) return null;
+            float dw = vdW * scale, dh = vdH * scale;
+            float ox = (iw - dw) / 2f, oy = (ih - dh) / 2f;
+            float dx = (vx - ox) / scale, dy = (vy - oy) / scale;
+            if (dx < 0 || dy < 0 || dx > vdW || dy > vdH) return null;
+            return new float[]{dx, dy};
+        } catch (Throwable t) { return null; }
+    }
+
+    /** v2.15：把一次点击/滑动丢给 core，别卡住 UI 线程。 */
+    private void coreGetAsync(final String path) {
+        new Thread(new Runnable() { @Override public void run() {
+            try { coreGet(path, 6000); } catch (Throwable ignored) {}
+        }}, "vscreen-touch").start();
     }
 
     /** v1.39：记住"收成小球 / 展开"。 */
@@ -797,7 +1246,7 @@ public class VsreenBridgeService extends Service {
         tv.setFocusable(false);
         GradientDrawable bg = new GradientDrawable();
         bg.setShape(GradientDrawable.OVAL);
-        bg.setColor(0x59000000);
+        bg.setColor(0x26FFFFFF);
         tv.setBackground(bg);
         tv.setOnClickListener(l);
         return tv;
@@ -806,7 +1255,7 @@ public class VsreenBridgeService extends Service {
     /** v1.39：圆形按钮 32dp，间距 5dp。 */
     private LinearLayout.LayoutParams circleLp() {
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(32), dp(32));
-        lp.setMargins(dp(3), 0, dp(3), 0);
+        lp.setMargins(dp(1), 0, dp(1), 0);
         return lp;
     }
 
@@ -829,12 +1278,17 @@ public class VsreenBridgeService extends Service {
     private void clampPreviewBounds() {
         try {
             if (previewLp == null) return;
+            if (previewFullscreen) { previewLp.x = 0; previewLp.y = 0; return; }
             final int screenW = getResources().getDisplayMetrics().widthPixels;
             final int usableH = usableHeight();
             // v1.36：「缩到一旁」的小标签很小，不能按展开态的最小宽高夹，只夹可见性
             if (previewSideCollapsed) {
-                if (previewLp.x > screenW - previewLp.width) previewLp.x = screenW - previewLp.width;
-                if (previewLp.x < 0) previewLp.x = 0;
+                // v2.13：允许球往屏幕外塞（贴边半藏），上限 = 屏宽-球宽+塞出去的那点
+                // v3.4：左边同样允许塞到屏外（负 x），否则往左贴会被夹回 0、看着"没贴住"
+                int maxX = screenW - previewLp.width + ballTuckPx();
+                int minX = -ballTuckPx();
+                if (previewLp.x > maxX) previewLp.x = maxX;
+                if (previewLp.x < minX) previewLp.x = minX;
                 if (previewLp.y < 0) previewLp.y = 0;
                 if (previewLp.y > usableH - previewLp.height) previewLp.y = usableH - previewLp.height;
                 return;
@@ -871,7 +1325,12 @@ public class VsreenBridgeService extends Service {
     /** 最小化时保留的高度：一条按钮栏 + 上下留白。 */
     private int barHeightPx() { return dp(40); }
     /** v1.39：小球直径（跟悬浮球观感对齐）。 */
-    private int ballSizePx() { return dp(52); }
+    private int ballWidthPx() { return dp(36); }   // Operit 贴边小条：36dp 宽
+    private int ballHeightPx() { return dp(48); }  // 48dp 高，圆角 12dp
+    private int ballSizePx() { return dp(48); }
+
+    /** v2.13：贴边小球往屏幕外塞的像素（Operit 同款：露大半、少半在屏外）。 */
+    private int ballTuckPx() { return dp(12); }   // Operit 也是 12dp 露在屏幕外
 
     /**
      * v1.13.11：预览窗 ✕ = **销毁/停止虚拟屏**。
@@ -980,6 +1439,7 @@ public class VsreenBridgeService extends Service {
                             vdW = jsonInt(st, "width", 0);
                             vdH = jsonInt(st, "height", 0);
                             boolean running = id >= 0 && jsonBool(st, "running");
+                            vdFrozen = jsonBool(st, "suspectFrozen");
                             sVscreenRunning = running;   // 小鲸鱼面板「销毁屏」按钮的显示依据
                             // v1.37：虚拟屏"刚起来"那几秒不要给用户一片黑 —— 先显示占位
                             if (running && !lastVscreenRunning) {
@@ -1301,7 +1761,13 @@ public class VsreenBridgeService extends Service {
                     try {
                         getSharedPreferences("dsh_prefs", MODE_PRIVATE).edit().putBoolean(PREF_PREVIEW, on).apply();
                     } catch (Throwable ignored) {}
-                    if (!on) hidePreviewWindow();
+                    if (on) {
+                        previewDismissedDisplayId = Integer.MIN_VALUE;
+                        if (previewRootView == null) showPreviewWindow();
+                        else previewWindowVisible = true;
+                    } else {
+                        hidePreviewWindow();
+                    }
                 } else {
                     on = previewWanted();
                 }
@@ -1311,6 +1777,169 @@ public class VsreenBridgeService extends Service {
                 out.write(pbody);
                 out.flush();
                 return;
+            }
+            // v2.18.2：兜底遥控 —— 万一界面又"动不了/关不上"，一条命令就能收起来
+            //   /dsh/vscreen-collapse          收成小球
+            //   /dsh/vscreen-close             直接关掉预览窗
+            //   /dsh/vscreen-move?dx=0&dy=-200 挪窗
+            if (path.startsWith("/dsh/vscreen-collapse") || path.startsWith("/dsh/vscreen-close")
+                    || path.startsWith("/dsh/vscreen-move")) {
+                out = s.getOutputStream();
+                final boolean doCollapse = path.startsWith("/dsh/vscreen-collapse");
+                final boolean doClose = path.startsWith("/dsh/vscreen-close");
+                final int dx = qint(path, "dx=", 0);
+                final int dy = qint(path, "dy=", 0);
+                previewHandler.post(new Runnable() { @Override public void run() {
+                    try {
+                        if (doClose) { closePreviewWindowOnly(); return; }
+                        if (doCollapse) { collapsePreviewToSide(); return; }
+                        if (previewLp != null) {
+                            previewLp.x += dp(dx);
+                            previewLp.y += dp(dy);
+                            clampPreviewBounds();
+                            updatePreviewLayout();
+                        }
+                    } catch (Throwable ignored) {}
+                }});
+                byte[] cbody = "{\"ok\":true}".getBytes("UTF-8");
+                out.write(("HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\n"
+                        + "Content-Length: " + cbody.length + "\r\nConnection: close\r\n\r\n").getBytes("UTF-8"));
+                out.write(cbody);
+                out.flush();
+                return;
+            }
+            if (path.startsWith("/dsh/vscreen-expand")) {
+                out = s.getOutputStream();
+                expandPreviewFromSide();
+                byte[] ebody = "{\"ok\":true}".getBytes("UTF-8");
+                out.write(("HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\n"
+                        + "Content-Length: " + ebody.length + "\r\nConnection: close\r\n\r\n").getBytes("UTF-8"));
+                out.write(ebody);
+                out.flush();
+                return;
+            }
+            if (path.startsWith("/dsh/vscreen-fullscreen")) {
+                out = s.getOutputStream();
+                final boolean onFs = path.contains("on=1");
+                if (onFs) enterPreviewFullscreen(); else exitPreviewFullscreen();
+                byte[] fbody = ("{\"ok\":true,\"fullscreen\":" + onFs + "}").getBytes("UTF-8");
+                out.write(("HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\n"
+                        + "Content-Length: " + fbody.length + "\r\nConnection: close\r\n\r\n").getBytes("UTF-8"));
+                out.write(fbody);
+                out.flush();
+                return;
+            }
+            // v2.25：自检 —— 合成 DOWN/UP 走真实触摸链路（不用他动手、不碰主屏）
+            if (path.startsWith("/dsh/vscreen-mode")) {
+                out = s.getOutputStream();
+                final boolean it = path.contains("interact=1");
+                previewHandler.post(new Runnable() { @Override public void run() {
+                    previewInteract = it;
+                    try { getSharedPreferences("dsh_prefs", MODE_PRIVATE).edit()
+                            .putBoolean("vscreen_interact", it).apply(); } catch (Throwable ignored) {}
+                }});
+                byte[] mbody = ("{\"ok\":true,\"interact\":" + it + "}").getBytes("UTF-8");
+                out.write(("HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\n"
+                        + "Content-Length: " + mbody.length + "\r\nConnection: close\r\n\r\n").getBytes("UTF-8"));
+                out.write(mbody);
+                out.flush();
+                return;
+            }
+            if (path.startsWith("/dsh/vscreen-simtap")) {
+                out = s.getOutputStream();
+                final int lx = qint(path, "x=", -1), ly = qint(path, "y=", -1);
+                final String[] res = new String[]{"{\"ok\":false}"};
+                final java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+                previewHandler.post(new Runnable() { @Override public void run() {
+                    try {
+                        if (previewRootView == null || previewLp == null || lx < 0 || ly < 0) {
+                            res[0] = "{\"ok\":false,\"error\":\"no window or coords\"}";
+                        } else {
+                            int sx = lx, sy = ly;
+                            long t0 = android.os.SystemClock.uptimeMillis();
+                            MotionEvent d = MotionEvent.obtain(t0, t0, MotionEvent.ACTION_DOWN, sx, sy, 0);
+                            previewRootView.dispatchTouchEvent(d);
+                            d.recycle();
+                            MotionEvent u = MotionEvent.obtain(t0, t0 + 60, MotionEvent.ACTION_UP, sx, sy, 0);
+                            previewRootView.dispatchTouchEvent(u);
+                            u.recycle();
+                            res[0] = "{\"ok\":true,\"fullscreen\":" + previewFullscreen
+                                    + ",\"controls\":" + (previewControls != null && previewControls.getVisibility() == View.VISIBLE)
+                                    + ",\"at\":" + lastForwardAt + "}";
+                        }
+                    } catch (Throwable t) {
+                        res[0] = "{\"ok\":false,\"error\":\"" + t.getClass().getSimpleName() + "\"}";
+                    }
+                    latch.countDown();
+                }});
+                try { latch.await(5, java.util.concurrent.TimeUnit.SECONDS); } catch (Throwable ignored) {}
+                byte[] sbody = res[0].getBytes("UTF-8");
+                out.write(("HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\n"
+                        + "Content-Length: " + sbody.length + "\r\nConnection: close\r\n\r\n").getBytes("UTF-8"));
+                out.write(sbody);
+                out.flush();
+                return;
+            }
+            // v2.16：自检渲染 —— 把浮窗自己 draw 成 PNG 落到私有目录，我看图改 UI，全程不碰他的主屏。
+            //   /dsh/vscreen-snapshot           当前形态
+            //   /dsh/vscreen-snapshot?mode=card 展开态（画完自动收回去）
+            if (path.startsWith("/dsh/vscreen-snapshot")) {
+                out = s.getOutputStream();
+                final boolean wantCard = path.contains("mode=card");
+                final boolean keepOpen = path.contains("keep=1");
+                final String[] res = new String[]{"{\"ok\":false,\"error\":\"no window\"}"};
+                final java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+                previewHandler.post(new Runnable() { @Override public void run() {
+                    try {
+                        if (previewRootView == null || previewRootView.getWidth() <= 0) { latch.countDown(); return; }
+                        final boolean wasCollapsed = previewSideCollapsed;
+                        if (wantCard && wasCollapsed) expandPreviewFromSide();
+                        previewHandler.postDelayed(new Runnable() { @Override public void run() {
+                            try {
+                                int w = previewRootView.getWidth(), h = previewRootView.getHeight();
+                                android.graphics.Bitmap bmp = android.graphics.Bitmap.createBitmap(w, h,
+                                        android.graphics.Bitmap.Config.ARGB_8888);
+                                previewRootView.draw(new android.graphics.Canvas(bmp));
+                                java.io.File dir = new java.io.File(getFilesDir(), "shots");
+                                dir.mkdirs();
+                                java.io.File f = new java.io.File(dir, wantCard ? "ui-card.png" : "ui-ball.png");
+                                java.io.FileOutputStream fo = new java.io.FileOutputStream(f);
+                                bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, fo);
+                                fo.close(); bmp.recycle();
+                                if (wantCard && wasCollapsed && !keepOpen) collapsePreviewToSide();
+                                res[0] = "{\"ok\":true,\"path\":\"" + f.getAbsolutePath() + "\",\"w\":" + w + ",\"h\":" + h + "}";
+                            } catch (Throwable t) {
+                                res[0] = "{\"ok\":false,\"error\":\"" + t.getClass().getSimpleName() + "\"}";
+                            }
+                            latch.countDown();
+                        }}, wantCard ? 420 : 60);
+                    } catch (Throwable t) {
+                        res[0] = "{\"ok\":false,\"error\":\"" + t.getClass().getSimpleName() + "\"}";
+                        latch.countDown();
+                    }
+                }});
+                try { latch.await(5, java.util.concurrent.TimeUnit.SECONDS); } catch (Throwable ignored) {}
+                byte[] body = res[0].getBytes("UTF-8");
+                out.write(("HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\n"
+                        + "Content-Length: " + body.length + "\r\nConnection: close\r\n\r\n").getBytes("UTF-8"));
+                out.write(body);
+                out.flush();
+                return;
+            }
+            // v2.14（学 Operit）：虚拟屏里起 App 时，把小球图标换成那个 App 的图标
+            if (path.startsWith("/vscreen/launch")) {
+                try {
+                    int pi = path.indexOf("pkg=");
+                    if (pi >= 0) {
+                        String p = path.substring(pi + 4);
+                        int amp = p.indexOf('&');
+                        if (amp > 0) p = p.substring(0, amp);
+                        p = java.net.URLDecoder.decode(p, "UTF-8");
+                        int slash = p.indexOf('/');
+                        if (slash > 0) p = p.substring(0, slash);
+                        setBallIcon(p);
+                    }
+                } catch (Throwable ignored) {}
             }
             out = s.getOutputStream();
             Socket up = null;
@@ -1411,6 +2040,18 @@ public class VsreenBridgeService extends Service {
         if (i < 0) return false;
         i = json.indexOf(':', i + k.length());
         return i > 0 && json.startsWith("true", i + 1 + (json.charAt(i + 1) == ' ' ? 1 : 0));
+    }
+
+    /** 从查询串里抠一个整数，抠不到就给默认值。 */
+    private static int qint(String q, String key, int def) {
+        try {
+            int i = q.indexOf(key);
+            if (i < 0) return def;
+            int j = i + key.length();
+            int e = j;
+            while (e < q.length() && (Character.isDigit(q.charAt(e)) || q.charAt(e) == '-' || q.charAt(e) == '+')) e++;
+            return Integer.parseInt(q.substring(j, e));
+        } catch (Throwable t) { return def; }
     }
 
     private static String safe(String s) {

@@ -53,6 +53,11 @@ const BAD = [
   // 11 位手机号正则，dependabot 的 @users.noreply.github.com 会命中邮箱正则。
   // 要留下的只有我们自己的那两份应用内更新日志（见下面 KEEP）。
   [/(^|\/)node_modules\/.*CHANGELOG\.md$/i, '第三方 changelog'],
+  // 2026-11-04（v1.47）：占卜技能改名 dsh-zhanbu。骨架解出来的那份旧 dsh-yijing 带 27 个文件，
+  // 不能随包走：全新安装会解出一整套废弃技能，老用户升级就只能靠装机侧迁移兜底。
+  // 只留一份墓碑 SKILL.md —— 它覆盖旧文件，装机侧再把整个目录移进 skills-retired/；
+  // 万一迁移没跑成，这份也写着"别加载本技能"。
+  [/^dshhome\/skills\/dsh-yijing\/(?!SKILL\.md$).+/i, '旧技能 dsh-yijing 残留'],
 ];
 
 // 例外白名单：这两份 CHANGELOG 是**我们自己的**应用内更新日志，必须随包分发，

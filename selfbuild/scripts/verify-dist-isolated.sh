@@ -45,6 +45,29 @@ export LD_LIBRARY_PATH="$F/payload/runtime/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PA
 "$NODE" -e 'process.exit(0)' 2>/dev/null || { echo "✗ node 起不来（缺 LD_LIBRARY_PATH？）"; exit 2; }
 PORT=3098
 ISO=$F/tmp/distverify
+# 2026-10-31 补：隔离实例从 payload 拉起的常驻守护（life hub 等）不归 $PID 管 ——
+# 它们直接用 /sdcard 绝对路径读写真库，引擎被杀后仍挂在 init 下假活。
+# 当天就漏出一个记账守护：在 tmp/gate 的临时树里跑 4 小时、稳定烧 20% CPU，
+# 且开着**真的** life.db（清一次 tmp 目录就会静默断账）。收尾必须按 $ISO 路径清整棵树。
+iso_tree_cleanup() {
+  [ -n "${ISO:-}" ] || return 0
+  in_iso() {
+    tr '\0' '\n' <"/proc/$1/cmdline" 2>/dev/null | awk -v p="$ISO/" 'index($0,p)==1 {f=1; exit} END {exit(f?0:1)}'
+  }
+  for sig in TERM KILL; do
+    for d in /proc/[0-9]*; do
+      p=${d#/proc/}
+      [ "$p" = "$$" ] && continue
+      # 逐参数匹配「以 $ISO/ 开头的路径」，不按整条命令行做子串匹配：
+      # 子串版会把只是"提到"该路径的 shell 也杀掉（自测时真把自己杀了）；
+      # 也不能只看 argv[0]，mksh 会把符号链接解析成真实路径。
+      in_iso "$p" || continue
+      kill -$sig "$p" 2>/dev/null
+    done
+    sleep 1
+  done
+}
+trap 'iso_tree_cleanup' EXIT
 FAIL=0
 PIDOWN_OK=0; RPC_OK=0; NATIVE_OK=0; HOME_ISO_OK=0; PLUGINS_OK=0; SKILL_OK=0
 PENDING=0; FILES_N=0; LN=0; CODE=""; AFTER_ONE=""; TOKEN=""

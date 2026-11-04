@@ -54,8 +54,8 @@ dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-app/
 #       e6eb41e7 → 88ea18c3），而 verify 里的 `|| true` 又把它吞了 → 四版没人发现。
 #       内容对不对由发版前人工过目保证，不由 md5 保证（md5 在此只制造假警报）。
 #    ⚠ 顺带一条：只换 dex 的包（不动 payload）里这份日志来自骨架版本，本来就比 overlay 旧。
-dshroot/CHANGELOG.md|fd3c1b3f9bf27f7a0740c5cb684f4200|更新日志
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/CHANGELOG.md|fd3c1b3f9bf27f7a0740c5cb684f4200|更新日志
+dshroot/CHANGELOG.md|a5ad6ca45f95ed908a9e0a6a7716e757|更新日志
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/CHANGELOG.md|a5ad6ca45f95ed908a9e0a6a7716e757|更新日志
 # ⑭ v1.36：账户 UI —— 放开上游「桌面独占」门禁（apply 首行 dshDesktop 检查）
 #    刻意不注入全局 dshDesktop，以免挤掉 settings-models 的 API Key 引导。
 #    ⚠ 2026-10-17 换 0.2.1 时发现：上游自己把这道门禁去掉了（apply 里只剩
@@ -97,8 +97,8 @@ dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-fs-
 # ② 分享进来的可见性与落盘副本（2026-10-15 事故：两份副本里服务的是"瘦"的那份，
 #    且"到货卡片"只挂在会话页 → 用户分享进来的文件收下了却没人看见。
 #    这两条把「带 shell.overlay 到货横幅的那一份」钉死，两份副本都必须一致）
-dshhome/profiles/web/node_modules/dsh-android-console/lib/client.js|a00cbdb46730a00ada17759207fbe4c1|android-share-notice
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-android-console/lib/client.js|08b79df4ea2d89a6eee5a8ab98ed54b5|android-share-notice
+dshhome/profiles/web/node_modules/dsh-android-console/lib/client.js|b3426fe7eddb063c92be0e0b14f0606c|android-share-notice
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-android-console/lib/client.js|b3426fe7eddb063c92be0e0b14f0606c|android-share-notice
 # ⚠️ 2026-10-15 之前这条清单**没覆盖**这两个文件，于是"源码改了、包里带的还是旧的"
 #    能一路通过 verify。装 1.39 之前，patch-check 对这两条会报漂移（装机副本还是旧的）——那是**正确**的。
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-plugin-auto-summary-policy/lib/index.js|d0beb2db51a199d1d7b4a45b5cc74936|0.1.2-effective-policy
@@ -113,7 +113,7 @@ dshhome/profiles/web/node_modules/dsh-plugin-turn-notify/lib/index-v3.js|3e40e4c
 #    同 id 条目会替换前一层并**静默丢掉它的 config**，1.38 的"新建会话失败"就是这么来的
 # 2026-10-24 更新 md5：新增 dsh-smart-search，并把 web.searchProvider 设为 auto-search。
 # 原 auto-summary-policy、dsh-doc-media 等条目保留；强制搜索仍由 web_search_with 显式选择。
-dshhome/cordis.patch.yml|f5b0b1a0fb722af22a168636d399bae6|dsh-doc-media
+dshhome/cordis.patch.yml|a88097849b311574b21ed48347b45db4|dsh-doc-media
 
 # 2026-10-21 v1.42：文件预览视频播放 + 安卓文件动作。两个都是纯客户端插件，
 # Node 半边（lib/index.js）只为让 Loader 能解析包入口，必须随包，否则启动日志报
@@ -143,3 +143,13 @@ dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-experime
 # 2026-10-27 v1.43：当前会话多模型顺序回答、重复配置、成员污染与注入消息误判修复；31 项测试通过后重算入口哈希。
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-sidebar/lib/client.js|1d01e5e007809a39e7e353f0bbd50731|dsh.sidebar.featurePanelsOpen
 dshhome/skills/dsh-review/scripts/review-channels.mjs|44a6de8ae7525a06b8d23a22a73325db|unlisted
+
+# 2026-11-02 完整审计轮新增：四个安全修复必须能随包校验（此前都没进门禁）。
+# Excel 预览 window.open 补 noopener（反向 tabnabbing）
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-sidebar-documentpreview/lib/client.excel.js|80d1bc747d2d6693038ff0d7bb7e3265|noopener,noreferrer
+# WebServer 三处 disposer 改成幂等、只删自己那次注册（旧 disposer 不能删掉新路由）
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-host-webserver/lib/index.js|441640d43d5089e6bd83b551b1be7b43|table.get(route.path) === route
+# spill 清理放行 Android 系统目录与本 App setgid 目录（否则清缓存直接失败）
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-spill-local/lib/index.js|d21ebc6ba4e0fd6a154fdc39354cc4a5|isAndroidProtectedAncestor
+# MCP 跨源 307 不再转发自定义鉴权头（X-Api-Key 等）
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-mcp-client/lib/index.js|d54c36ee60dd2d6b6e689fffdc0cc2a5|sameOriginRedirectFetch

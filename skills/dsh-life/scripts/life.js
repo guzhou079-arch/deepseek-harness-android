@@ -107,6 +107,14 @@ function openDB() {
       key TEXT PRIMARY KEY,
       value TEXT
     );
+
+    -- 忽略名单：用户点名「这条别记」的通知原文（如招行入账其实是内部划转）。
+    -- 只删 transactions 行不够 —— 桥缓冲回放会把同一条原文重新插回来。
+    CREATE TABLE IF NOT EXISTS ignored_texts (
+      full_text TEXT PRIMARY KEY,
+      reason TEXT,
+      created_at INTEGER NOT NULL
+    );
   `);
 
   return db;
@@ -203,6 +211,21 @@ function normalizeAccount(a) {
 function isNeutralMerchant(m) {
   return !m || /^(银行消费|银行转入\/代发|微信商户|支付宝商户|银行转入)$/.test(String(m).trim());
 }
+// 2026-10-31：同一笔钱可能从两个渠道各来一条 —— 「微信支付 已支付¥10」和「农行…财付通交易-10」。
+// 两边 account 一个是「微信支付」一个是「中国农业银行」，账户比较必然不等，老逻辑直接 continue
+// 放过 → 一笔记三次（微信通知 + 银行回执 + 22 分钟后补发的笼统通知）。跨渠道要认出来。
+function isThirdPartyAccount(a) {
+  return /微信|支付宝|财付通|云闪付/.test(String(a || ''));
+}
+function isBankAccount(a) {
+  return /银行|农行|工行|建行|中行|招行|邮储|储蓄|借记|民生|兴业|浦发|光大|中信|平安|交行/.test(String(a || ''));
+}
+function accountsRelated(ra, norm) {
+  if (!ra || !norm) return 'none';
+  if (ra === norm || ra.startsWith(norm) || norm.startsWith(ra)) return 'same';
+  if ((isThirdPartyAccount(ra) && isBankAccount(norm)) || (isThirdPartyAccount(norm) && isBankAccount(ra))) return 'cross';
+  return 'none';
+}
 // 重放保护用：同一段通知原文是否已经入库（table 只传脚本内固定字面量）
 function textAlreadyStored(db, table, fullText) {
   if (!fullText) return false;
@@ -211,6 +234,24 @@ function textAlreadyStored(db, table, fullText) {
 // 推送/短信正文里都带「10月20日10:43」这样的动账时刻（是交易时刻，不是收通知的时刻）。
 // 两条原文时刻不同 ⇒ 是两笔在不同分钟发生的动账，哪怕金额一样、都在 3 分钟窗里。
 // 这条判据专治「小额（<¥10）两条推送都不带余额」—— 那时没有余额可比，只剩这个硬判据。
+/**
+ * 「钱还没真扣」型通知：信用卡预扣费/预授权这类，记账会虚增支出。
+ * 哥 2026-10-31 明确说招行预扣费成功的短信不用记 —— 整条挡在账本外，日志留痕。
+ */
+function excludeReason(fullText) {
+  const s = String(fullText || '');
+  if (/预扣费/.test(s)) return '预扣费，未真实扣款';
+  // 2026-10-31：招行只是「农行 → 招行万事达 → 订阅」的落脚卡。
+  // 「您尾号****的招行一卡通入账人民币X元」= 自己另一张卡打进来的钱，不是收入；
+  // 记了会虚增收入（10/31 的 +70/+8、10/27 的 +7 都是这种）。
+  if (/(招商银行|招行)/.test(s) && /(一卡通|账户)入账/.test(s) && !/(工资|代发|奖金|薪资|退款|退费|返还|冲正|退回)/.test(s)) return '招行卡内划转，非收入';
+  return null;
+}
+/** 忽略名单命中：这条通知原文用户说过「别记」，以后再来（含缓冲重放）一律不入账。 */
+function isIgnoredText(db, fullText) {
+  if (!fullText) return false;
+  try { return !!db.prepare('SELECT 1 FROM ignored_texts WHERE full_text = ? LIMIT 1').get(fullText); } catch (_) { return false; }
+}
 function txnTimeOf(text) {
   const m = /(\d{1,2})月(\d{1,2})日\s*(\d{1,2}):(\d{2})/.exec(String(text || ''));
   if (!m) return null;
@@ -219,6 +260,9 @@ function txnTimeOf(text) {
 function insertTransactionDedup(db, txInfo, seq, createdAt) {
   const at = createdAt || Date.now();
   try {
+    if (txInfo.fullText && isIgnoredText(db, txInfo.fullText)) return { ok: true, ignored: true, reason: '忽略名单' };
+    const _excl = excludeReason(txInfo.fullText);
+    if (_excl) return { ok: true, ignored: true, reason: _excl };
     // 重放保护：桥归零后缓冲会被整段重放，同一条通知原文不该重复记账。
     // 但旧行若只有中性商户（"银行消费"）而这次解析出真商户，仍要给旧行补上。
     if (txInfo.fullText) {
@@ -233,43 +277,60 @@ function insertTransactionDedup(db, txInfo, seq, createdAt) {
       }
     }
     const norm = normalizeAccount(txInfo.account);
-    const rows = db.prepare(`
-      SELECT id, merchant, account, created_at, full_text FROM transactions
-      WHERE type = ? AND abs(amount - ?) < 0.005 AND abs(created_at - ?) <= 180000
-    `).all(txInfo.type, txInfo.amount, at);
-    for (const r of rows) {
-      const ra = normalizeAccount(r.account);
-      if (ra !== norm && !ra.startsWith(norm) && !norm.startsWith(ra)) continue;
-      // ⚠️ 2026-10-20：「同金额 + 3 分钟内」不足以判重 —— 两笔真动账也可能金额相同
-      //    （食堂连刷两次 10 元、公交连刷两次 2 元）。更硬的判据是余额：两条都带余额
-      //    且数值不同 ⇒ 余额真的变了 ⇒ 是两笔独立动账，吞掉后一笔会让余额链少一段，
-      //    表现就是用户看到的「少记几块」。余额相同 = 同一条通知的重放，照旧判重。
-      const newBal = EXTRACTOR.extractBalance(txInfo.fullText || '');
-      if (newBal !== null) {
-        const oldBal = EXTRACTOR.extractBalance(r.full_text || '');
-        if (oldBal !== null && Math.abs(oldBal - newBal) >= 0.005) continue;
+    const newBal = EXTRACTOR.extractBalance(txInfo.fullText || '');
+    const newT = txnTimeOf(txInfo.fullText);
+
+    // 判重判据（通用）：
+    // 1) 账户必须是同一张卡，或「第三方支付 ⇄ 银行卡」的跨渠道配对；
+    // 2) 两条都带余额且数值不同 ⇒ 余额真的变了 ⇒ 两笔独立动账，绝不吞；
+    // 3) 两条都写得出动账时刻且分钟不同 ⇒ 两笔独立动账，绝不吞。
+    const judge = (r, strictTime) => {
+      const rel = accountsRelated(normalizeAccount(r.account), norm);
+      if (rel === 'none') return null;
+      const oldBal = EXTRACTOR.extractBalance(r.full_text || '');
+      if (newBal !== null && oldBal !== null && Math.abs(oldBal - newBal) >= 0.005) return null;
+      const oldT = txnTimeOf(r.full_text);
+      if (newT !== null && oldT !== null && Math.abs(newT - oldT) >= 1) return null;
+      // 宽窗里同金额的行很多，只认「原文动账时刻完全相同」这一种同一笔。
+      if (strictTime && (newT === null || oldT === null || newT !== oldT)) return null;
+      return { rel, oldBal };
+    };
+
+    // 主窗 3 分钟。原文带「10月31日17:22」这类交易时刻时，再开一个 12 小时宽窗：
+    // 2026-10-31 农行把 17:22 那笔的笼统提醒拖到 17:44 才推，晚了 22 分钟，3 分钟窗根本够不着。
+    const scans = [{ span: 180000, strictTime: false }];
+    if (newT !== null) scans.push({ span: 43200000, strictTime: true });
+
+    let hit = null;
+    for (const scan of scans) {
+      const rows = db.prepare(`
+        SELECT id, merchant, account, created_at, full_text FROM transactions
+        WHERE type = ? AND abs(amount - ?) < 0.005 AND abs(created_at - ?) <= ?
+      `).all(txInfo.type, txInfo.amount, at, scan.span);
+      for (const r of rows) {
+        const j = judge(r, scan.strictTime);
+        if (j) { hit = { r, ...j }; break; }
       }
-      // 两条都不带余额时，余额判据是空的 ⇒ 再看正文里的动账时刻。
-      // 同一分钟 = 同一条通知的两种渠道；不同分钟 = 两笔真动账（2026-10-20 漏的 ¥5 就是这种）。
-      const newT = txnTimeOf(txInfo.fullText), oldT = txnTimeOf(r.full_text);
-      if (newT !== null && oldT !== null && Math.abs(newT - oldT) >= 1) continue;
+      if (hit) break;
+    }
+
+    if (hit) {
+      const r = hit.r;
+      // 旧行是中性商户而这次解析出真商户 ⇒ 就地升级，不新增行。
       if (isNeutralMerchant(r.merchant) && !isNeutralMerchant(txInfo.merchant)) {
         db.prepare(`UPDATE transactions SET merchant = ?, category = ?, account = ?, full_text = ? WHERE id = ?`)
           .run(txInfo.merchant, txInfo.category, txInfo.account, txInfo.fullText, r.id);
         return { ok: true, upgraded: true };
       }
-      // ⚠️ 2026-10-20：同一笔动账会来两条通知 —— 先「掌银推送」(只有金额、中性商户)，
-      //    几秒后「银行短信」(带商户 + **余额**)。老逻辑把短信当重复直接丢掉 →
-      //    余额锚点丢失，「最近余额」只能靠推算越走越偏（当天差 ¥14.90，用户以为漏账）。
-      //    ⇒ 重复时若新原文带余额而旧行没有，把原文并进旧行。幂等键仍是原文，重放安全。
-      if (txInfo.fullText && EXTRACTOR.extractBalance(txInfo.fullText) !== null &&
-          EXTRACTOR.extractBalance(r.full_text || '') === null) {
+      // 旧行没余额、新原文带余额 ⇒ 把余额锚点并进旧行（幂等键仍是原文，重放安全）。
+      if (txInfo.fullText && newBal !== null && hit.oldBal === null) {
         db.prepare(`UPDATE transactions SET full_text = ?, account = ? WHERE id = ?`)
           .run(txInfo.fullText, txInfo.account, r.id);
         return { ok: true, mergedBalance: true };
       }
       return { ok: true, duplicate: true };
     }
+
     const insSql = `
       INSERT INTO transactions (type, amount, merchant, category, account, full_text, created_at, seq)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -290,7 +351,6 @@ function insertTransactionDedup(db, txInfo, seq, createdAt) {
     return { ok: false, error: e.message };
   }
 }
-
 function cleanStationName(s) {
   if (!s) return '快递驿站/柜';
   let str = s.replace(/^[：:\s\-，,]+/, '').trim();
@@ -536,6 +596,16 @@ const EXTRACTOR = {
     // 3. 各大银行动账与云闪付 (招商/工商/建设/农行/中行/交通/中信/浦发/广发/平安/邮储/云闪付/银联等)
     const isBank = /(银行|信用卡|储蓄卡|借记卡|贷记卡|支行|农信|农商|信用社|云闪付|银联|农行|工行|建行|中行|招行|交行|邮储)/.test(text);
     if (isBank) {
+      // ⚠️ 2026-10-31：「文本里有银行名」≠「这是银行动账通知」。
+      //    财经新闻「工商银行：前三季度实现营业收入6671.37亿元…」被记成收入 ¥6671.37：
+      //    isBank 命中"工商银行" → incomeWord 命中"营业收入" → 兜底抓到 6671.37。
+      //    真通知必带签名：尾号四位 / 账户+余额 / 方向词紧邻人民币数字 / 【某银行·云闪付】。
+      //    用 73 条历史银行记录回放验证：合法通知 0 条被拒，只拦下那条新闻。
+      const bankSignature = /尾号\s*为?\s*[\d*]{4}/.test(text)
+        || /(账户|卡号)[^\n]{0,12}余额/.test(text)
+        || /(交易|消费|支付|入账|转入|存入|支出|扣款|代发|到账).{0,12}(?:人民币|RMB|￥|¥)\s*[+\-－]?\s*[\d]/.test(text)
+        || /【[^】]{0,12}(?:银行|信用社|云闪付|银联)[^】]{0,10}】/.test(text);
+      if (!bankSignature) return null;
       let account = '银行卡';
       const cardMatch = text.match(/尾号\s*为?\s*([0-9]{4})/);
       const bankTag = text.match(/【(.*?)】/);
@@ -584,8 +654,8 @@ const EXTRACTOR = {
         let merchant = txIsIncome ? '银行转入/代发' : '银行消费';
         const merchTagMatch = text.match(/(?:商户为|商户[：:\s]+)\s*([^\s,，。]+)/);
         const merchMatch = text.match(/(?:在|于|向)\s*([^\s,，。]{2,30}?)\s*(?:完成|消费|支出|扣款|支付|转账|扣收|付款)/);
-        // 进账模板「王金鑫于10月15日19:19向您尾号0770账户完成银联入账」里，上一条规则会抓到
-        // 「您尾号0770账户」这种垃圾商户，所以优先认「某人于 M月D日…」里的付款人。
+        // 进账模板「某用户于10月15日19:19向您尾号****账户完成银联入账」里，上一条规则会抓到
+        // 「您尾号****账户」这种垃圾商户，所以优先认「某人于 M月D日…」里的付款人。
         const payerMatch = txIsIncome ? text.match(/([^\s,，。【】]{2,20}?)于\s*\d{1,2}月\d{1,2}日/) : null;
         const cand = payerMatch ? payerMatch[1] : (merchTagMatch ? merchTagMatch[1] : (merchMatch ? merchMatch[1] : null));
         const cleaned = cand ? cleanMerchantName(cand) : null;
@@ -693,6 +763,33 @@ function guessCategory(merchant = '', fullText = '') {
 
 // ==================== 4. 定时调度器 (Cron Engine) ====================
 
+// 最后的安全闸：正常长轮询应接近 0 CPU；若未来别的分支再次形成紧循环，
+// 30 秒窗口内超过 20% 就强制睡 60 秒，宁可延迟通知，也不能整夜烧电池。
+class DaemonCpuFuse {
+  constructor(options = {}) {
+    this.windowMs = options.windowMs || 30000;
+    this.thresholdPct = options.thresholdPct || 20;
+    this.cooldownMs = options.cooldownMs || 60000;
+    this.now = options.now || (() => Date.now());
+    this.cpuUsage = options.cpuUsage || ((previous) => process.cpuUsage(previous));
+    this.lastAt = this.now();
+    this.lastCpu = this.cpuUsage();
+  }
+
+  check() {
+    const now = this.now();
+    const elapsedMs = now - this.lastAt;
+    if (elapsedMs < this.windowMs) return null;
+    const usage = this.cpuUsage(this.lastCpu);
+    const cpuMs = (usage.user + usage.system) / 1000;
+    const percent = cpuMs * 100 / elapsedMs;
+    this.lastAt = now;
+    this.lastCpu = this.cpuUsage();
+    if (percent <= this.thresholdPct) return null;
+    return { elapsedMs, cpuMs, percent, cooldownMs: this.cooldownMs };
+  }
+}
+
 class CronScheduler {
   constructor(db) {
     this.db = db;
@@ -712,17 +809,53 @@ class CronScheduler {
     this.timer = null;
   }
 
-  _scheduleNextTick() {
+  // cron 行被 CLI / 控制台改动后，通过 SIGUSR1 叫守护重新计算下一次唤醒。
+  // 没有任务时不挂任何定时器；有任务时直接睡到到点，不再每 15 秒空醒一次。
+  refresh() {
     if (!this.running) return;
-    // 每 15 秒轮询一次任务到期状态
+    if (this.checking) {
+      this.refreshAfterCheck = true;
+      return;
+    }
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    this._scheduleNextTick(0);
+  }
+
+  _nextDelay(now = Date.now()) {
+    // next_run_at=NULL 表示尚未排期，必须立即检查；把它折算成 0 才能和正常任务一次查完。
+    const row = this.db.prepare(`
+      SELECT MIN(CASE WHEN next_run_at IS NULL THEN 0 ELSE next_run_at END) AS next
+      FROM scheduled_tasks WHERE enabled = 1
+    `).get();
+    if (!row || row.next === null || row.next === undefined) return null;
+    return Math.max(0, Number(row.next) - now);
+  }
+
+  _scheduleNextTick(delayOverride) {
+    if (!this.running) return;
+    if (this.timer) clearTimeout(this.timer);
+    const delay = delayOverride === undefined ? this._nextDelay() : delayOverride;
+    this.timer = null;
+    if (delay === null) return;
     this.timer = setTimeout(async () => {
+      this.timer = null;
+      if (!this.running) return;
+      this.checking = true;
       try {
         await this.checkAndRunTasks();
       } catch (err) {
         logMessage(`[Cron] 调度检查异常: ${err.message}`);
+      } finally {
+        this.checking = false;
+        if (this.refreshAfterCheck) {
+          this.refreshAfterCheck = false;
+          this.refresh();
+        } else {
+          this._scheduleNextTick();
+        }
       }
-      this._scheduleNextTick();
-    }, 15000);
+    }, Math.min(Math.max(0, delay), 2147483647));
   }
 
   async checkAndRunTasks() {
@@ -1184,6 +1317,15 @@ function ensureDaemonRunning() {
   return { alive: false, pid, spawned: true, newPid: child.pid, beatAge, note: `原 PID 文件内容: ${pid || '无'}` };
 }
 
+
+// cron 行变化后唤醒常驻守护重排；PID 不在或信号失败时，下次启动仍会读最新表。
+function signalDaemonScheduler() {
+  try {
+    const pid = Number(fs.readFileSync(PID_FILE, 'utf8').trim());
+    if (pid > 0 && pid !== process.pid) process.kill(pid, 'SIGUSR1');
+  } catch (_) {}
+}
+
 async function runDaemon() {
   logMessage('>>> DSH Life & Notification Hub 守护进程已启动 <<<');
   fs.writeFileSync(PID_FILE, String(process.pid));
@@ -1191,6 +1333,7 @@ async function runDaemon() {
   const db = openDB();
   const scheduler = new CronScheduler(db);
   scheduler.start();
+  process.on('SIGUSR1', () => scheduler.refresh());
 
   // 恢复上次处理的通知 seq
   let lastSeq = 0;
@@ -1224,10 +1367,17 @@ async function runDaemon() {
   // 为什么需要它：只看 PID 文件分不清「守护在跑」和「PID 被别的进程复用 / 进程卡死」。
   // 有了心跳，外部（life.js tick / selfcheck）能判断它是不是真的在动。
   let lastBeatAt = 0;
+  const cpuFuse = new DaemonCpuFuse();
 
   // 主事件循环（长轮询通知）
   while (true) {
     try {
+      const fuse = cpuFuse.check();
+      if (fuse) {
+        logMessage(`[Power] CPU 保险丝触发：${fuse.percent.toFixed(1)}%/${(fuse.elapsedMs / 1000).toFixed(0)}s，强制休眠 ${fuse.cooldownMs / 1000}s`);
+        await new Promise(r => setTimeout(r, fuse.cooldownMs));
+        continue;
+      }
       const nowMs = Date.now();
       if (nowMs - lastBeatAt > 30000) {
         lastBeatAt = nowMs;
@@ -1236,7 +1386,9 @@ async function runDaemon() {
         } catch (_) {}
       }
       // 阻塞等待新通知（超时 15 秒返回；客户端再兜一层 35s 硬超时，防桥假死卡死守护）
-      const res = await httpGetJson(`${BRIDGE_3181}/notifications-wait?since=${lastSeq}&timeout=15`, 35000);
+      // ⚠️ 2026-10-31：桥的 timeout 单位是**毫秒**。这里曾写 timeout=15（=15ms），桥立刻回空包
+      //    ⇒ 守护每秒几十次 HTTP 空转，实测稳定吃 20% CPU。改 15000（15 秒长轮询）。
+      const res = await httpGetJson(`${BRIDGE_3181}/notifications-wait?since=${lastSeq}&timeout=15000`, 35000);
       // 长轮询空转时体检一次：高水位可能因为这次循环期间 App 重启而变成黑洞
       if (lastSeq > 0 && (!res.items || res.items.length === 0)) {
         const st = await httpGetJson(`${BRIDGE_3181}/notifications-status`, 10000);
@@ -1259,6 +1411,12 @@ async function runDaemon() {
           }
           lastCount = st.count;
         }
+      }
+      // 桥离线时 httpGetJson 会 resolve({ok:false})，不会进入 catch；
+      // 必须显式退避，否则连接被拒后会形成无 sleep 的紧循环，持续烧 CPU。
+      if (!res.ok) {
+        await new Promise(r => setTimeout(r, 3000));
+        continue;
       }
       if (res.ok && res.items && res.items.length > 0) {
         for (const item of res.items) {
@@ -1290,7 +1448,8 @@ async function runDaemon() {
             // ⚠️ 2026-10-20：老代码在 insert 之前就打「💰 记账」，于是被去重跳过、甚至 INSERT
             //    撞 seq 失败的通知，日志里也写着「已记账」→ 排查「少记」时日志根本不可信。
             //    现在一律按 insert 的真实结果分别打，日志与账本一一对应。
-            if (_r && _r.error) logMessage(`[Bill] ❌ 记账失败: ${_am} — ${_r.error}`);
+            if (_r && _r.ignored) logMessage(`[Bill] 🚫 不入账（${_r.reason || '忽略名单'}）: ${_am}`);
+            else if (_r && _r.error) logMessage(`[Bill] ❌ 记账失败: ${_am} — ${_r.error}`);
             else if (_r.duplicate) logMessage(`[Bill] ⏭️ 跳过重复记账: ${_am}`);
             else if (_r.mergedBalance) logMessage(`[Bill] ⬆️ 合并同笔记账: 补上余额原文 ${_am}`);
             else if (_r.upgraded) logMessage(`[Bill] ⬆️ 合并同笔记账: 补上商户 ${_am}`);
@@ -1425,12 +1584,14 @@ async function handleCLI() {
         fs.mkdirSync(path.dirname(WATCHDOG_FLAG), { recursive: true });
         fs.writeFileSync(WATCHDOG_FLAG, new Date().toISOString() + '\n');
         try { db.prepare('UPDATE scheduled_tasks SET enabled = 1 WHERE id = ?').run(WATCHDOG_ID); } catch (_) {}
+        signalDaemonScheduler();
         console.log(`✅ 已开启守护心跳（${WATCHDOG_FLAG}）—— 仅当装机版本支持 lifeTaskId 本地路径时才该开`);
         const r = await armWatchdog();
         if (r && r.ok) console.log(`   第一次心跳已排上: ${r.taskId}`);
       } else if (action === 'off') {
         try { fs.unlinkSync(WATCHDOG_FLAG); } catch (_) {}
         try { db.prepare('UPDATE scheduled_tasks SET enabled = 0 WHERE id = ?').run(WATCHDOG_ID); } catch (_) {}
+        signalDaemonScheduler();
         console.log('🛑 已关闭守护心跳（开关文件已删、cron 行已停用）。AlarmManager 里那一次撤不掉，最多再响一次；那次不会续排，链条就此断开。');
       } else {
         console.log(`守护心跳: ${watchdogArmed() ? '已开启' : '关闭（默认）'}`);
@@ -1728,6 +1889,7 @@ async function handleCLI() {
           INSERT OR REPLACE INTO scheduled_tasks (id, name, cron_expr, action_type, action_payload, enabled, next_run_at, created_at)
           VALUES (?, ?, ?, ?, ?, 1, ?, ?)
         `).run(id, name, expr, type, payload, next, Date.now());
+        signalDaemonScheduler();
         console.log(`✅ 定时任务 [${id}] 添加成功！下次触发时间: ${new Date(next).toLocaleString()}`);
       } else if (sub === 'rm' || sub === 'delete') {
         const id = args[2];
@@ -1735,6 +1897,7 @@ async function handleCLI() {
         // 顺手让原生侧把这条任务注册过的唤醒闹钟撤掉，避免删了记录闹钟还在响
         try { await httpPostJson(`${BRIDGE_3081}/schedule/cancel`, { source: 'life', taskId: id }); } catch (_) {}
         db.prepare(`DELETE FROM scheduled_tasks WHERE id = ?`).run(id);
+        signalDaemonScheduler();
         console.log(`✅ 已删除定时任务: ${id}`);
       } else if (sub === 'run') {
         // 控制台「立即运行」按钮走的是 life cron run <id>，老版本没有这个分支 → 点了没反应
@@ -1827,7 +1990,7 @@ async function handleCLI() {
 
 /**
  * 把一条动账归到「哪张卡」：银行名 + 尾号四位。
- * 为什么不能只看 account 字段：同一张农行卡的通知，有的解析出「中国农业银行(0770)」，
+ * 为什么不能只看 account 字段：同一张农行卡的通知，有的解析出「中国农业银行(****)」，
  * 有的只有「中国农业银行」（尾号写在正文里）—— 只看字段会把同一张卡拆成两个账户。
  */
 function bankKeyOf(account, fullText) {
@@ -2335,6 +2498,7 @@ async function handleLifeAction(id, arg) {
       if (r && r.ok === false && !isBridgeUnsupported(err)) warn = `（唤醒闹钟回收: ${err}）`;
     } catch (e) { warn = `（唤醒闹钟回收失败: ${e.message}）`; }
     db.prepare(`DELETE FROM scheduled_tasks WHERE id = ?`).run(taskId);
+    signalDaemonScheduler();
     const still = db.prepare(`SELECT id FROM scheduled_tasks WHERE id = ?`).get(taskId);
     return still
       ? { ok: false, msg: `删除失败: ${taskId}` }
@@ -2442,6 +2606,7 @@ if (require.main === module) {
     openDB,
     computeNextRun,
     CronScheduler,
+    DaemonCpuFuse,
     getLifeStatus,
     handleLifeAction,
     createHandler,

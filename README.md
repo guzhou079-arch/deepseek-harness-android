@@ -17,7 +17,7 @@
 
 **DeepSeek Harness 装进安卓：一个 APK，不用 Termux、不用 root、不用电脑。**
 
-装完填个 API Key 就能聊：能读屏、点按、输入、在虚拟屏里操作别的 App，能跑定时任务，21 款技能随包。
+装完填个 API Key 就能聊：能读屏、点按、输入、在虚拟屏里操作别的 App，能跑定时任务，27 款技能随包。
 **最不一样的一点：它能在手机上给自己出包** —— 改完代码直接在手机里 `javac → d8 → 重打包 → 签名 → 发版`，全程不碰电脑。
 
 ## 装起来到底省了什么
@@ -26,7 +26,7 @@
 |---|---|---|
 | 准备环境 | 装 Termux、装 Node、拉仓库、改配置 | 下载 APK，安装 |
 | 首次配置 | 对着一堆命令和文档 | 填一个 API Key |
-| 技能 | 一个个单独装 | 21 款随包 |
+| 技能 | 一个个单独装 | 27 款随包 |
 | AI 干活时你的屏 | 被占着，没法干别的 | 虚拟屏里跑，主屏照常用 |
 | 出包 / 发版 | 得回电脑 | 手机自己构建、签名、发版 |
 
@@ -38,12 +38,12 @@
 | 🐳 **悬浮球 / 桌宠** | 单击即"说话"：台词、账户余额、今日已用、上一轮消耗、峰谷提醒 |
 | ☁️ **流体云回复卡** | AI 写作时顶部浮出胶囊，点开成可上下翻的卡片 |
 | 🎛️ **内置控制台** | 引擎管理、救援模式、权限总览、插件开关、时光机备份 |
-| 🧩 **21 款技能随包** | 架构图 · 演示稿 · 短视频分镜 · 记忆中枢 · Office 批处理 · Word/公文 · Excel 多表 · 会议纪要 · 邮件公函 · 本地 RAG · 全站备份 · 跨厂商会审 · 网页抓取 · 代码工程 · 数据洞察 · 深度调研 · 敏捷排期 · 生活中枢 · 语音交互 |
+| 🧩 **27 款技能随包** | 占卜排盘 · 免屏操控 · 架构图 · 演示稿 · 短视频分镜 · 记忆中枢 · Office 批处理 · Word/公文 · Excel 多表 · 会议纪要 · 邮件公函 · 本地 RAG · 全站备份 · 跨厂商会审 · 网页抓取 · 代码工程 · 数据洞察 · 深度调研 · 敏捷排期 · 生活中枢 · 语音交互 |
 | 🔧 **手机上自己出包** | `javac → d8 → 重打包 → 签名 → 发版`，构建环境按需下载（约 193MB） |
 
 > 在上游安卓壳骨架之上，本版本带 25 条安卓适配补丁（系统能力 / 引擎适配 / 安全加固 / 界面 / 登录）与自研插件，来源与许可见文末。
 >
-> **English** — DeepSeek Harness as an installable Android APK: no Termux, no root, no PC. Screen reading, taps, typing, virtual display and scheduled tasks all run inside the app; 21 skills are bundled; and the app **builds, signs and releases its own APK on the phone**.
+> **English** — DeepSeek Harness as an installable Android APK: no Termux, no root, no PC. Screen reading, taps, typing, virtual display and scheduled tasks all run inside the app; 27 skills are bundled; and the app **builds, signs and releases its own APK on the phone**.
 
 ### 三步装好
 

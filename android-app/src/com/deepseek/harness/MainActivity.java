@@ -313,7 +313,11 @@ public class MainActivity extends Activity {
     private int bootStage;                          // 0 文件 1 引擎 2 连接 3 就绪
     private final Handler ui = new Handler(Looper.getMainLooper());
     // 运行时确定的 dshroot 目录（外部公共目录优先，失败回退内部 files/payload/dshroot）
+    /** v1.49：当前运行的受管内核树（null = 用内置树）。启动超时回退时用它判断。 */
+    private File kernelManagedTree = null;
     private File dshrootDir = null;
+    /** 内置树（非受管）的位置。切内核时用来回退，见 applyKernelTreeNow()。 */
+    private File builtinDshrootDir = null;
     private boolean watchdogStarted = false;
     private long lastRespawnAt = 0L;
     private volatile boolean engineStartAborted = false;   // v1.13：「停止」打断在飞的启动等待（否则状态栏一直计时到 90s 超时）
@@ -3426,6 +3430,44 @@ public class MainActivity extends Activity {
             if (zis != null) { try { zis.close(); } catch (Throwable ignored) {} }
         }
         Log.i(TAG, "engine plugins refreshed from payload.zip, files=" + copied);
+        retireDeprecatedPayloadEntries(payloadDir);
+    }
+
+    /**
+     * 退役 payload 里已被改名/下线的条目（v1.47 起）。
+     *
+     * 装机是「覆盖式解包」：payload.zip 只按白名单覆盖文件、不删目标目录下多余的东西。
+     * 技能一改名（dsh-yijing → dsh-zhanbu），老用户升级后 skills/ 里就会同时留下两个
+     * 描述相同的技能 —— 目录重复、关掉一个开关不等于清掉另一个，模型还可能继续挑旧的。
+     *
+     * 做法：payload 落盘之后，把**确切路径**的旧条目整目录移出 skills/（不模糊匹配、
+     * 不清空 skills）。移到 skills-retired/ 而不是直接删 —— 用户自己改过的内容还在，
+     * 技能加载器也不会再去读它。重复执行无副作用。
+     */
+    private void retireDeprecatedPayloadEntries(File payloadDir) {
+        final String[] DEPRECATED = { "dshhome/skills/dsh-yijing" };
+        File retiredRoot = new File(payloadDir, "dshhome/skills-retired");
+        for (String rel : DEPRECATED) {
+            File source = new File(payloadDir, rel);
+            if (!source.exists()) {
+                continue;
+            }
+            File target = new File(retiredRoot, source.getName());
+            try {
+                if (!retiredRoot.isDirectory() && !retiredRoot.mkdirs()) {
+                    throw new java.io.IOException("cannot create " + retiredRoot);
+                }
+                if (target.exists()) {
+                    deleteRecursive(target);
+                }
+                if (!source.renameTo(target)) {
+                    throw new java.io.IOException("rename failed");
+                }
+                Log.i(TAG, "retired deprecated payload entry: " + rel + " -> " + target);
+            } catch (Throwable t) {
+                Log.w(TAG, "retire deprecated payload entry failed: " + rel + " " + t.getMessage());
+            }
+        }
     }
 
     private File extractVscreenDex() {
@@ -3741,7 +3783,22 @@ public class MainActivity extends Activity {
                         }
                     }
 
-                    // 兜底：确保 dshroot 确实就位（例如首次内部解压被系统打断）。
+                    builtinDshrootDir = dshrootDir;   // 记下内置树，切回内置时用
+        // v1.49：受管内核优先（files/kernels/<ver>/dshroot）。
+        // 只在「校验通过」时才用：缺入口/缺 .kernel-ok 一律回落内置树 —— 切内核是实验通道，
+        // 不能拿能不能开机冒险。受管树不参与 FORCE_OVERWRITE_PREFIXES 覆盖，所以替换是安全的。
+        try {
+            File managed = KernelStore.activeTree(MainActivity.this);
+            if (managed != null) {
+                dshrootDir = managed;
+                kernelManagedTree = managed;
+                Log.i(TAG, "engine kernel = managed " + managed.getAbsolutePath());
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "managed kernel resolve failed", t);
+        }
+
+        // 兜底：确保 dshroot 确实就位（例如首次内部解压被系统打断）。
                     if (!new File(dshrootDir, REL_BINJS).exists()) {
                         Log.w(TAG, "dshroot missing at " + dshrootDir + ", repopulating");
                         extractPayload(payload, kernelOnExternal ? externalRoot : null, "dshroot");
@@ -6503,6 +6560,25 @@ public class MainActivity extends Activity {
         Log.e(TAG, "engine start timeout on port " + enginePort + ", check dsh-web.log");
         // v1.5.2 慢启动修复兜底：本次走了「快速同步」（同内核升级），若引擎仍起不来，
         // 可能外部 dshroot 有缺失文件（快速路径不 stat 已有文件）→ 全量补齐后重启引擎再等一轮。
+        // v1.49：受管内核起不来 → 先回退内置树再试，别让它连坐整个引擎。
+        // 只回退一次：置空后走原有超时兜底（fastSyncedThisBoot / 迟到达）。
+        if (kernelManagedTree != null) {
+            String badVer = KernelStore.kernelVersionAt(kernelManagedTree);
+            Log.w(TAG, "managed kernel boot timeout: " + badVer + " → fallback to builtin");
+            KernelStore.deactivate(this);
+            kernelManagedTree = null;
+            File fbPayload = payloadDir();
+            dshrootDir = new File(fbPayload, "dshroot");
+            setStatus("内核 " + (badVer.length() > 0 ? badVer : "受管") + " 启动失败，已回退内置内核…");
+            conToast("内核启动失败，已自动回退内置内核");
+            try {
+                spawnNode(fbPayload);
+            } catch (Throwable t) {
+                Log.e(TAG, "respawn after kernel fallback failed", t);
+            }
+            waitForServer();
+            return;
+        }
         if (fastSyncedThisBoot) {
             fastSyncedThisBoot = false;
             Log.w(TAG, "fast sync may have missed files, forcing full dshroot repair");
@@ -7144,6 +7220,39 @@ public class MainActivity extends Activity {
             be.put("sources", src);
             o.put("buildEnv", be);
 
+            // v1.49：内核切换 —— 状态给网页控制台（dsh-android-console）的「引擎内核」页用。
+            org.json.JSONObject kn = new org.json.JSONObject();
+            String kActive = KernelStore.activeVersion(this);
+            kn.put("active", kActive == null ? "" : kActive);
+            kn.put("activeText", kActive == null ? "内置内核" : kActive);
+            org.json.JSONArray kIn = new org.json.JSONArray();
+            java.util.List<KernelStore.Bundle> kInst = KernelStore.installed(this);
+            for (int i = 0; i < kInst.size(); i++) {
+                KernelStore.Bundle kb = kInst.get(i);
+                org.json.JSONObject r = new org.json.JSONObject();
+                r.put("version", kb.version);
+                r.put("label", kb.label == null ? "" : kb.label);
+                r.put("sizeBytes", kb.sizeBytes);
+                r.put("active", kb.active);
+                kIn.put(r);
+            }
+            kn.put("installed", kIn);
+            org.json.JSONArray kSt = new org.json.JSONArray();
+            java.util.List<KernelStore.Bundle> kStore = KernelStore.scanStore(this);
+            for (int i = 0; i < kStore.size(); i++) {
+                KernelStore.Bundle kb = kStore.get(i);
+                org.json.JSONObject r = new org.json.JSONObject();
+                r.put("version", kb.version);
+                r.put("label", kb.label == null ? "" : kb.label);
+                r.put("sizeBytes", kb.sizeBytes);
+                r.put("installed", kb.installed);
+                r.put("note", kb.note == null ? "" : kb.note);
+                kSt.put(r);
+            }
+            kn.put("store", kSt);
+            kn.put("storeDir", KernelStore.STORE);
+            o.put("kernel", kn);
+
             org.json.JSONObject lg = new org.json.JSONObject();
             lg.put("summary", conLogSummary());
             lg.put("path", conLogFile().getAbsolutePath());
@@ -7241,6 +7350,27 @@ public class MainActivity extends Activity {
             }
             if ("buildenv.resolve".equals(id)) { conBuildEnvResolve(); return; }
             if ("buildenv.cancel".equals(id)) { BuildEnvInstaller.cancel(); return; }
+            // 内核切换（网页控制台「引擎内核」页）：确认弹层在网页侧做，这里只管执行。
+            if ("kernel.install".equals(id)) {
+                java.util.List<KernelStore.Bundle> store = KernelStore.scanStore(this);
+                for (int i = 0; i < store.size(); i++) {
+                    KernelStore.Bundle b = store.get(i);
+                    if (b.version.equals(arg)) {
+                        if (b.installed) { conToast("这个内核已经装过了"); return; }
+                        conKernelInstall(b);
+                        return;
+                    }
+                }
+                conToast("找不到内核包: " + arg);
+                return;
+            }
+            if ("kernel.switch".equals(id)) { conKernelSwitchDirect(arg); return; }
+            if ("kernel.remove".equals(id)) { conKernelRemoveDirect(arg); return; }
+            if ("kernel.deactivate".equals(id)) {
+                KernelStore.deactivate(this);
+                conToast("已回退到内置内核，下次启动引擎生效");
+                return;
+            }
             if ("buildenv.install".equals(id)) {
                 int idx = -1;
                 try { idx = Integer.parseInt(arg); } catch (Throwable ignored) {}
@@ -7668,6 +7798,8 @@ public class MainActivity extends Activity {
         if (consolePage == 2) { renderConsolePlug(); return; }
         if (consolePage == 3) { renderConsoleLog(); return; }
         if (consolePage == 4) { renderConsoleBuildEnv(); return; }
+        if (consolePage == 5) { renderConsoleKernel(); return; }
+        if (consolePage == 4) { renderConsoleBuildEnv(); return; }
         renderConsoleMain();
     }
 
@@ -7790,6 +7922,7 @@ public class MainActivity extends Activity {
         col.addView(cSep(0));
         col.addView(cNavRow("插件", "关掉用不到的，省上下文", conPlugSummary(), 2));
         // 这个项目的核心价值是"能在手机上自己编译自己出包"，那套环境 342MB 不塞进主包，按需下载
+        col.addView(cNavRow("内核", "切换引擎内核（实验功能）：内置 rc5 永远兜底", conKernelSummary(), 5));
         col.addView(cNavRow("自建环境", "在手机上自己编译 / 打包 / 签名（可选，约 193MB）", conBuildEnvSummary(), 4));
         col.addView(cSep(0));
         LinearLayout logActs = new LinearLayout(this);
@@ -9123,6 +9256,207 @@ public class MainActivity extends Activity {
                 });
             }
         });
+    }
+
+    // ---------- 内核页（v1.49 P0）----------
+    // 为什么单开一页：issue #13 要「rc2 / rc3 与 rc5 共存、随时切」。
+    // 做法不是塞多份内核进 APK，而是把内核树抽成独立包按需装、点一下切 ——
+    // 切完重启引擎，会话 / 记忆 / 设置都不动；内置树永远是兜底。
+    private boolean kernelBusy = false;
+    private String kernelStage = "";
+
+    private String conKernelSummary() {
+        if (kernelBusy) return "处理中…";
+        File t = KernelStore.activeTree(this);
+        if (t == null) return "内置";
+        String v = KernelStore.kernelVersionAt(t);
+        return v.length() > 0 ? v : "受管";
+    }
+
+    private void renderConsoleKernel() {
+        LinearLayout col = consoleBody;
+        col.addView(conBackRow("内核"));
+        File activeTree = KernelStore.activeTree(this);
+        String activeVer = activeTree == null ? "" : KernelStore.kernelVersionAt(activeTree);
+        col.addView(cText(activeVer.length() > 0
+                ? "当前内核：" + activeVer + "（受管，位于 files/kernels/）"
+                : "当前内核：内置（随 APK 发布，永远是兜底）", 12.5f, cText(), false), cTop(dp(12)));
+        col.addView(cText("切内核不动你的会话、记忆、设置。插件是按内核适配的：换完如果哪个插件报错，先切回来。",
+                11f, cSub(), false), cTop(dp(8)));
+
+        if (kernelBusy) {
+            col.addView(cSep(dp(14)));
+            col.addView(cText(kernelStage, 12f, cAccent(), false), cTop(dp(14)));
+            return;
+        }
+
+        // ① 已装
+        col.addView(cSep(dp(16)));
+        col.addView(cText("已安装", 14f, cText(), false), cTop(dp(16)));
+        java.util.List<KernelStore.Bundle> ins = KernelStore.installed(this);
+        if (ins.isEmpty()) {
+            col.addView(cText("还没装受管内核，现在用的是内置树。", 11.5f, cSub(), false), cTop(dp(8)));
+        }
+        for (final KernelStore.Bundle b : ins) {
+            LinearLayout left = new LinearLayout(this);
+            left.setOrientation(LinearLayout.VERTICAL);
+            left.addView(cText(b.version + (b.active ? "（使用中）" : ""), 13.5f, cText(), false));
+            left.addView(cText((b.sizeBytes > 0 ? (b.sizeBytes / 1048576) + "MB · " : "") + "已解压到 files/kernels/",
+                    11f, cSub(), false));
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(0, dp(10), 0, dp(10));
+            row.addView(left, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            if (!b.active) {
+                Button sw = cButton("切换", true);
+                sw.setOnClickListener(new View.OnClickListener() {
+                    @Override public void onClick(View v) { conKernelSwitch(b.version); }
+                });
+                row.addView(sw);
+            }
+            if (!b.active) {
+                Button del = cButton("删除", false);
+                LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                dlp.leftMargin = dp(8);
+                del.setOnClickListener(new View.OnClickListener() {
+                    @Override public void onClick(View v) {
+                        conDialog("删除内核 " + b.version, "只删解压出来的树，不动包文件，也不动数据。", "删除",
+                                new Runnable() { @Override public void run() {
+                                    boolean ok = KernelStore.remove(MainActivity.this, b.version);
+                                    conToast(ok ? "已删除" : "删除失败（正在使用中？先切走）");
+                                    renderConsole();
+                                }}, "取消");
+                    }
+                });
+                row.addView(del, dlp);
+            }
+            col.addView(row);
+            col.addView(cSep(0));
+        }
+
+        // ② 可安装（扫 /sdcard/DeepSeekHarness/kernels/）
+        col.addView(cSep(dp(16)));
+        col.addView(cText("可安装", 14f, cText(), false), cTop(dp(16)));
+        java.util.List<KernelStore.Bundle> store = KernelStore.scanStore(this);
+        if (store.isEmpty()) {
+            col.addView(cText("把内核包（kernel-*.tar.gz + manifest.json）放进 " + KernelStore.STORE + " 就会出现在这里。",
+                    11f, cSub(), false), cTop(dp(8)));
+        }
+        for (final KernelStore.Bundle b : store) {
+            boolean ready = b.installed;
+            LinearLayout left = new LinearLayout(this);
+            left.setOrientation(LinearLayout.VERTICAL);
+            left.addView(cText(b.display(), 13f, cText(), false));
+            left.addView(cText(b.installed ? "已安装" : (b.note.length() > 0 ? b.note : "待安装"), 11f,
+                    b.note.length() > 0 && !b.installed ? cRed() : cSub(), false));
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(0, dp(10), 0, dp(10));
+            row.addView(left, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            if (!ready) {
+                Button ins2 = cButton("安装", true);
+                ins2.setOnClickListener(new View.OnClickListener() {
+                    @Override public void onClick(View v) { conKernelInstall(b); }
+                });
+                row.addView(ins2);
+            }
+            col.addView(row);
+            col.addView(cSep(0));
+        }
+
+        // ③ 回退
+        if (activeVer.length() > 0) {
+            Button rv = cButton("回退到内置内核", false);
+            rv.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    KernelStore.deactivate(MainActivity.this);
+                    conToast("已切回内置内核，正在重启引擎…");
+                    conRestartEngine();
+                }
+            });
+            col.addView(rv, cTop(dp(16)));
+        }
+
+        col.addView(cText("⚠️ 内核包是整棵树（约 125MB），解压必须落内部存储 —— /sdcard 存不了符号链接。\n"
+                + "切换时要停一次引擎（几秒），失败会自动回退内置内核。", 11f, cSub(), false), cTop(dp(12)));
+    }
+
+    private void conKernelInstall(final KernelStore.Bundle b) {
+        kernelBusy = true;
+        kernelStage = "准备中…";
+        renderConsole();
+        KernelStore.install(this, b, new KernelStore.Cb() {
+            @Override public void onStage(final String stage, final int pct) {
+                ui.post(new Runnable() { @Override public void run() {
+                    kernelStage = stage + (pct >= 0 ? " " + pct + "%" : "");
+                    if (consoleVisible && consolePage == 5) renderConsole();
+                }});
+            }
+            @Override public void onDone(final boolean ok, final String msg) {
+                ui.post(new Runnable() { @Override public void run() {
+                    kernelBusy = false;
+                    kernelStage = "";
+                    conToast(msg);
+                    if (consoleVisible) renderConsole();
+                }});
+            }
+        });
+    }
+
+    private void conKernelSwitch(final String ver) {
+        conDialog("切换到内核 " + ver, "会停一次引擎再起来（几秒）。会话和记忆都在 dshhome 里，不受影响。", "切换",
+                new Runnable() { @Override public void run() {
+                    String err = KernelStore.activate(MainActivity.this, ver);
+                    if (err != null) { conToast(err); return; }
+                    conToast("已切到 " + ver + "，正在重启引擎…");
+                    applyKernelTreeNow();
+                    conRestartEngine();
+                }}, "取消");
+    }
+
+    /** 网页控制台「切换」：不弹原生框（网页侧已二次确认），直接激活并重启引擎。 */
+    private void conKernelSwitchDirect(String ver) {
+        String err = KernelStore.activate(this, ver);
+        if (err != null) { conToast(err); return; }
+        conToast("已切到 " + ver + "，正在重启引擎…");
+        applyKernelTreeNow();
+        conRestartEngine();
+    }
+
+    /**
+     * v1.49.1：切完内核立刻把 dshrootDir 换成新的树。
+     *
+     * 为什么必须有这一步：整段文件准备（含「受管内核优先」）被 filesPreparedThisBoot 守着，
+     * 只在本次 App 进程的第一次启动时跑一遍。控制台的「切换」是在同一个进程里杀引擎再拉起，
+     * 这一步不会被重跑 —— 于是新引擎仍然用着旧的 dshrootDir（内置树），切了等于白切。
+     * 用户看到的就是「点了切换、重启了、内核没变」。
+     */
+    private void applyKernelTreeNow() {
+        try {
+            File managed = KernelStore.activeTree(MainActivity.this);
+            if (managed != null) {
+                dshrootDir = managed;
+                kernelManagedTree = managed;
+                Log.i(TAG, "engine kernel -> managed " + managed.getAbsolutePath());
+            } else {
+                if (builtinDshrootDir != null) dshrootDir = builtinDshrootDir;
+                kernelManagedTree = null;
+                Log.i(TAG, "engine kernel -> builtin " + (dshrootDir == null ? "-" : dshrootDir.getAbsolutePath()));
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "applyKernelTreeNow failed", t);
+        }
+    }
+
+    /** 网页控制台「删除」。使用中的内核不许删（先回退/切走）。 */
+    private void conKernelRemoveDirect(String ver) {
+        String act = KernelStore.activeVersion(this);
+        if (ver != null && ver.equals(act)) { conToast("这个内核正在使用，先切回内置或别的版本再删"); return; }
+        boolean ok = KernelStore.remove(this, ver);
+        conToast(ok ? "已删除内核 " + ver : "删除失败: " + ver);
     }
 
     // ---------- 日志页 ----------
