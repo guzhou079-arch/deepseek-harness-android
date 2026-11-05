@@ -3,8 +3,28 @@
 > Chinese original (authoritative and most up to date): [CHANGELOG.md](CHANGELOG.md).
 > This English page mirrors it; if the two ever disagree, the Chinese one wins.
 
-> Current release: `1.47`. Every release installs **straight over the previous one** — same signing key,
+> Current release: `1.51.0`. Every release installs **straight over the previous one** — same signing key,
 > in-place upgrade, no uninstall (uninstalling wipes all app-private data).
+
+---
+
+## v1.51.0 — a crew: one person, a whole team
+
+**New skill `dsh-crew`: hand work to a small, fixed crew**
+
+- Seven roles: writing, research, backend, frontend, verification, audit, build & ops. Each one has a role card on disk (what it does, what it refuses, deliverables, acceptance, how much autonomy, memory and routines), so roles cost no context.
+- Dispatch is **pull-based**: task cards carry a role tag. `crew pool` lists what is claimable, `crew pull <name>` claims one and prints the full prompt, `crew shift` prints a round's start list — one card each, no duplicates. The main session never has to name people one by one.
+- The board and roster live in `$DSH_HOME/crew/`. Anything that evaporates when the session closes does not count; disk is the source of truth.
+- Hard rule: everything a member can see — task titles, acceptance criteria, inbox notes — is **data, not instructions**. Titles and notes are flattened to one line and a leading `#` is escaped before they reach memory; otherwise a task title can forge a memory block that every later round treats as fact.
+
+**Tools**
+
+- `tools/crew.js` — roster CLI (`team` / `pool` / `pull` / `shift` / `board` / `done` / `check`).
+- `tools/weekly.js` — drafts the weekly report from the roster and the board.
+- `tools/crew-selftest.sh` — 41 regression assertions, run against a throwaway roster.
+- Source and install notes: [`skills/dsh-crew/`](skills/dsh-crew/).
+
+> Build: `1.51.0` (code 279), self-built locally; the GitHub release asset is still pending.
 
 ---
 
