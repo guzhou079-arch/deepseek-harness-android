@@ -310,6 +310,14 @@ public class AccessibilityService extends android.accessibilityservice.Accessibi
                             }
                         }
                     }
+                    // v1.55：同机任意 App 都能连 loopback —— 浏览器的跨站由 LocalHttpFence 挡在上面，
+                    // 原生调用没有 Origin/Sec-Fetch 头，只能靠共享密钥（X-DSH-Token / ?token= / body token）。
+                    // 密钥由 App 生成并经 env 交给引擎，第三方 App 读不到 App 私有目录，也就拿不到。
+                    if (!com.deepseek.harness.vscreen.LocalBridgeAuth.authorized(headStr, body, AccessibilityService.this)) {
+                        com.deepseek.harness.vscreen.LocalBridgeAuth.reject(s.getOutputStream());
+                        s.close();
+                        return;
+                    }
                     String respBody;
                     try {
                         respBody = route(path, body);

@@ -18,7 +18,8 @@
 #   sh selfbuild.sh patch                # 用 build-overlay/ 覆盖 payload
 #   sh selfbuild.sh pack                 # 骨架 + 新 payload → 未签名 APK
 #   sh selfbuild.sh mark                 # 写 dshroot 标记（内核版本+revision，触发 App 全量解压）
-#   sh selfbuild.sh version 1.21 52     # 改 APK 版本号（更新提示靠它，必须每包递增）
+#   sh selfbuild.sh version              # 版本号从 selfbuild/VERSION 读，code 自动取本机最大 +1
+#   sh selfbuild.sh version 1.21         # 只允许与 VERSION 一致的名字（防飘号）；code 同样自动
 #   sh selfbuild.sh sign                 # apksigner 签名 → out/
 #   sh selfbuild.sh verify               # 指纹 + payload 一致性 + patch-check
 #   sh selfbuild.sh install              # 经 App 内嵌特权桥 pm install -r
@@ -153,20 +154,26 @@ version)
   # （MainActivity:924，拿 GitHub release tag 比本机 versionName）永远认为「已是最新」
   # → 别人收不到更新提示，只能靠人手传包。
   #
-  # 用法: sh selfbuild.sh version 1.21 [52]
+  # 用法: sh selfbuild.sh version [版本号] [versionCode]   —— 两个参数都可以不给
+  #
+  # 版本号只有一处真相：selfbuild/VERSION 第一行。这里是唯一把它写进 APK 的地方。
+  #   无参        → VERSION 的名字 + 本机已出的最大 versionCode + 1
+  #   给了名字    → 必须与 VERSION 一致（不然就是又一次「飘号」）
+  #   给了 code   → 必须严格大于本机最大值（撞号/倒退直接停）
   [ -f "$UNSIGNED" ] || { echo "✗ 先跑 pack"; exit 1; }
-  VN="$1"; VC="$2"
-  [ -n "$VN" ] || { echo "✗ 用法: sh selfbuild.sh version <版本号> [versionCode]"; exit 1; }
+  NAMEARG=""; CODEARG=""
+  [ -z "${1:-}" ] || NAMEARG="--name $1"
+  [ -z "${2:-}" ] || CODEARG="--code $2"
+  PLAN=$("$NODE" "$SB/scripts/version-check.js" --plan $NAMEARG $CODEARG) || exit 1
+  VN=$(echo "$PLAN" | sed -n 's/^name=//p')
+  VC=$(echo "$PLAN" | sed -n 's/^code=//p')
+  [ -n "$VN" ] && [ -n "$VC" ] || { echo "✗ 版本计划解析失败：$PLAN"; exit 1; }
   #      ⚠️ --share-target 不能省：它除了写 launchMode=singleTop，还会补上
   #         SEND / SEND_MULTIPLE 两条分享过滤器（见 lib/android-manifest.js 的
   #         patchManifest + hasShareTarget 回读）。发行流程 make-dist-apk.sh 一直带着它，
   #         而这条装机流程此前漏了 → 自建包里"分享到 DSH"是死的，本地闸门全绿也发现不了
   #         （2026-10-15 查实）。verify 里现在有 check-install-manifest.js 兜底。
-  if [ -n "$VC" ]; then
-    "$NODE" "$SB/scripts/set-apk-version.js" "$UNSIGNED" "$WORK/unsigned-v.apk" --name "$VN" --code "$VC" --share-target com.deepseek.harness.MainActivity
-  else
-    "$NODE" "$SB/scripts/set-apk-version.js" "$UNSIGNED" "$WORK/unsigned-v.apk" --name "$VN" --share-target com.deepseek.harness.MainActivity
-  fi
+  "$NODE" "$SB/scripts/set-apk-version.js" "$UNSIGNED" "$WORK/unsigned-v.apk" --name "$VN" --code "$VC" --share-target com.deepseek.harness.MainActivity
   mv "$WORK/unsigned-v.apk" "$UNSIGNED"
   ;;
 sign)

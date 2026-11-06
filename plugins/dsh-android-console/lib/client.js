@@ -1472,10 +1472,10 @@ window.__ModuleLoader__.load({
                 : null,
               (typeof lf.monthIncome === 'number' && typeof lf.monthExpense === 'number')
                 ? jsxs('div', { className: 'ctl-desc', style: { padding: '0 12px 6px' }, children: [
-                    jsx('span', { children: '本月结余 ' }),
+                    jsx('span', { children: (lf.monthIncome - lf.monthExpense) > 0 ? '本月净收入 ' : '本月净支出 ' }),
                     jsx('span', {
                       className: (lf.monthIncome - lf.monthExpense) >= 0 ? 'ctl-amt-pos' : 'ctl-amt-neg',
-                      children: '¥' + (lf.monthIncome - lf.monthExpense).toFixed(2),
+                      children: '¥' + Math.abs(lf.monthIncome - lf.monthExpense).toFixed(2),
                     }),
                     jsx('span', {
                       children: ' · 支出 ¥' + lf.monthExpense.toFixed(2) + ' / 收入 ¥' + lf.monthIncome.toFixed(2)

@@ -44,6 +44,14 @@
   "local": "selfbuild/scripts/release-sync.mjs"
  },
  {
+  "repo": "selfbuild/VERSION",
+  "local": "selfbuild/VERSION"
+ },
+ {
+  "repo": "selfbuild/scripts/version-check.js",
+  "local": "selfbuild/scripts/version-check.js"
+ },
+ {
   "repo": "selfbuild/scripts/release-publish.mjs",
   "local": "selfbuild/scripts/release-publish.mjs"
  },
@@ -194,5 +202,17 @@
  {
   "repo": "skills/doc-tidy/scripts/doc_tidy.py",
   "local": "selfbuild/build-overlay/dshhome/skills/doc-tidy/scripts/doc_tidy.py"
+ },
+ {
+  "repo": "skills/dsh-crew/scripts/crew.js",
+  "local": "selfbuild/build-overlay/dshhome/tools/crew.js"
+ },
+ {
+  "repo": "skills/dsh-crew/scripts/weekly.js",
+  "local": "selfbuild/build-overlay/dshhome/tools/weekly.js"
+ },
+ {
+  "repo": "skills/dsh-crew/scripts/crew-selftest.sh",
+  "local": "selfbuild/build-overlay/dshhome/tools/crew-selftest.sh"
  }
 ]

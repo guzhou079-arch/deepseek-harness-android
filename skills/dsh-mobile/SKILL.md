@@ -6,6 +6,13 @@ whenToUse: 任务涉及操作手机上的其他 App（微信/QQ/飞书/WPS/浏�
 
 # 安卓手机自动化（DSH 内嵌版）
 
+
+> ⚠️ **2026-11-05 起 3081/3181/8998/8999 本机桥都校验共享密钥**（`X-DSH-Token`）。
+> bash 里没有这个环境变量：**用 `sh /sdcard/DeepSeekHarness/tools/curl.sh` 代替裸 `curl`**（自动带密钥，
+> 只对环回地址生效，外网不会泄漏）；或者 `TOKEN=$(sh /sdcard/DeepSeekHarness/tools/bridge-token.sh)`
+> 再自己加 `-H "X-DSH-Token: $TOKEN"`。`dsh-tool-android` / `dsh-tool-shizuku` / `dsh-tool-accessibility` /
+> `dsh-tool-nfc` / `dsh-native-command` 等插件已自动带上，插件调用无需关心。
+
 ## 三个通道（按优先级用）
 
 1. **免特权通道**（永远可用）：文件系统（`/sdcard` 全读写）、剪贴板、`android_notify`、定时任务、

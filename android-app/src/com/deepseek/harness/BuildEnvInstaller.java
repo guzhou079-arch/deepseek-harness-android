@@ -37,8 +37,11 @@ import java.util.Map;
  *    tarball 本身是纯文件，所以**放在 /sdcard 没问题** —— 于是"下载一次"能成立：
  *    重装 App 丢了私有目录，但 tarball 还在，**只需重新解压、不用重新下载**。
  *
- * ② **解压必须用 payload 里的 python3，且 filter='data'**
- *    data 会拒绝越出 staging 的路径和链接，同时保留 rootfs 需要的内部软链与执行位。
+ * ② **解压必须用 payload 里的 python3，且 filter='fully_trusted'**
+ *    data filter 会**拒绝绝对路径符号链接**（Python 3.12+ 默认就是它），
+ *    而 Alpine rootfs 里有 456 个绝对软链（`/bin/busybox`、`/etc/ssl/certs/java/cacerts` 等），
+ *    上去就是 AbsoluteLinkError 解压失败（Issue #16）。
+ *    归档是我们自己发布的，且上面 ③ 已校过整包 sha256 → 用 fully_trusted 安全。
  *    （Android 自带的 toybox tar 同样会丢符号链接，别用。）
  *
  * ③ **分卷是逼出来的**：实测 Gitee 附件上限 **100MB**（HTTP 400 明说），
@@ -464,7 +467,7 @@ public final class BuildEnvInstaller {
 
     /**
      * 调 payload 里的 python3 解压。
-     * 必须显式使用 data：拒绝路径穿越和逃逸链接，不误删 rootfs 内部软链与执行位。
+     * 必须显式 fully_trusted：data 会拒绝对符号链接，rootfs 里那 456 个直接让安装失败。
      */
     private static void extract(File tar, File stage) throws IOException {
         File base = stage.getParentFile().getParentFile();   // …/files
@@ -477,7 +480,7 @@ public final class BuildEnvInstaller {
         String script =
                 "import tarfile,sys\n" +
                 "tf=tarfile.open(sys.argv[1])\n" +
-                "tf.extractall(sys.argv[2], filter='data')\n" +   // 关键
+                "tf.extractall(sys.argv[2], filter='fully_trusted')\n" +   // 关键：data 会拒绝对软链
                 "tf.close()\n";
         ProcessBuilder pb = new ProcessBuilder(py.getAbsolutePath(), "-c", script,
                 tar.getAbsolutePath(), stage.getAbsolutePath());

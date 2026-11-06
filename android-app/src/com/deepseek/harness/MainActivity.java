@@ -100,6 +100,23 @@ public class MainActivity extends Activity {
      *  首次必须用它访问（服务器随即下发签名 cookie，后续可回到普通地址），
      *  否则首页返回 401 "authentication required"。这里保存解析到的带 token URL。 */
     private volatile String engineTokenUrl = null;
+
+    // ==================== v1.52 白屏兜底页 ====================
+    // 由来：2026-11-05 群里报「App 一直卡在白屏」。壳原来的做法是主框架加载失败就
+    // 每 2.5 秒重新 loadUrl（最多 120 次），用户面前始终是一块纯白：既不知道在等什么，
+    // 也点不到任何东西（原生控制台已降级，连日志都导不出来）。
+    // 现在改成：失败即切一张**不经过引擎**的静态页（assets/fallback.html），
+    // 上面有状态、版本、WebView 内核、日志路径和四个动作；后台继续探测，
+    // 引擎一通就自动切回主界面。整条路径不碰引擎、不碰插件、不碰原生控制台。
+    private static final String FALLBACK_URL = "file:///android_asset/fallback.html";
+    private volatile boolean fallbackActive = false;   // 主文档当前是兜底页
+    private volatile boolean fallbackProbing = false;  // 后台探测线程在跑
+    private volatile boolean fallbackReady = false;    // 探测到引擎已应答
+    private volatile long fallbackSince = 0L;          // 进入兜底页的时刻（算「已等待 N 秒」）
+    private volatile String fallbackWhy = null;        // 最近一次失败原因（兜底页展示 + 诊断）
+    private volatile long pageLoadedAt = 0L;           // 最近一次主文档 onPageFinished
+    private volatile int bootCycleFailures = 0;        // 「兜底页 → 进主界面 → 又失败」的轮数
+    private volatile int authReloadTries = 0;          // 401 后重捞令牌的次数
     /** WebView 与健康探测应使用的地址：拿到 token 就用带 token 的，否则退回普通地址。 */
     private String webHomeUrl() {
         // v1.39.1：内存里没有令牌时先到日志尾部捞（引擎重启后靠这条兜住，否则 WebView 401）
@@ -377,6 +394,9 @@ public class MainActivity extends Activity {
     private boolean openExternally(android.net.Uri u) {
         if (u == null) return true;
         String scheme = u.getScheme();
+        // 兜底页是内置 asset，只能由 WebView 自己加载：外面没有任何应用能打开它，
+        // 一旦误判成「外发」就会既不显示页面、又弹一个打开失败的错。
+        if (u.toString().startsWith(FALLBACK_URL)) return false;
         if (com.deepseek.harness.vscreen.LocalHttpFence.isLoopbackUrl(u.toString(), enginePort)) return false;
         // QQ 群卡片：mqqapi:// 由 QQ 自己接管，放行但不进浏览器选择器。
         boolean mqq = "mqqapi".equalsIgnoreCase(scheme);
@@ -531,6 +551,8 @@ public class MainActivity extends Activity {
                 // 开机动画：主文档是 data: URL（不走回环），只在 bootFilmOn 窗口内放行。
                 if (bootFilmOn && mainFrame && url != null
                         && (url.startsWith("data:") || url.startsWith("about:"))) return null;
+                // v1.52 兜底页：主文档是内置 asset，不走回环；同样只在兜底窗口内放行。
+                if (mainFrame && url != null && url.startsWith(FALLBACK_URL)) return null;
                 if (resourceAllowed(url, mainFrame)) return null;
                 return new android.webkit.WebResourceResponse("text/plain", "UTF-8", 403, "Forbidden",
                         java.util.Collections.<String, String>emptyMap(), new java.io.ByteArrayInputStream(new byte[0]));
@@ -552,6 +574,15 @@ public class MainActivity extends Activity {
             @Override
             public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
                 super.onPageStarted(view, url, favicon);
+                if (FALLBACK_URL.equals(url)) {
+                    trustedWebDocument = false;
+                    fallbackActive = true;
+                    if (fallbackSince == 0L) fallbackSince = System.currentTimeMillis();
+                    if (draftInput != null) draftInput.navigation();
+                    diagLog("FALLBACK", "page started");
+                    return;
+                }
+                fallbackActive = false;
                 trustedWebDocument = com.deepseek.harness.vscreen.LocalHttpFence.isLoopbackUrl(url, enginePort);
                 // 开机动画的主文档不是回环 → 放行，但绝不注入 DSH 脚本（trustedWebDocument 保持 false）。
                 if (bootFilmOn && !trustedWebDocument) return;
@@ -563,14 +594,15 @@ public class MainActivity extends Activity {
             @Override
             public void onReceivedError(WebView view, android.webkit.WebResourceRequest request,
                                          android.webkit.WebResourceError error) {
-                // 主框架加载失败（如 ERR_CONNECTION_REFUSED）时自动重试，直到服务器就绪
-                if (request != null && request.isForMainFrame() && errorRetries < 120) {
-                    errorRetries++;
-                    final WebView wv = view;
-                    view.postDelayed(new Runnable() {
-                        @Override public void run() { wv.loadUrl(webHomeUrl()); }
-                    }, 2500L);
-                }
+                // v1.52：主框架加载失败不再盲目 2.5s 重试（用户面前只剩一块白）。
+                // 改成交给兜底页：现场给状态 / 版本 / 日志出口 / 安全模式，后台自己继续探。
+                if (request == null || !request.isForMainFrame()) return;
+                if (FALLBACK_URL.equals(String.valueOf(request.getUrl()))) return;   // 兜底页自身失败：别递归
+                String desc = "";
+                try { desc = String.valueOf(error == null ? "" : error.getDescription()); } catch (Throwable ignored) {}
+                errorRetries++;
+                diagLog("FALLBACK", "main frame error: " + desc);
+                showBootFallback("主页面加载失败" + (desc.isEmpty() ? "" : "：" + desc));
             }
 
             // 2026-10-19 诊断用：把子资源的 4xx/5xx 打到 logcat。
@@ -584,12 +616,27 @@ public class MainActivity extends Activity {
                     if (request == null || errorResponse == null) return;
                     int code = errorResponse.getStatusCode();
                     if (code >= 400) diagLog("DSHNET", code + " " + String.valueOf(request.getUrl()));
+                    if (code == 401 && request.isForMainFrame()) {
+                        // token 一次性：内存里那条早就作废了，必须强制从日志重捞，
+                        // 否则拿着废令牌反复 loadUrl，用户看到的就是「白屏刷不完」。
+                        final String u = authReloadTries < 2 ? reloadTokenFromLog() : null;
+                        if (u != null && !u.isEmpty()) {
+                            authReloadTries++;
+                            final WebView wv = view;
+                            diagLog("FALLBACK", "401, token reloaded x" + authReloadTries);
+                            ui.post(new Runnable() { @Override public void run() { wv.loadUrl(u); }});
+                            return;
+                        }
+                        showBootFallback("引擎在，但认证反复没通过（401，token 重捞也没拿到）");
+                    }
                 } catch (Throwable ignored) {}
             }
 
             @Override
             public void onPageFinished(WebView view, String url) {
-                if (bootFilmOn && !trustedWebDocument) {          // 片子就绪：补发积压的那条指令
+                if (FALLBACK_URL.equals(url)) { diagLog("FALLBACK", "page finished"); return; }
+                if (bootFilmOn && !trustedWebDocument) {
+          // 片子就绪：补发积压的那条指令
                     bootFilmReady = true;
                     if (bootFilmPending != null) {
                         view.evaluateJavascript(bootFilmPending, null);
@@ -598,6 +645,11 @@ public class MainActivity extends Activity {
                     return;
                 }
                 if (!trustedWebDocument || !com.deepseek.harness.vscreen.LocalHttpFence.isLoopbackUrl(url, enginePort)) return;
+                // 只有真正的主文档才算「加载成功」：开机动画那份 data: 文档不能记账，
+                // 否则它晚到一步就会把 stall 看门狗骗过去，白屏重新变成没人管。
+                pageLoadedAt = System.currentTimeMillis();
+                bootCycleFailures = 0;
+                authReloadTries = 0;
                 errorRetries = 0;
                 injectDraftBootstrap(view);
                 diagLog("PAGE", "finished trusted=" + trustedWebDocument + " " + url);
@@ -678,6 +730,7 @@ public class MainActivity extends Activity {
                     }});
                 }
             }, "dshshell");
+            webView.addJavascriptInterface(new BootBridge(), "dshboot");
             draftInput = new DraftInputBridge(this, new DraftInputBridge.Guard() {
                 public boolean allowed() { return trustedWebDocument; }
             });
@@ -1607,7 +1660,9 @@ public class MainActivity extends Activity {
     private void confirmExit() {
         // v1.13.12 文案纠偏：退出只是关掉本界面，引擎 node 进程是独立子进程，会在后台继续运行
         // （这正是"手机当服务器"的设计意图，不需要停）。旧文案"服务器将停止运行"与实际行为不符。
-        conDialog("退出 DeepSeek Harness", "确定要退出吗？界面会关闭，服务器将在后台继续运行。", "退出", new Runnable() {
+        conDialog3("退出 DeepSeek Harness", "确定要退出吗？界面会关闭，服务器将在后台继续运行。",
+                "导日志", new Runnable() { @Override public void run() { conShareLog(); } },
+                "退出", new Runnable() {
             @Override public void run() {
                 stopKeepAliveService(); // 用户主动退出：停止保活服务
                 // v1.45：不 finish()，改成退到后台。
@@ -3633,7 +3688,7 @@ public class MainActivity extends Activity {
         super.onResume();
         if (draftInput != null) draftInput.resume();
         injectDraftBootstrap(webView);   // v1.40.5：切回前台补注入令牌，页面可能没走完一次加载
-        if (webView != null) webView.onResume();
+        if (webView != null) { webView.resumeTimers(); webView.onResume(); }
         rootOk = null; // 从设置页/Shizuku 返回时重新探测 root
         refreshAllStatuses();
         // 从 Shizuku/设置页返回时重新检测
@@ -3930,8 +3985,8 @@ public class MainActivity extends Activity {
             // 探测只用不带 token 的 /：401 + DSH 专属正文 也足以证明“是本引擎且在跑”。
             String probe = "http://127.0.0.1:" + port + "/";
             c = (HttpURLConnection) new URL(probe).openConnection();
-            c.setConnectTimeout(1200);
-            c.setReadTimeout(1500);
+            c.setConnectTimeout(4000);
+            c.setReadTimeout(4000);
             c.setRequestProperty("User-Agent", "dsh-probe");
             // 0.1.5：带 token 访问首页会返回 303 + Set-Cookie（浏览器会话 cookie），
             // 而 HttpURLConnection 默认不保存 cookie → 跟随重定向后又变 401 → 探测永远失败
@@ -4132,6 +4187,16 @@ public class MainActivity extends Activity {
                     } else {
                         // contentLength==0（如 GET 请求 /usage?days=N /overlay /status）：不读 body，
                         // 否则阻塞等 EOF 会 5s 读超时（SocketTimeoutException），所有 GET 路由卡死。
+                    }
+                    // v1.55：三个本地桥统一鉴权 —— 浏览器跨站由上面的 LocalHttpFence 挡（Host/Origin/Sec-Fetch），
+                    // 同机原生调用不带这些头，只能靠共享密钥。X-DSH-Token / ?token= / body token 任一命中即放行。
+                    // v1.55.1：/overlay 是网页设置页（3080 页面）跨端口直连的三个开关，/status /changelog 是只读公开信息；
+                    // 这三个路径不含敏感操作，免密钥放行（否则设置页开关点了没反应）。其余一律要密钥。
+                    boolean openRoute3081 = path.startsWith("/overlay") || path.startsWith("/status") || path.startsWith("/changelog");
+                    if (!openRoute3081 && !com.deepseek.harness.vscreen.LocalBridgeAuth.authorized(h, body.toString(), MainActivity.this)) {
+                        com.deepseek.harness.vscreen.LocalBridgeAuth.reject(s.getOutputStream());
+                        s.close();
+                        return;
                     }
                     // 3) 分发处理
                     String respBody;
@@ -4524,6 +4589,14 @@ public class MainActivity extends Activity {
             engineTokenUrl = fromLog;
             return fromLog;
         }
+        return null;
+    }
+
+    /** 401 之后强制丢弃内存里的旧令牌，重新从日志尾部捞一条。旧令牌用过即废，复用只会一路 401。 */
+    private String reloadTokenFromLog() {
+        engineTokenUrl = null;
+        String u = conTokenFromLog();
+        if (u != null && !u.isEmpty()) { engineTokenUrl = u; return u; }
         return null;
     }
 
@@ -6317,6 +6390,27 @@ public class MainActivity extends Activity {
     }
 
     private void spawnNode(File payload) throws IOException {
+        // v1.50：起引擎前先清场 —— 杀掉上一次遗留、还占着引擎端口的 node 进程。
+        //
+        // 为什么要放在这里（而不是只放 launchEngine）：
+        // 启动超时兜底那一支（内核回退重起、快速同步后全量补齐重起）是直接调 spawnNode 的，
+        // 绕过了 launchEngine 里 portListening 那道防护。真机日志实证：同一个 3080 上，
+        // 前一个 node 已经打印 "dsh web: ...?token=A"，后起的那个崩在
+        // "listen EADDRINUSE: address already in use 127.0.0.1:3080"，而它崩之前
+        // 已经把自己的 token=B 打进 dsh-web.log。App 取 token 时若取到 B，
+        // WebView 连的是活着的 A → 401 → 界面能显示却发不出消息，只能另开工具杀残留才恢复。
+        //
+        // killEngineNow 就是为这个准备的（找 /proc 里的引擎 node → SIGTERM → 6 秒内没死再 SIGKILL），
+        // 这里没有遗留进程时它只是扫一次 /proc 就返回，开销可以忽略。
+        try {
+            int stale = findEnginePid();
+            if (stale > 0) {
+                Log.w(TAG, "reaping stale engine pid " + stale + " before spawn");
+                killEngineNow();
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "reap before spawn failed: " + t);
+        }
         File node = new File(payload, "runtime/bin/node");
         File binjs = new File(dshrootDir, REL_BINJS);
         File lib = new File(payload, "runtime/lib");
@@ -6808,6 +6902,281 @@ public class MainActivity extends Activity {
         }, "engine-ready-reload").start();
     }
 
+
+    // ==================== v1.52 白屏兜底页：加载与自救 ====================
+
+    /** 主页面加载：引擎答话才 loadUrl；不答话先给兜底页，别再对着死端口白屏空转。 */
+    /** 引擎起来前那次「再等两轮」的探测是否已在跑（防重入，v1.53）。 */
+    private volatile boolean bootRechecking = false;
+
+    private void loadHomeGuarded() {
+        final WebView wv = webView;
+        if (wv == null) return;
+        fallbackWhy = null;
+        fallbackReady = false;
+        if (healthOk()) {
+            pageLoadedAt = 0L;
+            wv.loadUrl(webHomeUrl());
+            scheduleStallWatch();
+            return;
+        }
+        // v1.53：引擎常常只差一两秒才开始监听端口，探测一失败就切兜底页 → 用户看到兜底页闪一下
+        // （2026-11-06 实测：44s 判「没监听」，45s 引擎就 ready）。改成后台再等两轮（每轮 2 秒），
+        // 仍不通才真的兜底；等待期间保持启动动画，比闪一屏兜底页体面。
+        if (bootRechecking) return;
+        bootRechecking = true;
+        new Thread(new Runnable() { @Override public void run() {
+            try {
+                for (int i = 0; i < 2; i++) {
+                    try { Thread.sleep(2000); } catch (InterruptedException e) { return; }
+                    if (engineStartAborted || fallbackActive || pageLoadedAt > 0L) return;
+                    if (healthOk()) {
+                        final WebView w2 = webView;
+                        if (w2 == null) return;
+                        ui.post(new Runnable() { @Override public void run() {
+                            if (fallbackActive) return;
+                            pageLoadedAt = 0L;
+                            w2.loadUrl(webHomeUrl());
+                            scheduleStallWatch();
+                        }});
+                        return;
+                    }
+                }
+                ui.post(new Runnable() { @Override public void run() {
+                    if (fallbackActive) return;
+                    showBootFallback("引擎还没应答（端口 " + enginePort + " 没监听）");
+                }});
+            } finally { bootRechecking = false; }
+        }}, "boot-recheck").start();
+    }
+
+    /** 主页面 loadUrl 之后 90 秒还没 onPageFinished（前端崩 / 资源 404）也交给兜底页。 */
+    private void scheduleStallWatch() {
+        final long expectAfter = System.currentTimeMillis();
+        ui.postDelayed(new Runnable() { @Override public void run() {
+            if (fallbackActive) return;
+            if (pageLoadedAt >= expectAfter) return;
+            showBootFallback("页面 90 秒没有加载完成");
+        }}, 90000L);
+    }
+
+    /** 切到兜底页，并在后台继续探测引擎。幂等：已经在兜底页就只更新原因。 */
+    private void showBootFallback(final String why) {
+        if (why != null) fallbackWhy = why;
+        if (fallbackActive) return;
+        final WebView wv = webView;
+        if (wv == null) return;
+        fallbackActive = true;
+        fallbackReady = false;
+        bootCycleFailures++;
+        if (fallbackSince == 0L) fallbackSince = System.currentTimeMillis();
+        diagLog("FALLBACK", "show: " + why);
+        ui.post(new Runnable() { @Override public void run() {
+            try { wv.loadUrl(FALLBACK_URL); } catch (Throwable t) { Log.w(TAG, "fallback load", t); }
+        }});
+        scheduleFallbackProbe();
+    }
+
+    /** 兜底页期间：每 1.2 秒探一次端口，通了只置 ready（由页面自己要求 enter，动画更顺）。 */
+    private void scheduleFallbackProbe() {
+        if (fallbackProbing) return;
+        fallbackProbing = true;
+        final long deadline = System.currentTimeMillis() + 15 * 60 * 1000L;
+        new Thread(new Runnable() { @Override public void run() {
+            while (System.currentTimeMillis() < deadline) {
+                if (!fallbackActive) { fallbackProbing = false; return; }
+                try {
+                    if (healthOk()) {
+                        fallbackReady = true;
+                        diagLog("FALLBACK", "engine ready, waiting for page to enter");
+                        fallbackProbing = false;
+                        return;
+                    }
+                } catch (Throwable ignored) {}
+                try { Thread.sleep(1200); } catch (InterruptedException e) { fallbackProbing = false; return; }
+            }
+            fallbackProbing = false;
+        }}, "fallback-probe").start();
+    }
+
+    /** 兜底页状态：页面每 1.5 秒拉一次。刻意做得很轻 —— 这里不跑 HTTP，只读缓存标志。 */
+    private String fallbackStateJson() {
+        org.json.JSONObject o = new org.json.JSONObject();
+        try {
+            boolean alive = false;
+            try { alive = nodeProcess != null && nodeProcess.isAlive(); } catch (Throwable ignored) {}
+            long waited = fallbackSince == 0L ? 0 : Math.max(0, (System.currentTimeMillis() - fallbackSince) / 1000);
+            // 连续两轮「进去了又掉回来」就不再自动进：否则就是兜底页 ↔ 白页来回跳
+            boolean ready = fallbackReady && bootCycleFailures < 2;
+            o.put("status", ready ? "ready" : (alive ? "booting" : "offline"));
+            o.put("waited", waited);
+            o.put("version", conVersionLabel());
+            o.put("model", android.os.Build.MANUFACTURER + " " + android.os.Build.MODEL);
+            o.put("android", android.os.Build.VERSION.RELEASE + "（API " + android.os.Build.VERSION.SDK_INT + "）");
+            o.put("webview", webViewVersionText());
+            o.put("engine", engineStateOneLine(alive));
+            String why = fallbackWhy == null ? "" : fallbackWhy;
+            if (bootCycleFailures >= 2) {
+                why = (why.isEmpty() ? "" : why + "；") + "已经连着 " + bootCycleFailures
+                        + " 次没进到主界面，先别自动重试了";
+            }
+            o.put("lastError", why);
+            o.put("logPath", externalLogFile().getAbsolutePath());
+        } catch (Throwable t) {
+            return "{\"status\":\"offline\",\"waited\":0,\"version\":\"\",\"model\":\"\",\"android\":\"\",\"webview\":\"\",\"engine\":\"状态拼装失败\",\"lastError\":\"\",\"logPath\":\"\"}";
+        }
+        return o.toString();
+    }
+
+    private String engineStateOneLine(boolean alive) {
+        try {
+            boolean listening = portListening(enginePort);
+            boolean ok = healthOk();
+            if (ok) return "运行中（端口 " + enginePort + " 已应答）";
+            if (listening) return "进程在，端口已监听但还没应答";
+            if (alive) return "进程在，端口 " + enginePort + " 还没监听";
+            return "进程不在（没起来或已退出）";
+        } catch (Throwable t) { return "状态未知：" + t; }
+    }
+
+    private String webViewVersionText() {
+        try {
+            if (Build.VERSION.SDK_INT >= 26) {
+                android.content.pm.PackageInfo pi = android.webkit.WebView.getCurrentWebViewPackage();
+                if (pi != null && pi.versionName != null) {
+                    return pi.versionName + "（Chromium " + parseChromeMajor(pi.versionName) + "）";
+                }
+            }
+            int c = parseChromeMajor(webView == null ? null : webView.getSettings().getUserAgentString());
+            return c > 0 ? ("Chromium " + c) : "未知";
+        } catch (Throwable t) { return "未知"; }
+    }
+
+    /** 引擎日志的外部镜像（未 root 也可读），与 spawnNode 里写的落点保持一致。 */
+    private File externalLogFile() {
+        String dir = getPackageName().contains("beta") ? "DeepSeekHarnessLite"
+                : getPackageName().contains("compat") ? "DeepSeekHarnessCompat" : "DeepSeekHarness";
+        return new File(android.os.Environment.getExternalStorageDirectory(), dir + "/dsh-web.log");
+    }
+
+    /** 诊断文本：用户点一下「复制诊断」拿到的就是它，直接粘群里。 */
+    private String buildDiagText() {
+        StringBuilder b = new StringBuilder();
+        b.append("===== DeepSeek Harness 诊断 =====\n");
+        b.append("时间：").append(new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new java.util.Date())).append('\n');
+        b.append("版本：").append(conVersionLabel()).append('\n');
+        b.append("包名：").append(getPackageName()).append('\n');
+        b.append("机型：").append(android.os.Build.MANUFACTURER).append(' ').append(android.os.Build.MODEL).append('\n');
+        b.append("系统：").append(android.os.Build.VERSION.RELEASE)
+         .append("（API ").append(android.os.Build.VERSION.SDK_INT).append("）\n");
+        b.append("WebView：").append(webViewVersionText()).append('\n');
+        boolean alive = false;
+        try { alive = nodeProcess != null && nodeProcess.isAlive(); } catch (Throwable ignored) {}
+        b.append("兜底页：").append(fallbackActive ? "显示中" : "未显示");
+        if (fallbackWhy != null) b.append("（").append(fallbackWhy).append("）");
+        b.append('\n');
+        b.append("引擎：").append(engineStateOneLine(alive)).append('\n');
+        b.append("端口：").append(enginePort)
+         .append("，token=").append(engineTokenUrl == null ? "未取到" : "已取到").append('\n');
+        try {
+            b.append("安全模式：").append(safeModeActive() ? "开" : "关")
+             .append("，连续失败 ").append(bootFailures()).append(" 次\n");
+        } catch (Throwable ignored) {}
+        b.append("\n----- dsh-web.log（末尾 300 行）-----\n");
+        try {
+            String tail = conTailOf(conLogFile(), 300);
+            b.append(tail == null || tail.isEmpty() ? "（空）" : tail);
+        } catch (Throwable t) { b.append("读取失败：").append(t); }
+        b.append("\n----- webview.log（末尾 60 行）-----\n");
+        try {
+            String tail = conTailOf(new File(getFilesDir(), "diag/webview.log"), 60);
+            b.append(tail == null || tail.isEmpty() ? "（空）" : tail);
+        } catch (Throwable t) { b.append("读取失败：").append(t); }
+        b.append("\n===== 诊断结束 =====\n");
+        return b.toString();
+    }
+
+    /** 兜底页专用桥：只在兜底页文档上生效，方法就这几个，不给任何文件 / 命令能力。 */
+    private final class BootBridge {
+        @android.webkit.JavascriptInterface
+        public String state() {
+            return fallbackActive ? fallbackStateJson() : "{}";
+        }
+
+        @android.webkit.JavascriptInterface
+        public String action(final String id) {
+            if (!fallbackActive) return "{\"ok\":false,\"msg\":\"当前不是兜底页\"}";
+            if ("enter".equals(id)) {
+                if (bootCycleFailures >= 2) {
+                    return "{\"ok\":false,\"msg\":\"已经连着 " + bootCycleFailures + " 次没进去，先点「重新连接」\"}";
+                }
+                ui.post(new Runnable() { @Override public void run() {
+                    if (webView == null) return;
+                    fallbackActive = false;
+                    fallbackSince = 0L;
+                    fallbackReady = false;
+                    fallbackWhy = null;
+                    pageLoadedAt = 0L;
+                    webView.loadUrl(webHomeUrl());
+                    scheduleStallWatch();
+                }});
+                return "{\"ok\":true,\"msg\":\"正在进入主界面\"}";
+            }
+            if ("retry".equals(id)) {
+                bootCycleFailures = 0;   // 用户自己点的重连：给他重开一轮
+                authReloadTries = 0;
+                boolean alive = false;
+                try { alive = nodeProcess != null && nodeProcess.isAlive(); } catch (Throwable ignored) {}
+                if (!alive) {
+                    // 引擎进程压根不在：只探端口会一路干等，直接把引擎拉起来
+                    ui.post(new Runnable() { @Override public void run() { conEngineClick(); }});
+                    scheduleFallbackProbe();
+                    return "{\"ok\":true,\"msg\":\"引擎没在跑，正在启动\"}";
+                }
+                new Thread(new Runnable() { @Override public void run() {
+                    for (int i = 0; i < 60; i++) {
+                        if (healthOk()) { fallbackReady = true; return; }
+                        try { Thread.sleep(250); } catch (InterruptedException e) { return; }
+                    }
+                }}, "fallback-retry").start();
+                scheduleFallbackProbe();
+                return "{\"ok\":true,\"msg\":\"正在重新探测引擎\"}";
+            }
+            if ("copy".equals(id)) {
+                final String text = buildDiagText();
+                ui.post(new Runnable() { @Override public void run() {
+                    try {
+                        android.content.ClipboardManager cm = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                        if (cm != null) cm.setPrimaryClip(android.content.ClipData.newPlainText("DSH 诊断", text));
+                        conToast("诊断信息已复制，粘到群里即可");
+                    } catch (Throwable t) { conToast("复制失败：" + t.getMessage()); }
+                }});
+                return "{\"ok\":true,\"msg\":\"诊断信息已复制\"}";
+            }
+            if ("share".equals(id)) {
+                final String text = buildDiagText();
+                ui.post(new Runnable() { @Override public void run() { conSendShare(text); }});
+                return "{\"ok\":true,\"msg\":\"正在打开分享\"}";
+            }
+            if ("safe".equals(id)) {
+                ui.post(new Runnable() { @Override public void run() { conSafeModeNow(); }});
+                return "{\"ok\":true,\"msg\":\"正在切到安全模式\"}";
+            }
+            if ("open-log".equals(id)) {
+                ui.post(new Runnable() { @Override public void run() { conShareLog(); }});
+                return "{\"ok\":true,\"msg\":\"正在准备日志文件\"}";
+            }
+            return "{\"ok\":false,\"msg\":\"未知动作\"}";
+        }
+    }
+
+    /** 三按钮弹窗：在「取消 / 退出」之外再给一个次要出口（白屏时用来导日志）。 */
+    private void conDialog3(String title, String body, String neutral, final Runnable onNeutral,
+                            String positive, final Runnable onPositive, String negative) {
+        TextView t = (body == null || body.length() == 0) ? null : cText(body, 12.5f, cSub(), false);
+        conDialogView3(title, t, neutral, onNeutral, positive, onPositive, negative);
+    }
+
     private void loadHome() {
         // v1.12：控制台还开着时不抢界面（引擎就绪后由用户点「打开主界面」进来）
         if (consoleVisible) return;
@@ -6829,7 +7198,7 @@ public class MainActivity extends Activity {
                             bootFilmOn = false;
                             bootFilmReady = false;
                             if (webView != null) {
-                                webView.loadUrl(webHomeUrl());
+                                loadHomeGuarded();
                                 webView.clearHistory();
                             }
                         }
@@ -6864,7 +7233,7 @@ public class MainActivity extends Activity {
                     progressBar.setIndeterminate(false);
                     progressBar.setVisibility(View.GONE);
                 }
-                if (!film) webView.loadUrl(webHomeUrl());   // 开机动画在放时，由上面的收尾流程接管
+                if (!film) loadHomeGuarded();   // 开机动画在放时，由上面的收尾流程接管
             }
         });
     }
@@ -6940,7 +7309,10 @@ public class MainActivity extends Activity {
     protected void onPause() {
         if (draftInput != null) draftInput.pause();
         super.onPause();
-        if (webView != null) webView.onPause();
+        // v1.51 省电：退后台不只暂停渲染，连 JS 定时器一起暂停。
+        // 前端有周期轮询（状态/日志），onPause 只停 WebView 渲染时 setInterval 仍在空转，
+        // 是「挂后台掉电」的主要来源之一。恢复时 onResume 会 resumeTimers。
+        if (webView != null) { webView.onPause(); webView.pauseTimers(); }
         disableNfcReader();   // v1.16：退后台/锁屏立刻关 reader mode（别抢用户的卡）
     }
 
@@ -8083,6 +8455,11 @@ public class MainActivity extends Activity {
 
     /** 同风格弹窗的通用版：内容自定（例如带滚动的日志正文）。 */
     private void conDialogView(String title, View content, String positive, final Runnable onPositive, String negative) {
+        conDialogView3(title, content, null, null, positive, onPositive, negative);
+    }
+
+    private void conDialogView3(String title, View content, String neutral, final Runnable onNeutral,
+                                String positive, final Runnable onPositive, String negative) {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         // v1.13：卡片自己画圆角背景（原来用直角色块，系统对话框面板的圆角/描边会露在外面，
@@ -8095,6 +8472,16 @@ public class MainActivity extends Activity {
         LinearLayout acts = new LinearLayout(this);
         acts.setOrientation(LinearLayout.HORIZONTAL);
         acts.setGravity(Gravity.RIGHT);
+        if (neutral != null) {
+            Button ub = cButton(neutral, false);
+            ub.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    closeDialogOverlay();
+                    if (onNeutral != null) onNeutral.run();
+                }
+            });
+            acts.addView(ub);
+        }
         if (negative != null) {
             Button nb = cButton(negative, false);
             nb.setOnClickListener(new View.OnClickListener() {

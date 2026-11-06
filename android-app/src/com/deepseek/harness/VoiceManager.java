@@ -62,7 +62,7 @@ public class VoiceManager {
 
     // 热词唤醒 (KWS) 状态
     private boolean hotwordEnabled = false;
-    private String wakeWords = "流光,小鲸鱼,DeepSeek";
+    private String wakeWords = "小鲸鱼,DeepSeek";
     private final Set<String> wakeWordAliases = new HashSet<String>();
 
     // 音频反馈
@@ -106,7 +106,7 @@ public class VoiceManager {
         try {
             android.content.SharedPreferences sp = context.getSharedPreferences("dsh_prefs", Context.MODE_PRIVATE);
             hotwordEnabled = sp.getBoolean("voice_hotword_enabled", false);
-            wakeWords = sp.getString("voice_wake_words", "流光,小鲸鱼,DeepSeek");
+            wakeWords = sp.getString("voice_wake_words", "小鲸鱼,DeepSeek");
             rebuildWakeWordAliases();
         } catch (Throwable ignored) {}
     }
@@ -116,7 +116,7 @@ public class VoiceManager {
     }
 
     public void setWakeWords(String words) {
-        if (words == null || words.trim().isEmpty()) words = "流光,小鲸鱼,DeepSeek";
+        if (words == null || words.trim().isEmpty()) words = "小鲸鱼,DeepSeek";
         this.wakeWords = words.trim();
         rebuildWakeWordAliases();
         try {
@@ -141,9 +141,6 @@ public class VoiceManager {
             // 针对常用唤醒词内置同音/谐音词库
             if (item.contains("小鲸鱼") || item.contains("小金鱼") || item.contains("小静")) {
                 wakeWordAliases.addAll(Arrays.asList("小鲸鱼", "小金鱼", "小静鱼", "小金", "小鲸", "鲸鱼", "小静", "xiaojingyu"));
-            }
-            if (item.contains("流光") || item.contains("刘光") || item.contains("留光")) {
-                wakeWordAliases.addAll(Arrays.asList("流光", "留光", "刘光", "六光", "liuguang"));
             }
             if (item.contains("deepseek") || item.contains("deep") || item.contains("深度")) {
                 wakeWordAliases.addAll(Arrays.asList("deepseek", "deep seek", "深度求索", "迪普西克", "地皮斯克", "deep", "seek"));

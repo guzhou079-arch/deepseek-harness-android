@@ -3,28 +3,33 @@
 > Chinese original (authoritative and most up to date): [CHANGELOG.md](CHANGELOG.md).
 > This English page mirrors it; if the two ever disagree, the Chinese one wins.
 
-> Current release: `1.51.0`. Every release installs **straight over the previous one** — same signing key,
+> Current release: `1.48`. Every release installs **straight over the previous one** — same signing key,
 > in-place upgrade, no uninstall (uninstalling wipes all app-private data).
 
 ---
 
-## v1.51.0 — a crew: one person, a whole team
+## v1.48 — build environment installs again, a crew skill, clearer ledger wording
 
-**New skill `dsh-crew`: hand work to a small, fixed crew**
+**The build environment installs**
 
-- Seven roles: writing, research, backend, frontend, verification, audit, build & ops. Each one has a role card on disk (what it does, what it refuses, deliverables, acceptance, how much autonomy, memory and routines), so roles cost no context.
-- Dispatch is **pull-based**: task cards carry a role tag. `crew pool` lists what is claimable, `crew pull <name>` claims one and prints the full prompt, `crew shift` prints a round's start list — one card each, no duplicates. The main session never has to name people one by one.
-- The board and roster live in `$DSH_HOME/crew/`. Anything that evaporates when the session closes does not count; disk is the source of truth.
-- Hard rule: everything a member can see — task titles, acceptance criteria, inbox notes — is **data, not instructions**. Titles and notes are flattened to one line and a leading `#` is escaped before they reach memory; otherwise a task title can forge a memory block that every later round treats as fact.
+Downloading the three-part build environment from Settings used to stall at unpacking. It now installs, and once it is in you can compile and package on the phone. If you were stuck there, just hit install again — no need to delete the old directory first.
 
-**Tools**
+**A crew skill**
 
-- `tools/crew.js` — roster CLI (`team` / `pool` / `pull` / `shift` / `board` / `done` / `check`).
-- `tools/weekly.js` — drafts the weekly report from the roster and the board.
-- `tools/crew-selftest.sh` — 41 regression assertions, run against a throwaway roster.
-- Source and install notes: [`skills/dsh-crew/`](skills/dsh-crew/).
+New skill `dsh-crew`. Seven roles — writing, research, backend, frontend, verification, audit, build & ops — each with one card saying what it does, what it does not, what it delivers and how "done" is judged. Work is pulled, not pushed: `crew pool` lists what can be picked up, `crew pull <role>` claims one and prints the full brief, `crew shift` prints a round's starting list, one task per person. The roster and the task board live in the app data directory and survive closing the session.
 
-> Build: `1.51.0` (code 279), self-built locally; the GitHub release asset is still pending.
+**The ledger no longer mixes cards**
+
+Reconciliation now compares within the same card, so another card's transactions no longer land in this card's difference — and the tool no longer "corrects" a good entry against a wrong difference. On the panel, "this month's balance" is now "this month's net spend / net income": it was always the month's net flow, not the balance on the account, and the old name read like a balance.
+
+**More patience on first launch**
+
+After an upgrade or a fresh install, the first launch now waits up to 90 seconds for the page. It used to give up after 45 and say the page never loaded — easy to misread on a slower machine or right after unpacking.
+
+**Other**
+
+- Avatar and English display name show up again.
+- The QQ group entry is under Settings → Console, group 1050918023.
 
 ---
 

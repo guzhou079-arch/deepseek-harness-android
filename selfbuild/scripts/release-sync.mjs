@@ -15,7 +15,9 @@ export function localFor(repo) {
   return repo;
 }
 // 仓库独有文件（只存在于公开仓库、本地源码树里没有）不参与映射，否则同步会报 Missing mapped source。
-const preserved = repo => /^(README(?:\.en)?\.md|licenses\/|docs\/assets\/|plugins\/whale-shota\/)/.test(repo) || repo.endsWith('check-repo-hygiene.sh') || repo === '.repo-hygiene-allow';
+// skills/*/README.md 属于仓库侧的安装说明（不在出包输入的 overlay 里），同样跳过；
+// 技能正文与脚本仍走下面的显式映射，脚本的真实来源是 overlay/dshhome/tools。
+const preserved = repo => /^(README(?:\.en)?\.md|licenses\/|docs\/assets\/|plugins\/whale-shota\/)/.test(repo) || /^skills\/[^/]+\/README(?:\.en)?\.md$/.test(repo) || repo.endsWith('check-repo-hygiene.sh') || repo === '.repo-hygiene-allow';
 function safeRelative(p) { insist(typeof p === 'string' && p && !p.startsWith('/') && !p.split('/').some(s => !s || s === '..' || s === '.'), 'Invalid release-file path'); return p; }
 function hygieneName(p) { insist(!/(^|\/)(work|out|build-overlay|memory|\.git)(\/|$)|\.(apk|keystore|p12|bak|pem|key)$|\.bak-|PATCH-NOTES/.test(p), 'Non-public release-file path: ' + p); }
 export function syncPlan(clone) {

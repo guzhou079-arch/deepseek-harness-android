@@ -19,6 +19,9 @@ const { DatabaseSync } = require('node:sqlite');
 const DB_PATH = '/sdcard/DeepSeekHarness/life.db';
 const PID_FILE = '/data/user/0/com.deepseek.harness/files/tmp/life-daemon.pid';
 const LOG_FILE = '/sdcard/DeepSeekHarness/life-daemon.log';
+// 本地桥共享密钥：App 启动引擎/守护进程时经 env 注入（APP_LOCAL_TOKEN）。
+// 3081/3181 现在都校验它 —— loopback 对同机任意 App 可见，不校验等于把通知/剪贴板交出去。
+const BRIDGE_TOKEN = String(process.env.APP_LOCAL_TOKEN || '').trim();
 const BRIDGE_3181 = 'http://127.0.0.1:3181';
 const BRIDGE_3081 = 'http://127.0.0.1:3081';
 
@@ -124,7 +127,7 @@ function openDB() {
 
 function httpGetJson(url, timeoutMs) {
   return new Promise((resolve) => {
-    const req = http.get(url, (res) => {
+    const req = http.get(url, { headers: { 'X-DSH-Token': BRIDGE_TOKEN } }, (res) => {
       let data = '';
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
@@ -151,6 +154,7 @@ function httpPostJson(url, payload) {
         path: u.pathname + u.search,
         method: 'POST',
         headers: {
+          'X-DSH-Token': BRIDGE_TOKEN,
           'Content-Type': 'application/json',
           'Content-Length': Buffer.byteLength(postData)
         }
@@ -870,7 +874,12 @@ class CronScheduler {
       let status = 'success';
       try {
         if (task.action_type === 'cmd') {
-          execSync(task.action_payload, { stdio: 'ignore', timeout: 60000, shell: '/system/bin/sh' });
+          // 备份是 400MB+ 的全站快照，1 分钟必超时；60s 只够 doctor/mem 这种小活。
+          // 2026-11-05：weekly_backup 报 spawnSync /system/bin/sh ETIMEDOUT ——
+          // 超时只杀了 sh，里面 fork 的 node 还在后台把包写完，于是「状态是失败、文件却生成了」，
+          // 下一周再跑一遍，包越堆越多。按任务给足时间，别让它假失败。
+          const timeout = task.id === 'weekly_backup' ? 30 * 60 * 1000 : 60000;
+          execSync(task.action_payload, { stdio: 'ignore', timeout, shell: '/system/bin/sh' });
         } else if (task.action_type === 'notify') {
           await sendNotification('⏰ 定时提醒', task.action_payload);
         } else if (task.action_type === 'builtin') {
@@ -1316,7 +1325,6 @@ function ensureDaemonRunning() {
   child.unref();
   return { alive: false, pid, spawned: true, newPid: child.pid, beatAge, note: `原 PID 文件内容: ${pid || '无'}` };
 }
-
 
 // cron 行变化后唤醒常驻守护重排；PID 不在或信号失败时，下次启动仍会读最新表。
 function signalDaemonScheduler() {
@@ -1993,6 +2001,7 @@ async function handleCLI() {
  * 为什么不能只看 account 字段：同一张农行卡的通知，有的解析出「中国农业银行(****)」，
  * 有的只有「中国农业银行」（尾号写在正文里）—— 只看字段会把同一张卡拆成两个账户。
  */
+
 function bankKeyOf(account, fullText) {
   const s = String(account || '') + ' ' + String(fullText || '');
   // ⚠️ 必须认「农行/建行/工行」这类简称：掌银通知正文写「农行借记卡」，
@@ -2003,6 +2012,19 @@ function bankKeyOf(account, fullText) {
   return bank.replace(/^中国/, '').replace(/^农行$/, '农业银行').replace(/^建行$/, '建设银行')
     .replace(/^工行$/, '工商银行').replace(/^招行$/, '招商银行').replace(/^交行$/, '交通银行')
     .replace(/^邮储(银行)?$/, '邮政储蓄银行') + ':' + tail;
+}
+
+/** 只从 account 字段认银行（不看正文）。
+ *  为什么不能看正文：手工补录行的正文常写着「实际由招行万事达卡支付，按用户要求
+ *  计入农行借记卡」，按正文认卡会把这类行从本卡区间里误排掉（2026-11-05 实测）。
+ *  认不出返回 null —— 这类行（手动补记/第三方支付）一律算进本卡区间，宁可算进来
+ *  让差额暴露，也不要静默漏掉。 */
+function accountBankName(account) {
+  const m = String(account || '').match(/(中国农业银行|农业银行|农行|中国建设银行|建设银行|建行|中国工商银行|工商银行|工行|中国银行|中行|招商银行|招行|交通银行|交行|邮储银行|邮政储蓄银行|中信银行|浦发银行|兴业银行|民生银行|光大银行|华夏银行|广发银行|平安银行|云闪付|银联)/);
+  if (!m) return null;
+  return m[1].replace(/^中国/, '').replace(/^农行$/, '农业银行').replace(/^建行$/, '建设银行')
+    .replace(/^工行$/, '工商银行').replace(/^招行$/, '招商银行').replace(/^交行$/, '交通银行')
+    .replace(/^邮储(银行)?$/, '邮政储蓄银行');
 }
 
 /**
@@ -2077,7 +2099,7 @@ function readLatestBalances(db, limit = 3) {
  */
 function balanceChainSegments(db, days = 30) {
   const from = Date.now() - days * 86400000;
-  const rows = db.prepare(`SELECT id, type, amount, full_text, created_at FROM transactions WHERE created_at >= ? ORDER BY created_at, id`).all(from);
+  const rows = db.prepare(`SELECT id, type, amount, account, full_text, created_at FROM transactions WHERE created_at >= ? ORDER BY created_at, id`).all(from);
   const anchors = [];
   for (const r of rows) {
     const b = EXTRACTOR.extractBalance(r.full_text || '');
@@ -2087,7 +2109,17 @@ function balanceChainSegments(db, days = 30) {
   for (let i = 1; i < anchors.length; i++) {
     const a = anchors[i - 1], b = anchors[i];
     // 区间动账要含 b 自己那笔（b 的余额是那笔之后的值），只排除 a 自己
-    const between = rows.filter(r => r.created_at > a.created_at && r.created_at <= b.created_at && r.id !== a.id);
+    // ⚠️ 2026-11-05：区间必须限定在**同一张卡**。原实现只按时间筛，招行流水
+    //    （境外退款 ¥0.18、COMMANDCODE 扣款 ¥9.41）被算进农行区间，11/1 两段
+    //    因此报假差（−0.18 / +9.41），--fix 会照假差补错账。
+    //    判据只看 account 字段、不看正文：手工补录行正文写着「实际由招行支付，
+    //    按用户要求计入农行借记卡」，按正文认卡会把它从本卡区间里误排掉。
+    const bankA = accountBankName(a.account);
+    const bankB = accountBankName(b.account);
+    if (bankA && bankB && bankA !== bankB) continue; // 跨卡锚点不成段
+    const bank = bankA || bankB;
+    const between = rows.filter(r => r.created_at > a.created_at && r.created_at <= b.created_at && r.id !== a.id
+      && (!bank || !accountBankName(r.account) || accountBankName(r.account) === bank));
     const delta = between.reduce((s, r) => s + (r.type === 'expense' ? -r.amount : r.amount), 0);
     const expect = +(a.bal + delta).toFixed(2);
     const diff = +(b.bal - expect).toFixed(2);

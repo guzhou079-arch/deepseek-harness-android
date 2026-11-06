@@ -52,7 +52,7 @@ public class Main {
      */
     // ⚠ 改过任何影响对外行为的核心代码（路由 / 参数 / 尺寸归一化等）都必须同时升这个值：
     // 只改代码不升指纹，App 就判不出"跑的是旧 core"，改动会静默失效。
-    static final String BUILD = "vs-audit-20261009-origin";
+    static final String BUILD = "vs-token-20261105";
 
     /**
      * 心跳看门狗（v1.13.12）。App 进程内的桥服务每 ~750ms 就来拉一次 /vscreen/status，
@@ -80,6 +80,9 @@ public class Main {
     private static Context sContext;
     private static int sPort = DEFAULT_PORT;
     private static String sExternalRoot = DEFAULT_EXTERNAL_ROOT;
+    /** 本地桥共享密钥：由 App（VsreenBridgeService）启动时经 env APP_LOCAL_TOKEN 传入，或 --token 参数。
+     *  8998 对同机任意进程可见，不校验等于把虚拟屏（截图/触控/起 App）交给全机 —— 必须与 3081/3181/8999 同源。 */
+    private static String sToken = "";
 
     private static final ConcurrentHashMap<Integer, Session> sSessions = new ConcurrentHashMap<>();
     private static final AtomicInteger sDisplaySeq = new AtomicInteger(0);
@@ -88,7 +91,11 @@ public class Main {
     public static void main(String[] args) {
         Looper.prepareMainLooper();
         parseArgs(args);
-        log("server starting uid=" + Process.myUid() + " sdk=" + Build.VERSION.SDK_INT
+        if (sToken.length() == 0) {
+            String env = System.getenv("APP_LOCAL_TOKEN");
+            if (env != null) sToken = env.trim();
+        }
+        log("bridge auth " + (sToken.length() >= 16 ? "enabled" : "MISSING-TOKEN") + " uid=" + Process.myUid() + " sdk=" + Build.VERSION.SDK_INT
                 + " brand=" + Build.BRAND + " port=" + sPort + " dir=" + sExternalRoot, null);
 
         try {
@@ -159,6 +166,8 @@ public class Main {
                 }
             } else if ("--dir".equals(a) && i + 1 < args.length) {
                 sExternalRoot = args[++i].trim();
+            } else if ("--token".equals(a) && i + 1 < args.length) {
+                sToken = args[++i].trim();
             }
         }
     }
@@ -775,6 +784,13 @@ public class Main {
             int rejection = LocalHttpFence.rejection(header, sPort, -1);
             if (rejection != 0) {
                 LocalHttpFence.reject(sock.getOutputStream(), rejection);
+                return;
+            }
+            // v1.55：8998 也可能被同机 App 直连（不经 8999 代理）—— 浏览器跨站由上面的 fence 挡，
+            // 原生调用只能靠共享密钥。App 心跳 / 代理转发都会带上 X-DSH-Token。
+            String givenToken = LocalBridgeAuth.fromHeader(header);
+            if (sToken.length() < 16 || !sToken.equals(givenToken)) {
+                LocalBridgeAuth.reject(sock.getOutputStream());
                 return;
             }
             sLastRequestAt = System.currentTimeMillis();

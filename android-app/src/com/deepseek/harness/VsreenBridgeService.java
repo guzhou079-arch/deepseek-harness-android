@@ -74,7 +74,7 @@ public class VsreenBridgeService extends Service {
      * 表现为“服务在跑但新路由/新参数静默失效”（如 create 的 width/height 被完全忽略）。
      * v1.13.12：core 加了心跳看门狗（App 死了 → 20 秒后自动销毁虚拟屏并退出）。
      */
-    private static final String EXPECTED_CORE_BUILD = "vs-audit-20261009-origin";
+    private static final String EXPECTED_CORE_BUILD = "vs-token-20261105";
 
     /** 持有 Shizuku 拉起的进程引用：被 GC 回收会连带清理子进程。 */
     private static volatile IRemoteProcess sCoreProc;
@@ -1628,7 +1628,8 @@ public class VsreenBridgeService extends Service {
                     + "id >> /data/local/tmp/vscreen.log 2>&1; "
                     + "cp -f \"" + jar.getAbsolutePath() + "\" " + remoteJar + " >> /data/local/tmp/vscreen.log 2>&1; "
                     + "chmod 644 " + remoteJar + " 2>/dev/null; "
-                    + "CLASSPATH=" + remoteJar
+                    + "APP_LOCAL_TOKEN=" + com.deepseek.harness.vscreen.LocalBridgeAuth.token(this)
+                    + " CLASSPATH=" + remoteJar
                     + " /system/bin/app_process /system/bin " + CORE_MAIN
                     + " --port " + CORE_PORT + " --dir \"" + rootDir + "\""
                     + " >> /data/local/tmp/vscreen.log 2>&1";
@@ -1741,6 +1742,12 @@ public class VsreenBridgeService extends Service {
             int rejection = com.deepseek.harness.vscreen.LocalHttpFence.rejection(header, s.getLocalPort(), ep);
             if (rejection != 0) {
                 com.deepseek.harness.vscreen.LocalHttpFence.reject(s.getOutputStream(), rejection);
+                return;
+            }
+            // v1.55：8999 代理同样只靠共享密钥挡同机原生调用（浏览器跨站已由 fence 挡）。
+            // 这里只认请求头 / query 的 token —— body 走流式转发，不在闸门里解析。
+            if (!com.deepseek.harness.vscreen.LocalBridgeAuth.authorized(header, "", this)) {
+                com.deepseek.harness.vscreen.LocalBridgeAuth.reject(s.getOutputStream());
                 return;
             }
             String requestLine = header.substring(0, header.indexOf("\r\n"));
@@ -1948,7 +1955,9 @@ public class VsreenBridgeService extends Service {
                 up.connect(new java.net.InetSocketAddress("127.0.0.1", CORE_PORT), 5000);
                 up.setSoTimeout(20000);
                 OutputStream uo = up.getOutputStream();
-                uo.write(("GET " + path + " HTTP/1.0\r\nHost: 127.0.0.1:" + CORE_PORT + "\r\n\r\n").getBytes("UTF-8"));
+                uo.write(("GET " + path + " HTTP/1.0\r\nHost: 127.0.0.1:" + CORE_PORT
+                        + "\r\nX-DSH-Token: " + com.deepseek.harness.vscreen.LocalBridgeAuth.token(this)
+                        + "\r\n\r\n").getBytes("UTF-8"));
                 uo.flush();
                 InputStream is = up.getInputStream();
                 byte[] buf = new byte[32768];
@@ -1988,6 +1997,8 @@ public class VsreenBridgeService extends Service {
         try {
             URL u = new URL("http://127.0.0.1:" + CORE_PORT + path);
             URLConnection c = u.openConnection();
+            // v1.55：core 也校验共享密钥（同机 App 能直连 8998）
+            c.setRequestProperty("X-DSH-Token", com.deepseek.harness.vscreen.LocalBridgeAuth.token(this));
             c.setConnectTimeout(timeoutMs);
             c.setReadTimeout(timeoutMs);
             is = c.getInputStream();

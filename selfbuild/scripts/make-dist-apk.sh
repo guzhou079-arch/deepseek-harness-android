@@ -12,14 +12,22 @@ RUN="$F/work/linux/run.sh"
 export LD_LIBRARY_PATH="$F/payload/runtime/lib:${LD_LIBRARY_PATH:-}"
 export DSH_PROJECT="$R"
 V="${DSH_DIST_VERSION:-}"; C="${DSH_DIST_CODE:-}"
+# 未显式指定时，按 selfbuild/VERSION + 本机已出的同名包取：自用装过的那一版就是对外要发的
+# 这一版，同一个号。显式给则照旧校验，写错就停。
+if [ -z "$V" ] && [ -z "$C" ]; then
+  PLAN=$("$NODE" "$SB/scripts/version-check.js" --current) || exit 1
+  V=$(echo "$PLAN" | sed -n 's/^name=//p'); C=$(echo "$PLAN" | sed -n 's/^code=//p')
+fi
 case "$V" in ''|*[!0-9.]*|.*|*.|*..*) echo '✗ DSH_DIST_VERSION must contain digits/dots and no empty segment'; exit 2 ;; esac
 case "$C" in ''|*[!0-9]*|0*) echo '✗ DSH_DIST_CODE must be a canonical integer in 1..2147483647'; exit 2 ;; esac
 [ "$C" -ge 1 ] && [ "$C" -le 2147483647 ] || { echo '✗ DSH_DIST_CODE out of range'; exit 2; }
+# 发行包不是新版本：名字和号都必须对上「已经自用装过的那一版」，自己编一个号就停。
+"$NODE" "$SB/scripts/version-check.js" --dist --name "$V" --code "$C" || exit 1
 if [ "${1:-}" = "--print-plan" ]; then
   printf 'version=%s\ncode=%s\noutput=DeepSeekHarness-v%s-code%s-<timestamp>-<pid>-dist.apk\n' "$V" "$C" "$V" "$C"
   exit 0
 fi
-BASE="$SB/work/base-current-175.apk"
+BASE="$SB/work/base-current-295.apk"
 [ -f "$BASE" ] || { echo '✗ Missing base-current-175.apk'; exit 1; }
 [ -z "${DSH_BASE:-}" ] || [ "$(realpath "$DSH_BASE")" = "$(realpath "$BASE")" ] || { echo '✗ Wrong APK base'; exit 1; }
 export DSH_BASE="$BASE"
@@ -109,9 +117,15 @@ cd "$SB"
 runlog sh "$SB/selfbuild.sh" payload
 runlog sh "$SB/selfbuild.sh" patch
 runlog "$NODE" "$SB/scripts/strip-dist-payload.js" "$SB/work/payload-new.zip"
+# 2026-11-06 发行隐私整改：脱敏必须作用在**最终 payload** 上。
+# 底包 base-current-175.apk 里躺的是未脱敏的旧插件文案，patch 阶段会把旧版盖回来；
+# 反过来设备运行树也会被冷启动 FORCE_OVERWRITE 重铺 —— 两头都不可信，只信这里。
+runlog "$NODE" "$SB/scripts/sanitize-dist-payload.js" "$SB/work/payload-new.zip"
+# 改完自己判不算数：独立判据必须绿，否则 set -e 直接中止，不会走到签名和 out/。
+runlog "$NODE" "$SB/scripts/assert-dist-privacy.js" "$SB/work/payload-new.zip"
 runlog "$NODE" "$SB/scripts/slim-dist-payload.js" "$SB/work/payload-new.zip"
 runlog "$NODE" "$RECEIPTS" payload-check --payload "$SB/work/payload-new.zip" --checks "$SB/checks.manifest" --dist yes
-runlog sh "$SB/selfbuild.sh" pack --dex "$DEX" --asset "$R/v118/android-app/splash/boot.html:assets/boot.html"
+runlog sh "$SB/selfbuild.sh" pack --dex "$DEX" --asset "$R/v118/android-app/splash/boot.html:assets/boot.html" --asset "$R/v118/android-app/splash/fallback.html:assets/fallback.html"
 runlog sh "$SB/selfbuild.sh" mark
 runlog "$NODE" "$SB/scripts/set-apk-version.js" "$SB/work/unsigned.apk" "$SB/work/unsigned-v.apk" --name "$V" --code "$C" --share-target com.deepseek.harness.MainActivity
 OUT="$SB/out/DeepSeekHarness-v$V-code$C-$(date +%Y%m%d-%H%M%S)-$$-dist.apk"
@@ -127,13 +141,15 @@ if ! sh "$RUN" java -cp /tc/apksigner.jar com.android.apksigner.ApkSignerTool ve
 fi
 # Scan before restoration: only distributable overlay entries contribute to content scope.
 REPORT="$OUT.privacy-report.json"
-runlog "$PY" "$SB/scripts/scan-dist-privacy.py" --apk "$OUT" --overlay "$OVL" --wallpaper "$R/bg-patch/dsh-bg-user.png" --report "$REPORT"
+# 2026-11-06：scan-dist-privacy.py 改为必须一起扫底包（静默跳过正是三个包带毒还显示 PASS 的原因）。
+runlog "$PY" "$SB/scripts/scan-dist-privacy.py" --apk "$OUT" --base-apk "$BASE" --overlay "$OVL" --wallpaper "$R/bg-patch/dsh-bg-user.png" --report "$REPORT"
 runlog "$NODE" "$RECEIPTS" evidence --kind privacy --apk "$OUT" --report "$REPORT" --out "$OUT.privacy.json"
 restore_dist
 # 门禁咬住刚签名的最终 OUT；版本声明也随调用传入，防止文件名、清单和发布意图分叉。
 # runlog 原样返回非零，set -e 会在 artifact 收据之前中止；发布端没有可上传的通过凭据。
 runlog env DSH_EXPECT_VERSION="$V" DSH_EXPECT_CODE="$C" sh "$SB/scripts/gate.sh" "$OUT"
 ARTIFACT="${DSH_ARTIFACT_RECEIPT:-$SB/out/release-v$V-code$C.json}"
-runlog "$NODE" "$RECEIPTS" artifact --apk "$OUT" --compile "$COMPILE" --payload "$SB/work/payload-new.zip" --checks "$SB/checks.manifest" --signature "$SIGNATURE" --assets "$SB/work/packed-assets.json" --out "$ARTIFACT"
+# 2026-11-06：这行原来没给版本，release-receipts.mjs 退回默认 1.38/70，与包里的 1.48/285 必然 mismatch。
+runlog env DSH_DIST_VERSION="$V" DSH_DIST_CODE="$C" "$NODE" "$RECEIPTS" artifact --apk "$OUT" --compile "$COMPILE" --payload "$SB/work/payload-new.zip" --checks "$SB/checks.manifest" --signature "$SIGNATURE" --assets "$SB/work/packed-assets.json" --out "$ARTIFACT"
 echo "✓ Exact artifact: $OUT"
 echo "✓ Artifact receipt: $ARTIFACT"

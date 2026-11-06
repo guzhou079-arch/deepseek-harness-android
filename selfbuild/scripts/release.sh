@@ -15,6 +15,12 @@ ARTIFACT=""
 BASELINE=""
 CLONE="${DSH_VERIFY_DIR:-$F/_verify}/ws-GitHub"
 V="${DSH_DIST_VERSION:-}"; C="${DSH_DIST_CODE:-}"
+# 版本号不靠手输：两个都没给时，按 selfbuild/VERSION + 本机已出的同名包取 ——
+# 自用装过的那一版就是对外要发的这一版，同一个号。显式给了仍照旧走 target() 的校验。
+if [ -z "$V" ] && [ -z "$C" ]; then
+  PLAN=$("$NODE" "$SB/scripts/version-check.js" --current) || exit 1
+  V=$(echo "$PLAN" | sed -n 's/^name=//p'); C=$(echo "$PLAN" | sed -n 's/^code=//p')
+fi
 CMD="${1:-}"; [ $# -eq 0 ] || shift
 GO=0; WRITE=0; TITLE=""; TAG="${DSH_PREVIOUS_TAG:-}"; PREVIOUS=""
 while [ $# -gt 0 ]; do
