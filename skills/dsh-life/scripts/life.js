@@ -240,7 +240,7 @@ function textAlreadyStored(db, table, fullText) {
 // 这条判据专治「小额（<¥10）两条推送都不带余额」—— 那时没有余额可比，只剩这个硬判据。
 /**
  * 「钱还没真扣」型通知：信用卡预扣费/预授权这类，记账会虚增支出。
- * 哥 2026-10-31 明确说招行预扣费成功的短信不用记 —— 整条挡在账本外，日志留痕。
+ * 银行信用卡预扣费成功的短信不计入账本 —— 整条挡在账本外，日志留痕。
  */
 function excludeReason(fullText) {
   const s = String(fullText || '');
@@ -906,7 +906,7 @@ class CronScheduler {
       //    绕过了 armWatchdog 的开关 —— 当时只验了那道闸，漏了这条。
       // ⛔ 而且：builtin / cmd / notify 这三种**守护进程自己就能执行**（免费，见下面 runBuiltinTask
       //    和上面的 execSync/sendNotification），根本不需要叫 AI。给它们排闹钟只会得到
-      //    「把任务名当用户消息提交给 AI」= 白花一个完整会话（用户 2026-10-15 确认去掉这一路）。
+      //    「把任务名当用户消息提交给 AI」= 白花一个完整会话。
       //    本地执行不受影响：cron 表里的行照旧被守护进程按点跑。
       const localRun = ['builtin', 'cmd', 'notify'].includes(task.action_type);
       if (nextRun && !localRun && task.id !== WATCHDOG_ID) {
@@ -2322,7 +2322,7 @@ function getLifeStatus() {
   }
 
   // 本月（自然月）合计 —— 面板上并排显示「月结余」用（结余 = 本月收入 − 本月支出）。
-  // 用户 2026-10-15 要求：记账 App 里每个月有结余，我们面板上也该看得到，省得手动算。
+  // 记账 App 里每个月有结余，我们面板上也该看得到，省得手动算。
   const monthStart = new Date();
   monthStart.setDate(1);
   monthStart.setHours(0, 0, 0, 0);
@@ -2335,12 +2335,12 @@ function getLifeStatus() {
   }
   const monthTxCount = db.prepare(`SELECT COUNT(*) AS c FROM transactions WHERE created_at >= ?`).get(monthStart.getTime()).c || 0;
 
-  // 卡片只列**今天**的账（用户 2026-10-15 明确要求：标题写着「今日」，
+  // 卡片只列**今天**的账（标题写着「今日」，
   // 下面却混着昨天那几笔，看着就像数据对不上）。更早的账走「全部账目」入口（/api/tx 分页）。
   const txs = db.prepare(`SELECT id, type, amount, merchant, category, account, created_at FROM transactions WHERE created_at >= ? ORDER BY created_at DESC, id DESC LIMIT 20`).all(todayStart.getTime());
   const txTotal = db.prepare(`SELECT COUNT(*) AS c FROM transactions`).get().c || 0;
   // 今日总笔数：卡片最多列 20 条，超过了要明说「还有 N 笔未显示」，不许静默截断
-  //（2026-10-15 正是被"看不见的截断"坑过：余额行被挤出窗口，界面上一片正常）。
+  //（曾被"看不见的截断"坑过：余额行被挤出窗口，界面上一片正常）。
   const txToday = db.prepare(`SELECT COUNT(*) AS c FROM transactions WHERE created_at >= ?`).get(todayStart.getTime()).c || 0;
   const tasks = db.prepare(`SELECT id, name, cron_expr, action_type, enabled, last_status, next_run_at FROM scheduled_tasks ORDER BY id ASC`).all();
   const scenes = db.prepare(`SELECT id, name, type, description, enabled, last_triggered_at FROM scenes ORDER BY created_at ASC`).all();

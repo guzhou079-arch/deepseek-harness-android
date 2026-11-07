@@ -218,7 +218,7 @@ window.__ModuleLoader__.load({
       const [voiceHub, setVoiceHub] = react.useState({
         config: {
           hotword_enabled: '1',
-          wake_words: '流光,小鲸鱼,DeepSeek',
+          wake_words: '小鲸鱼,DeepSeek',
           wake_mode: 'single_breath',
           stt_engine: 'system',
           tts_engine: 'edge',
@@ -852,7 +852,7 @@ window.__ModuleLoader__.load({
 
     /**
      * 全部账目页：按天分组、每页 60 笔、可「加载更多」。
-     * 入口在「💰 今日记账与消费流水」卡片底部 —— 那张卡片只列**今天**（用户 2026-10-15 要求），
+     * 入口在「💰 今日记账与消费流水」卡片底部 —— 那张卡片只列**今天**，
      * 更早的账都在这里翻。
      */
     function LedgerPage({ onBack }) {
@@ -1186,7 +1186,7 @@ window.__ModuleLoader__.load({
         const vCfg = voiceHub.config || {};
         const presets = voiceHub.presets || [];
         const isHotword = vCfg.hotword_enabled === '1' || vo.hotwordEnabled;
-        const currentWords = vCfg.wake_words || vo.wakeWords || '流光,小鲸鱼,DeepSeek';
+        const currentWords = vCfg.wake_words || vo.wakeWords || '小鲸鱼,DeepSeek';
         const currentVoice = vCfg.tts_voice || 'zh-CN-XiaoxiaoNeural';
         const currentSpeed = vCfg.tts_speed || '1.0';
         const currentEngine = vCfg.tts_engine || 'edge';
