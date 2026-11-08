@@ -942,7 +942,13 @@ class CronScheduler {
       try {
         // 必须带 create 子命令：不带时 backup.mjs 只会打印用法并 exit 0，
         // 被这里当成"备份完成"（2026-10-21 修：静默假成功）
-        const out = execSync('node /sdcard/DeepSeekHarness/tools/backup.mjs create --name WeeklyAutoBackup',
+        // 优先用包里那份技能脚本：它随安装包更新，修好的逻辑才跟得上；
+        // sdcard 那份是历史遗留的运行树副本，安装包不会覆盖它，只作兜底。
+        const packagedBackup = path.join(String(process.env.DSH_HOME || ''), 'skills/dsh-backup/scripts/backup.mjs');
+        const backupScript = (process.env.DSH_HOME && fs.existsSync(packagedBackup))
+          ? packagedBackup
+          : '/sdcard/DeepSeekHarness/tools/backup.mjs';
+        const out = execSync(`node ${backupScript} create --name WeeklyAutoBackup`,
           { encoding: 'utf8', shell: '/system/bin/sh', timeout: 10 * 60 * 1000 });
         const sizeLine = (out.match(/快照大小:.*/) || [''])[0].trim();
         logMessage(`[Cron] 时光机全站备份完成 ${sizeLine}`);
