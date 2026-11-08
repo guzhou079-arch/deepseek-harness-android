@@ -116,6 +116,9 @@ public class MainActivity extends Activity {
     private volatile String fallbackWhy = null;        // 最近一次失败原因（兜底页展示 + 诊断）
     private volatile long pageLoadedAt = 0L;           // 最近一次主文档 onPageFinished
     private volatile int bootCycleFailures = 0;        // 「兜底页 → 进主界面 → 又失败」的轮数
+    // 是否曾经真正进过主界面。首装首启要解压 payload，页面 90 秒没加载完是常态，
+    // 那不是「进去又掉回来」；拿它做闸门，否则首启会被自己的失败计数永久锁死在兜底页。
+    private volatile boolean everEnteredHome = false;
     private volatile int authReloadTries = 0;          // 401 后重捞令牌的次数
     /** WebView 与健康探测应使用的地址：拿到 token 就用带 token 的，否则退回普通地址。 */
     private String webHomeUrl() {
@@ -230,7 +233,12 @@ public class MainActivity extends Activity {
         "dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-model-selection/lib/client.js",
         "dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-plugin-session-rewind/",
         "dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-plugin-turn-notify/",
-        "dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-plugin-auto-summary-policy/"
+        "dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-plugin-auto-summary-policy/",
+        // v1.49：终端面板找不到 bash、预设挂载只报「未启动」这两处修复分别落在这两个包里。
+        // 它们不是本项目自研包，此前不在表内 —— 同内核版本走 fast 同步时不覆盖它们，
+        // 补丁虽然进了安装包，运行树里却一直是旧文件（装机后实测两个文件仍是旧版）。
+        "dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-terminal-bash/",
+        "dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-agent-preset-registry/"
     };
     // 外部 dshroot 解压完成标记（App 在 dshroot 补齐后写入；清空/重置时随目录删除）。
     // 用于识别「解压中途被打断」：即使 REVISION 一致也强制补齐缺失文件。
@@ -254,6 +262,9 @@ public class MainActivity extends Activity {
     private static final int REQ_CAMERA_CAPTURE = 501;
     /** 导入备份（SAF 选 zip 文件）。 */
     private static final int REQ_BACKUP_FILE = 600;
+    /** 从时光机快照还原（SAF 选 .dshbackup 容器）。和上面的 zip 是两种格式，不能共用一条路径：
+     *  zip 由 Java 自己解包，.dshbackup 是 [DSHB][manifest][gzip] 容器，只有 backup.mjs 认得。 */
+    private static final int REQ_SNAPSHOT_FILE = 601;
 
     // ---------- 安全模式 / 启动失败计数 ----------
     // 背景：引擎启动会解析 profile 的 patch 文件，一旦 YAML 语法坏掉（用户装的插件把配置写坏是常见路径），
@@ -649,6 +660,7 @@ public class MainActivity extends Activity {
                 // 否则它晚到一步就会把 stall 看门狗骗过去，白屏重新变成没人管。
                 pageLoadedAt = System.currentTimeMillis();
                 bootCycleFailures = 0;
+                everEnteredHome = true;
                 authReloadTries = 0;
                 errorRetries = 0;
                 injectDraftBootstrap(view);
@@ -668,10 +680,18 @@ public class MainActivity extends Activity {
                 // v1.13.12：让页面把底色变化主动推给壳（用户在前端里切深浅色时状态栏能跟着变，
                 // 不再只靠页面加载时的几次采样）。注入 MutationObserver，主题 class/属性一变就上报。
                 try {
+                    final String cssDark = cssRgb(getColor(R.color.shell_bg_dark));
+                    final String cssLight = cssRgb(getColor(R.color.shell_bg_light));
                     view.evaluateJavascript(
                         "(function(){try{if(window.__dshBgWatch)return;window.__dshBgWatch=1;"
                         + "function opaque(s){return s&&!/rgba?\\([^)]*,\\s*0\\s*\\)/.test(s);}"
-                        + "function cur(){var b='';try{b=getComputedStyle(document.body).backgroundColor||''}catch(e){}"
+                        // 壁纸模式下 body/html 的底被壁纸层撤掉了，量出来是透明或上游默认白 ——
+                        // 把白推给壳会把系统栏染成一条白带，这里按页面自己的深浅色标记给壳色。
+                        + "function wall(){try{return (getComputedStyle(document.documentElement,'::before')"
+                        + ".backgroundImage||'').indexOf('url(')>=0}catch(e){return false}}"
+                        + "function dark(){try{return !!(document.body&&document.body.hasAttribute('data-ds-dark-theme'))}catch(e){return false}}"
+                        + "function cur(){if(wall())return dark()?'" + cssDark + "':'" + cssLight + "';"
+                        + "var b='';try{b=getComputedStyle(document.body).backgroundColor||''}catch(e){}"
                         + "if(opaque(b))return b;var h='';try{h=getComputedStyle(document.documentElement).backgroundColor||''}catch(e){}"
                         + "return opaque(h)?h:b;}"
                         + "function push(){try{if(window.dshshell&&dshshell.onBg)dshshell.onBg(cur())}catch(e){}}"
@@ -1697,6 +1717,12 @@ public class MainActivity extends Activity {
         return pageBgColor != 0 ? pageBgColor : cBg();
     }
 
+    /**
+     * 两条系统栏各自涂一个颜色（页面上半部的底色），图标深浅按该颜色算。
+     *
+     * 试过让壁纸铺进这两条区域（栏透明 + WebView 铺满），视觉上确实没有了"色带"，
+     * 但顶部的图标和时间直接压在壁纸图案上，浅色壁纸下就看不清，所以退回涂色方案。
+     */
     private void applySystemBars(int barColor) {
         try {
             android.view.Window w = getWindow();
@@ -1716,6 +1742,15 @@ public class MainActivity extends Activity {
         } catch (Throwable ignored) {}
     }
 
+    /** 系统栏实际占用高度（px），取不到就给 0。 */
+    private int sysBarSize(String name) {
+        try {
+            int id = getResources().getIdentifier(name, "dimen", "android");
+            if (id <= 0) return 0;
+            return getResources().getDimensionPixelSize(id);
+        } catch (Throwable t) { return 0; }
+    }
+
     /** 底色是否偏亮 —— 决定状态栏/导航栏图标用深色还是浅色。 */
     private boolean isLightColor(int color) {
         double lum = 0.299 * Color.red(color) + 0.587 * Color.green(color) + 0.114 * Color.blue(color);
@@ -1731,8 +1766,16 @@ public class MainActivity extends Activity {
         if (webView == null) return;
         try {
             // body 透明（全透明底）时退回 <html> 的底色 —— 有些前端把底色画在根元素上
+            final String cssDark = cssRgb(getColor(R.color.shell_bg_dark));
+            final String cssLight = cssRgb(getColor(R.color.shell_bg_light));
             webView.evaluateJavascript(
                 "(function(){try{function op(s){return s&&!/rgba?\\([^)]*,\\s*0\\s*\\)/.test(s);}"
+                // 壁纸模式下壁纸层铺在 html::before 上，body/html/#root 的底色全被撤掉，
+                // 实测出来是透明或上游默认白 —— 拿它给系统栏上色会和页面的视觉底色对不上
+                // （深色壁纸配出一条白状态栏）。这种情况改按页面自身的深浅色标记取壳色。
+                + "var wall=(getComputedStyle(document.documentElement,'::before').backgroundImage||'').indexOf('url(')>=0;"
+                + "if(wall){var dk=!!(document.body&&document.body.hasAttribute('data-ds-dark-theme'));"
+                + "return dk?'" + cssDark + "':'" + cssLight + "';}"
                 + "var b=getComputedStyle(document.body).backgroundColor||'';if(op(b))return b;"
                 + "var h=getComputedStyle(document.documentElement).backgroundColor||'';return op(h)?h:''}catch(e){return ''}})()",
                 new android.webkit.ValueCallback<String>() {
@@ -1766,6 +1809,11 @@ public class MainActivity extends Activity {
         } catch (Throwable t) {
             return 0;
         }
+    }
+
+    /** 反方向：把颜色资源拼成页面侧能直接用的 "rgb(r, g, b)"（注入的 JS 读不到资源表）。 */
+    private static String cssRgb(int c) {
+        return "rgb(" + Color.red(c) + "," + Color.green(c) + "," + Color.blue(c) + ")";
     }
 
 
@@ -3047,6 +3095,12 @@ public class MainActivity extends Activity {
             }
             return;
         }
+        if (requestCode == REQ_SNAPSHOT_FILE) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+                conSnapshotImportFromUri(data.getData());
+            }
+            return;
+        }
         if (requestCode == REQ_WORKSPACE_TREE && resultCode == RESULT_OK && data != null && data.getData() != null) {
             Uri tree = data.getData();
             // 持久化 SAF 授权（重启后仍可访问该目录）
@@ -3821,6 +3875,13 @@ public class MainActivity extends Activity {
                             extractPayload(payload, null, mode);
                             writeDshrootComplete(internalBase);
                             if (revisionChanged) refreshInternalConfig(payload);
+                            // 内核指针体检：active.json 指向的内核比这次装进来的内置树旧，就把指针
+                            // 改名挪开（不删、可回滚），否则引擎会一直被指回旧内核，前端停在旧版本。
+                            if (revisionChanged) {
+                                try { KernelStore.parkIfStale(MainActivity.this); } catch (Throwable t) {
+                                    Log.w(TAG, "park stale kernel pointer failed", t);
+                                }
+                            }
                         }
                         dshrootDir = internalDshroot;
                         // v1.19：插件强制刷新移到同步之后 —— 否则 refresh 会先覆盖 dsh/package.json，
@@ -5857,11 +5918,22 @@ public class MainActivity extends Activity {
             File parent = target.getParentFile();
             if (parent != null && !parent.exists() && !parent.mkdirs()) throw new IOException("mkdir failed: " + parent);
             prepareTarget(target);
+            // 2026-11-08：写临时文件再 rename。直接 FileOutputStream(target) 覆盖**正在被执行**
+            // 的二进制会拿到 ETXTBSY（Text file busy），典型是 payload/python/bin/python3.14：
+            // 旧引擎进程还握着它，整轮解压挂在这一条上，引擎直接起不来。rename 覆盖运行中的
+            // 文件是合法操作——旧进程继续持有旧 inode，新文件按新名字落地；临时文件放同一
+            // 目录保证同一文件系统，rename 不会退化成跨设备拷贝。
+            File tmp = new File(parent, target.getName() + ".tmp-" + System.nanoTime());
             try {
-                FileOutputStream fos = new FileOutputStream(target);
+                // 可执行位必须自己带过去：rename 保留的是 tmp 的权限（默认 0644），
+                // payload 里的 python/node/bash 全靠这一位才能跑。
+                boolean wasExecutable = target.exists() && target.canExecute();
+                FileOutputStream fos = new FileOutputStream(tmp);
                 int n;
                 while ((n = zis.read(buf)) > 0) fos.write(buf, 0, n);
                 fos.close();
+                if (wasExecutable) tmp.setExecutable(true, true);
+                if (!tmp.renameTo(target)) throw new IOException("rename failed: " + target);
                 // v1.13.5：dex 必须**不可写**——Android 14+ 的 ART 拒绝加载可写 dex
                 // （logcat: SecurityException: Writable dex file '…' is not allowed → 进程直接
                 //  SIGABRT/exit 134，终端上只看到一个 "Aborted"）。payload.zip 内所有条目都不带
@@ -5869,6 +5941,7 @@ public class MainActivity extends Activity {
                 if (name.endsWith(".dex")) secureDexPermissions(target);
                 written++;
             } catch (IOException ioe) {
+                if (tmp.exists()) tmp.delete();
                 // 单个条目失败不中断整体（否则一次 EACCES 就能让整轮解压白干），最后汇总报错
                 failed++;
                 if (firstFail == null) firstFail = name + "（" + ioe.getMessage() + "）";
@@ -5905,6 +5978,32 @@ public class MainActivity extends Activity {
         }
         Log.i(TAG, "extracted " + written + " entries (external=" + (externalRoot != null) + ", mode=" + mode + ")");
         if (failed > 0) throw new IOException("有 " + failed + " 个文件写不进去，首个：" + firstFail);
+        // 写成功不等于树完整：payload 本身缺文件时这里一条都不会失败，残缺的树照样起引擎，
+        // 然后在下游以 ENOENT（/bin/bash）、"xxx: never started"（模块不在，Loader 不建 fiber）
+        // 这类看不懂的形式乱报。只验本 mode 必须落地的几个关键路径，缺了就当场说清楚。
+        final File mustRoot;
+        final String[] mustHave;
+        if (internalOnly) {
+            mustRoot = destInternal;
+            mustHave = new String[]{"bin/bash"};
+        } else if (dshrootOnly && !fast) {
+            mustRoot = (externalRoot != null) ? externalRoot : destInternal;
+            mustHave = new String[]{
+                    "dshroot/REVISION",
+                    "dshroot/lib/node_modules/@deepseek-ai/dsh/package.json",
+                    "dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-subagent-control/package.json"};
+        } else {
+            mustRoot = null;
+            mustHave = null;
+        }
+        if (mustRoot != null) {
+            for (String rel : mustHave) {
+                if (!new File(mustRoot, rel).exists()) {
+                    throw new IOException("payload 不完整，缺少 " + rel
+                            + "（空间不足或安装包损坏，请重装；已解压的文件会保留）");
+                }
+            }
+        }
     }
 
     /**
@@ -6561,6 +6660,16 @@ public class MainActivity extends Activity {
         if (ws != null && !ws.isEmpty()) env.put("DSH_WORKSPACE", ws);
         pb.redirectErrorStream(true);
 
+        // 装包时系统直接把 App 杀掉，node 子进程不跟着退，会变成孤儿进程继续占着引擎端口。
+        // 重开后再起一个 node 就 listen EADDRINUSE，而前端拿的是新进程的 token，跟旧引擎对不上
+        // （401）→ 界面看着在、发不出消息，只能手动清。起之前先把孤儿收掉：同 uid 才发得了信号，
+        // 找的又正是自己的 node（bin.js web --port 本端口），不会误伤别的应用。
+        int stalePid = findEnginePid();
+        if (stalePid > 0) {
+            Log.w(TAG, "残留引擎进程 pid=" + stalePid + " 仍占着 " + enginePort + "，先停掉再起新引擎");
+            killEngineNow();
+        }
+
         final Process proc = pb.start();
         nodeProcess = proc;
         final File logFile = new File(getFilesDir(), "dsh-web.log");
@@ -6968,7 +7077,8 @@ public class MainActivity extends Activity {
         if (wv == null) return;
         fallbackActive = true;
         fallbackReady = false;
-        bootCycleFailures++;
+        // 只有「进去过又掉回来」才算一轮循环；首启从没进去过就任由它慢慢加载。
+        if (everEnteredHome) bootCycleFailures++;
         if (fallbackSince == 0L) fallbackSince = System.currentTimeMillis();
         diagLog("FALLBACK", "show: " + why);
         ui.post(new Runnable() { @Override public void run() {
@@ -7685,6 +7795,7 @@ public class MainActivity extends Activity {
             }
             if ("backup.export".equals(id)) { conBackupExport(); return; }
             if ("backup.import".equals(id)) { conBackupImport(); return; }
+            if ("backup.snapshotImport".equals(id)) { conSnapshotImport(); return; }
             if ("snapshot".equals(id)) { triggerSnapshotBackup(); return; }
             if ("notification.history".equals(id)) { showNotificationHistory(); return; }
             if ("log.view".equals(id)) { conViewLog(); return; }
@@ -8295,6 +8406,13 @@ public class MainActivity extends Activity {
             @Override public void onClick(View v) { conBackupImport(); }
         });
         col.addView(impBtn, cTop(dp(8)));
+        // 两种备份格式各走各的门：上面那个只吃「导出全部数据」的 zip，
+        // 这里吃时光机生成的 .dshbackup（长得多、内容是全站资产 + 会话 + 记忆库）。
+        Button snapImpBtn = cButton("从时光机快照还原", false);
+        snapImpBtn.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { conSnapshotImport(); }
+        });
+        col.addView(snapImpBtn, cTop(dp(8)));
 
         // ③ 三个入口
         col.addView(cSep(dp(20)));
@@ -8302,7 +8420,7 @@ public class MainActivity extends Activity {
         col.addView(cSep(0));
         col.addView(cNavRow("插件", "关掉用不到的，省上下文", conPlugSummary(), 2));
         // 这个项目的核心价值是"能在手机上自己编译自己出包"，那套环境 342MB 不塞进主包，按需下载
-        col.addView(cNavRow("内核", "切换引擎内核（实验功能）：内置 rc5 永远兜底", conKernelSummary(), 5));
+        col.addView(cNavRow("内核", "切换引擎内核（实验功能）：内置内核永远兜底", conKernelSummary(), 5));
         col.addView(cNavRow("自建环境", "在手机上自己编译 / 打包 / 签名（可选，约 193MB）", conBuildEnvSummary(), 4));
         col.addView(cSep(0));
         LinearLayout logActs = new LinearLayout(this);
@@ -8397,6 +8515,18 @@ public class MainActivity extends Activity {
         refreshConsole();
     }
 
+    /**
+     * 内置工具脚本的实际位置。
+     * 先取 payload 内核区的 tools/：它在 App 私有目录里，跟包一起发出去，
+     * 也动不到（还原 dshhome 不会覆盖内核区）；再回落到早期开发机上手工堆的 /sdcard 目录。
+     * 只认 /sdcard 那条路的话，别人装了这个包点备份只会看到「未找到备份工具脚本」。
+     */
+    private File builtinTool(String name) {
+        File bundled = new File(getFilesDir(), "payload/dshroot/lib/node_modules/@deepseek-ai/dsh/tools/" + name);
+        if (bundled.isFile()) return bundled;
+        return new File("/sdcard/DeepSeekHarness/tools/" + name);
+    }
+
     /** 触发时光机全站一键备份 */
     private void triggerSnapshotBackup() {
         conToast("正在生成时光机快照…");
@@ -8404,7 +8534,7 @@ public class MainActivity extends Activity {
             @Override public void run() {
                 try {
                     File node = new File(getFilesDir(), "payload/runtime/bin/node");
-                    File tool = new File("/sdcard/DeepSeekHarness/tools/backup.mjs");
+                    File tool = builtinTool("backup.mjs");
                     if (!tool.exists()) {
                         ui.post(new Runnable() {
                             @Override public void run() { conToast("未找到备份工具脚本"); }
@@ -8412,6 +8542,10 @@ public class MainActivity extends Activity {
                         return;
                     }
                     ProcessBuilder pb = new ProcessBuilder(node.getAbsolutePath(), tool.getAbsolutePath(), "create", "--name", "console-backup");
+                    // node 是动态链接的（libz 等），不给 LD_LIBRARY_PATH 会直接
+                    // CANNOT LINK EXECUTABLE ... library "libz.so.1" not found，
+                    // 脚本一行都跑不到。引擎自己有设，这几条裸起 node 的旁路以前漏了。
+                    pb.environment().put("LD_LIBRARY_PATH", new File(getFilesDir(), "payload/runtime/lib").getAbsolutePath());
                     pb.redirectErrorStream(true);
                     Process p = pb.start();
                     BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream(), "UTF-8"));
@@ -8861,15 +8995,66 @@ public class MainActivity extends Activity {
     }
 
     /** 只负责起引擎（文件已就绪）：健康探测 → spawnNode → 等就绪。v1.12 从 startEngine 拆出。 */
+    /**
+     * 给 profile 树补上它缺失的内核包软链（清单：payload 内
+     * dshhome/profiles/web/PROFILE-KERNEL-LINKS.txt，随包发布）。
+     *
+     * 为什么需要：插件在 profiles/web 下按裸导入解析依赖，而内核包只存在于 dshroot，
+     * 两棵树各有独立的 node_modules，互不可见。缺一个包就会让那个插件整体加载失败，
+     * 而且失败是静默的 —— 它负责的功能随后悄悄退步（工具闸门失效后，开局改回
+     * 一次性注入全部工具，按需解锁的机制形同作废）。
+     *
+     * 幂等：profile 里已存在就跳过；链指向内核树，内核升级自动跟随。
+     * 每次拉起引擎前跑一遍，profile 被重铺或手工清掉之后能自愈。
+     */
+    private void ensureProfileKernelLinks(File payload) {
+        File list = new File(payload, "dshhome/profiles/web/PROFILE-KERNEL-LINKS.txt");
+        File kernel = new File(payload, "dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai");
+        File prof = new File(payload, "dshhome/profiles/web/node_modules/@deepseek-ai");
+        if (!list.exists() || !kernel.isDirectory() || !prof.isDirectory()) return;
+        java.io.BufferedReader r = null;
+        int made = 0;
+        try {
+            r = new java.io.BufferedReader(new java.io.InputStreamReader(new java.io.FileInputStream(list), "UTF-8"));
+            String line;
+            while ((line = r.readLine()) != null) {
+                line = line.trim();
+                if (line.isEmpty() || line.startsWith("#")) continue;
+                File src = new File(kernel, line);
+                File dst = new File(prof, line);
+                if (!src.isDirectory() || dst.exists()) continue;
+                try {
+                    Os.symlink(src.getAbsolutePath(), dst.getAbsolutePath());
+                    made++;
+                } catch (Throwable t) {
+                    Log.w(TAG, "profile kernel link failed: " + line, t);
+                }
+            }
+            if (made > 0) Log.i(TAG, "profile kernel links restored: " + made);
+        } catch (Throwable t) {
+            Log.w(TAG, "ensureProfileKernelLinks failed", t);
+        } finally {
+            try { if (r != null) r.close(); } catch (Throwable ignored) {}
+        }
+    }
+
     private void launchEngine(File payload) {
+        ensureProfileKernelLinks(payload);
         if (healthOk()) {
-            starting = false;
-            engineAliveCached = true;                        // v1.13：写回缓存 → 控制台立刻显示“引擎运行中”
-            engineProbeAt = System.currentTimeMillis();
-            if (engineStartTs == 0L) engineStartTs = System.currentTimeMillis();
-            ui.post(new Runnable() { @Override public void run() { refreshConsole(); } });
-            if (!consoleVisible) loadHome();
-            return;
+            // 端口通、但本次进程从没起过引擎、日志里也捞不到令牌 —— 那是上次装包/被杀时留下的
+            // 引擎在应答。前端拿不到能配对的令牌，界面能开、消息发不出去。收掉重建。
+            if (nodeProcess == null && currentEngineTokenUrl() == null) {
+                Log.w(TAG, "engine answers but no token recoverable, recycling orphan");
+                killEngineNow();
+            } else {
+                starting = false;
+                engineAliveCached = true;                        // v1.13：写回缓存 → 控制台立刻显示“引擎运行中”
+                engineProbeAt = System.currentTimeMillis();
+                if (engineStartTs == 0L) engineStartTs = System.currentTimeMillis();
+                ui.post(new Runnable() { @Override public void run() { refreshConsole(); } });
+                if (!consoleVisible) loadHome();
+                return;
+            }
         }
         showIndeterminate("正在启动 DeepSeek Harness…");
         starting = true;
@@ -8889,11 +9074,21 @@ public class MainActivity extends Activity {
         // node 启动中虽然不响应 HTTP，但**端口已经 listen**；只要端口被占就不该再拉一个。
         // （引擎日志里 EADDRINUSE 高达 72 次 vs 成功启动 38 次，重复拉起是最高频的浪费。）
         if (portListening(enginePort)) {
-            Log.w(TAG, "port " + enginePort + " already listening, wait instead of respawning");
-            waitForServer();
-            starting = false;
-            ui.post(new Runnable() { @Override public void run() { refreshConsole(); } });
-            return;
+            // 「端口被占」有两种，处置相反：
+            //   a) 本进程起的 node 正在启动（句柄还在）→ 等它，别拉第二个；
+            //   b) 装包/被系统杀死留下的孤儿 node（句柄已丢）→ 它守着端口，可前端拿的是本次
+            //      新进程的令牌，对不上就一直是 401，干等到超时也不会好。收掉它再起一个。
+            if (nodeProcess == null || !nodeProcess.isAlive()) {
+                Log.w(TAG, "port " + enginePort + " held by an orphan node, recycling before spawn");
+                killEngineNow();
+            }
+            if (portListening(enginePort)) {
+                Log.w(TAG, "port " + enginePort + " already listening, wait instead of respawning");
+                waitForServer();
+                starting = false;
+                ui.post(new Runnable() { @Override public void run() { refreshConsole(); } });
+                return;
+            }
         }
         try {
             spawnNode(payload);
@@ -9253,12 +9448,13 @@ public class MainActivity extends Activity {
             new Thread(new Runnable() {
                 @Override public void run() {
                     try {
-                        String[] cmd = new String[] {
-                            payloadDir() + "/bin/node",
-                            "/sdcard/DeepSeekHarness/tools/tier.mjs",
-                            effort
-                        };
-                        Runtime.getRuntime().exec(cmd);
+                        ProcessBuilder pb = new ProcessBuilder(
+                                new File(getFilesDir(), "payload/runtime/bin/node").getAbsolutePath(),
+                                builtinTool("tier.mjs").getAbsolutePath(),
+                                effort);
+                        // 同上：裸起 node 必须带库路径，否则 libz 链不上、静默失败
+                        pb.environment().put("LD_LIBRARY_PATH", new File(getFilesDir(), "payload/runtime/lib").getAbsolutePath());
+                        pb.start();
                     } catch (Throwable ignored) {}
                 }
             }).start();
@@ -10430,6 +10626,120 @@ public class MainActivity extends Activity {
             return (stat.st_mode & android.system.OsConstants.S_IFMT) == android.system.OsConstants.S_IFLNK;
         } catch (android.system.ErrnoException failed) {
             throw new IOException("Cannot inspect file before backup", failed);
+        }
+    }
+
+    private void conSnapshotImport() {
+        try {
+            Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            i.addCategory(Intent.CATEGORY_OPENABLE);
+            i.setType("*/*");
+            startActivityForResult(i, REQ_SNAPSHOT_FILE);
+        } catch (Throwable t) { conToast("无法打开文件选择器：" + t.getMessage()); }
+    }
+
+    private void conSnapshotImportFromUri(final Uri uri) {
+        conDialog("从时光机快照还原",
+                "会把快照里的全站资产（记忆库 / 所有会话 / 配置 / 技能）写回本机，然后重启引擎。\n\n"
+                        + "还原前脚本会先自动存一份当前状态的安全快照，出问题还能再还原回来。\n\n"
+                        + "整个过程可能要一两分钟，别中途退出。开始还原吗？",
+                "开始还原",
+                new Runnable() { @Override public void run() { conSnapshotImportNow(uri); } },
+                "取消");
+    }
+
+    /** 只认 backup.mjs 产出的 .dshbackup 容器（魔数 DSHB），不走 readBackupZip。
+     *  两种格式长期共存：zip 是「导出全部数据」的产物，.dshbackup 是时光机的全站快照。 */
+    private void conSnapshotImportNow(final Uri uri) {
+        conToast("正在准备还原…");
+        new Thread(new Runnable() { @Override public void run() {
+            File staged = null;
+            try {
+                staged = stageBackup(uri);
+                if (!looksLikeSnapshot(staged)) {
+                    throw new IOException("这个文件不是时光机快照（头部不是 DSHB），请选「立即备份」产出的 .dshbackup");
+                }
+                File node = new File(getFilesDir(), "payload/runtime/bin/node");
+                File tool = builtinTool("backup.mjs");
+                if (!node.exists()) throw new IOException("找不到内置 node");
+                if (!tool.exists()) throw new IOException("找不到备份工具脚本 backup.mjs");
+                // 还原是整体覆盖 dshhome，没有任何回退路径：先存一份还原前快照，
+                // 这一步失败就中止，绝不能在没有后路的情况下往下走。
+                ui.post(new Runnable() { @Override public void run() { conToast("正在备份当前状态…"); }});
+                if (runBackupTool(node, tool, "create", "--name", "before-restore") != 0) {
+                    throw new IOException("还原前备份失败，已中止，数据没有被改动");
+                }
+                // 引擎正读着 dshhome，边还原边读会拿到半截文件，必须先停干净
+                killEngineNow();
+                long deadline = System.currentTimeMillis() + 8000;
+                while (System.currentTimeMillis() < deadline && portListening(enginePort)) {
+                    try { Thread.sleep(200); } catch (InterruptedException ignored) {}
+                }
+                ui.post(new Runnable() { @Override public void run() { conToast("正在还原，别退出…"); }});
+                ProcessBuilder pb = new ProcessBuilder(node.getAbsolutePath(), tool.getAbsolutePath(),
+                        "restore", staged.getAbsolutePath(), "--yes");
+                pb.environment().put("LD_LIBRARY_PATH", new File(getFilesDir(), "payload/runtime/lib").getAbsolutePath());
+                pb.redirectErrorStream(true);
+                Process p = pb.start();
+                BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream(), "UTF-8"));
+                StringBuilder sb = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    sb.append(line).append('\n');
+                    if (sb.length() > 3000) sb.delete(0, sb.length() - 3000);   // 只留尾巴，够定位即可
+                }
+                int code = p.waitFor();
+                final String tail = sb.toString().trim();
+                if (code != 0) {
+                    throw new IOException("还原脚本退出码 " + code + (tail.isEmpty() ? "" : "：" + tail));
+                }
+            } catch (Throwable t) {
+                Log.e(TAG, "snapshot import", t);
+                final String m = t.getMessage();
+                ui.post(new Runnable() { @Override public void run() { conToast("还原失败：" + m); } });
+                return;
+            } finally {
+                if (staged != null) staged.delete();
+            }
+            ui.post(new Runnable() { @Override public void run() {
+                conToast("快照已写回，正在重启引擎…");
+                refreshConsole();
+                engineStoppedByUser = false; engineStartAborted = false;
+                conEngineClick();
+            }});
+        }}, "snapshot-import").start();
+    }
+
+    /** 跑一次 backup.mjs 子命令并返回退出码；输出丢弃，只在失败时用退出码判定。 */
+    private int runBackupTool(File node, File tool, String... args) throws Exception {
+        java.util.List<String> cmd = new java.util.ArrayList<String>();
+        cmd.add(node.getAbsolutePath());
+        cmd.add(tool.getAbsolutePath());
+        for (String a : args) cmd.add(a);
+        ProcessBuilder pb = new ProcessBuilder(cmd);
+        // node 是动态链接的，App 进程环境里没有 LD_LIBRARY_PATH，不显式给就链不上 libz
+        pb.environment().put("LD_LIBRARY_PATH", new File(getFilesDir(), "payload/runtime/lib").getAbsolutePath());
+        pb.redirectErrorStream(true);
+        Process p = pb.start();
+        BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream(), "UTF-8"));
+        try {
+            while (reader.readLine() != null) { /* 读干净，避免子进程写满管道阻塞 */ }
+        } catch (Exception ignored) {}
+        return p.waitFor();
+    }
+
+    /** .dshbackup 头 4 字节是 ASCII "DSHB"：选错文件时立刻报错，别等脚本跑完一整轮才说不行。 */
+    private boolean looksLikeSnapshot(File f) {
+        java.io.FileInputStream in = null;
+        try {
+            in = new java.io.FileInputStream(f);
+            byte[] magic = new byte[4];
+            if (in.read(magic) != 4) return false;
+            return magic[0] == 'D' && magic[1] == 'S' && magic[2] == 'H' && magic[3] == 'B';
+        } catch (Throwable t) {
+            return false;
+        } finally {
+            try { if (in != null) in.close(); } catch (Throwable ignored) {}
         }
     }
 

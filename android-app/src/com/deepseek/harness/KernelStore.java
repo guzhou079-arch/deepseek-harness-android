@@ -101,6 +101,45 @@ public final class KernelStore {
         return new File(versionDir(c, ver), ".kernel-ok");
     }
 
+    // ---------------------------------------------------------------- revision 体检
+
+    /** 内置树的 revision（assets/dshroot_revision.txt，每次出包都会变）；读不到返回空串。 */
+    public static String builtinRevision(Context c) {
+        InputStream in = null;
+        try {
+            in = c.getAssets().open("dshroot_revision.txt");
+            byte[] buf = new byte[64];
+            int n = in.read(buf);
+            return n <= 0 ? "" : new String(buf, 0, n, "UTF-8").trim();
+        } catch (Throwable t) {
+            return "";
+        } finally {
+            try { if (in != null) in.close(); } catch (Throwable ignored) {}
+        }
+    }
+
+    /** 内核树自己的 revision（&lt;tree&gt;/REVISION）；读不到返回空串。 */
+    private static String treeRevision(File tree) {
+        try {
+            File f = new File(tree, "REVISION");
+            return f.isFile() ? readText(f).trim() : "";
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
+    /**
+     * 指针是不是「比内置树旧」。
+     *
+     * REVISION 是出包时间戳（yyyyMMddHHmmss），等长时字典序即时间序，长度不同也能判出谁旧。
+     * 任一方读不到就让判旧不成立 —— 读不到文件不能成为顶掉别人内核的理由。
+     */
+    private static boolean isOlder(String activeRev, String builtinRev) {
+        if (activeRev == null || builtinRev == null) return false;
+        if (activeRev.length() == 0 || builtinRev.length() == 0) return false;
+        return activeRev.compareTo(builtinRev) < 0;
+    }
+
     // ---------------------------------------------------------------- active 指针
 
     /** 当前激活版本；没激活（= 用内置树）返回 null。 */
@@ -139,6 +178,14 @@ public final class KernelStore {
                 Log.w(TAG, "active kernel " + ver + " 缺 .kernel-ok 标记，回落内置树");
                 return null;
             }
+            // 指针指向的内核比内置树旧 → 当未激活。目录与指针都留着，装包时 parkIfStale 负责挪走
+            // 指针，这里兜住「没走装包这条路」的情况（改外部模式、手工改 active.json 等）。
+            String activeRev = treeRevision(tree);
+            String builtinRev = builtinRevision(c);
+            if (isOlder(activeRev, builtinRev)) {
+                Log.w(TAG, "active kernel " + ver + " (" + activeRev + ") 比内置树 (" + builtinRev + ") 旧，回落内置树");
+                return null;
+            }
             return tree;
         } catch (Throwable t) {
             Log.w(TAG, "resolve active failed", t);
@@ -172,6 +219,42 @@ public final class KernelStore {
                 if (f.exists()) f.delete();
             } catch (Throwable t) {
                 Log.w(TAG, "deactivate failed", t);
+            }
+        }
+    }
+
+    /**
+     * 升级后指针体检：active.json 指向的内核比内置树旧，就把指针改名挪开（不删，可回滚）。
+     *
+     * 为什么必须在装包这条路上做：热切过内核的机器升级 App 只换内置树，active.json 照样把引擎
+     * 指回旧内核，前端于是永远停在旧版本，新包怎么发都到不了这台机器。改名保留原指针，
+     * 真要回旧内核时把 active.json.stale-* 改回 active.json 即可。只判「更旧」，
+     * 比内置树新的内核（例如自己装的更新版）不受影响。
+     *
+     * @return 挪走后的文件名；没有挪动返回 null。
+     */
+    public static String parkIfStale(Context c) {
+        synchronized (LOCK) {
+            try {
+                File f = activeFile(c);
+                if (!f.isFile()) return null;
+                String ver = activeVersion(c);
+                if (ver == null) return null;
+                String activeRev = treeRevision(treeDir(c, ver));
+                String builtinRev = builtinRevision(c);
+                if (!isOlder(activeRev, builtinRev)) return null;
+                File stale = new File(f.getParentFile(), "active.json.stale-" + builtinRev);
+                if (stale.exists()) stale.delete();
+                if (!f.renameTo(stale)) {
+                    Log.w(TAG, "旧内核指针挪不开，保留原样：" + f);
+                    return null;
+                }
+                Log.w(TAG, "active kernel " + ver + " (" + activeRev + ") 比内置树 (" + builtinRev
+                        + ") 旧，指针已挪到 " + stale.getName() + "，本次改用内置树");
+                return stale.getName();
+            } catch (Throwable t) {
+                Log.w(TAG, "park stale pointer failed", t);
+                return null;
             }
         }
     }

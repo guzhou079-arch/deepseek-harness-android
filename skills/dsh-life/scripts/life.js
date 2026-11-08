@@ -111,7 +111,7 @@ function openDB() {
       value TEXT
     );
 
-    -- 忽略名单：用户点名「这条别记」的通知原文（如招行入账其实是内部划转）。
+    -- 忽略名单：点名「这条别记」的通知原文（如招行入账其实是内部划转）。
     -- 只删 transactions 行不够 —— 桥缓冲回放会把同一条原文重新插回来。
     CREATE TABLE IF NOT EXISTS ignored_texts (
       full_text TEXT PRIMARY KEY,
@@ -251,7 +251,7 @@ function excludeReason(fullText) {
   if (/(招商银行|招行)/.test(s) && /(一卡通|账户)入账/.test(s) && !/(工资|代发|奖金|薪资|退款|退费|返还|冲正|退回)/.test(s)) return '招行卡内划转，非收入';
   return null;
 }
-/** 忽略名单命中：这条通知原文用户说过「别记」，以后再来（含缓冲重放）一律不入账。 */
+/** 忽略名单命中：这条通知原文点名过「别记」，以后再来（含缓冲重放）一律不入账。 */
 function isIgnoredText(db, fullText) {
   if (!fullText) return false;
   try { return !!db.prepare('SELECT 1 FROM ignored_texts WHERE full_text = ? LIMIT 1').get(fullText); } catch (_) { return false; }
@@ -906,7 +906,7 @@ class CronScheduler {
       //    绕过了 armWatchdog 的开关 —— 当时只验了那道闸，漏了这条。
       // ⛔ 而且：builtin / cmd / notify 这三种**守护进程自己就能执行**（免费，见下面 runBuiltinTask
       //    和上面的 execSync/sendNotification），根本不需要叫 AI。给它们排闹钟只会得到
-      //    「把任务名当用户消息提交给 AI」= 白花一个完整会话。
+      //    「把任务名当用户消息提交给 AI」= 白花一个完整会话（这一路已去掉）。
       //    本地执行不受影响：cron 表里的行照旧被守护进程按点跑。
       const localRun = ['builtin', 'cmd', 'notify'].includes(task.action_type);
       if (nextRun && !localRun && task.id !== WATCHDOG_ID) {
@@ -2015,7 +2015,7 @@ function bankKeyOf(account, fullText) {
 }
 
 /** 只从 account 字段认银行（不看正文）。
- *  为什么不能看正文：手工补录行的正文常写着「实际由招行万事达卡支付，按用户要求
+ *  为什么不能看正文：手工补录行的正文常写着「实际由招行万事达卡支付，按要求
  *  计入农行借记卡」，按正文认卡会把这类行从本卡区间里误排掉（2026-11-05 实测）。
  *  认不出返回 null —— 这类行（手动补记/第三方支付）一律算进本卡区间，宁可算进来
  *  让差额暴露，也不要静默漏掉。 */
@@ -2113,7 +2113,7 @@ function balanceChainSegments(db, days = 30) {
     //    （境外退款 ¥0.18、COMMANDCODE 扣款 ¥9.41）被算进农行区间，11/1 两段
     //    因此报假差（−0.18 / +9.41），--fix 会照假差补错账。
     //    判据只看 account 字段、不看正文：手工补录行正文写着「实际由招行支付，
-    //    按用户要求计入农行借记卡」，按正文认卡会把它从本卡区间里误排掉。
+    //    按要求计入农行借记卡」，按正文认卡会把它从本卡区间里误排掉。
     const bankA = accountBankName(a.account);
     const bankB = accountBankName(b.account);
     if (bankA && bankB && bankA !== bankB) continue; // 跨卡锚点不成段
@@ -2322,7 +2322,7 @@ function getLifeStatus() {
   }
 
   // 本月（自然月）合计 —— 面板上并排显示「月结余」用（结余 = 本月收入 − 本月支出）。
-  // 记账 App 里每个月有结余，我们面板上也该看得到，省得手动算。
+  // 记账 App 里每个月有结余，面板上也该看得到，省得手动算。
   const monthStart = new Date();
   monthStart.setDate(1);
   monthStart.setHours(0, 0, 0, 0);
@@ -2340,7 +2340,7 @@ function getLifeStatus() {
   const txs = db.prepare(`SELECT id, type, amount, merchant, category, account, created_at FROM transactions WHERE created_at >= ? ORDER BY created_at DESC, id DESC LIMIT 20`).all(todayStart.getTime());
   const txTotal = db.prepare(`SELECT COUNT(*) AS c FROM transactions`).get().c || 0;
   // 今日总笔数：卡片最多列 20 条，超过了要明说「还有 N 笔未显示」，不许静默截断
-  //（曾被"看不见的截断"坑过：余额行被挤出窗口，界面上一片正常）。
+  //（2026-10-15 正是被"看不见的截断"坑过：余额行被挤出窗口，界面上一片正常）。
   const txToday = db.prepare(`SELECT COUNT(*) AS c FROM transactions WHERE created_at >= ?`).get(todayStart.getTime()).c || 0;
   const tasks = db.prepare(`SELECT id, name, cron_expr, action_type, enabled, last_status, next_run_at FROM scheduled_tasks ORDER BY id ASC`).all();
   const scenes = db.prepare(`SELECT id, name, type, description, enabled, last_triggered_at FROM scenes ORDER BY created_at ASC`).all();

@@ -18,6 +18,7 @@
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
+const { isSkipped } = require('./overlay-skip.js');
 const crypto = require('crypto');
 const { readZip, writeZip } = require('./ziptool.js');
 
@@ -95,7 +96,10 @@ function walk(dir, rel, map) {
     if (st.isDirectory()) walk(f, r, map);
     // 2026-10-18：`.bak-before-<事项>-<时间戳>` 这类备份过去能漏进 payload（只挡了 .bak 结尾）。
     // overlay 里每加一次备份就多一个垃圾文件进包，直接按前缀挡掉。
-    else if (!/(\.(md5|sha256|bak)$)|(\.bak-)/.test(n)) map.set(r, fs.readFileSync(f));
+    // 2026-11-07：跳过集含 .md5/.sha256/.orig/.rej/.DS_Store/~，与 selfbuild.sh 的 ovl_find
+    // **同源**（lib/overlay-skip.js）。以前各写一份，find 挡的 walk 不挡、walk 挡的 find 不挡，
+    // 会出现「文件进了包，但 dshroot_forced.txt 里没有」的清单漂移。
+    else if (!isSkipped(n)) map.set(r, fs.readFileSync(f));
   }
   return map;
 }
@@ -142,7 +146,9 @@ else if (cmd === 'payload-patch') {
   // writeZip 见到 raw 就不重压缩、不重算 crc，所以输出与输入逐条等价。
   const es = readZip(zipIn, { load: false });
   let rep = 0, add = 0;
-  const missing = [];
+  const added = [];       // overlay 里 payload 原本没有的路径：必须出声，不许静默追加
+  const rewritten = [];   // 本轮真的被改写的条目：写进 .patched.txt，供事后核对「补丁到底跑没跑」
+  const suspicious = [];  // 可疑追加（塞进已存在的包 / 开发备份名 / 整棵目录不存在）
   const pending = new Map(map);
   const fd = fs.openSync(zipIn, 'r');
   function* entries() {
@@ -151,23 +157,120 @@ else if (cmd === 'payload-patch') {
         if (pending.has(e.name)) {
           const buf = pending.get(e.name);
           log(`  替换 ${e.name}（${buf.length} 字节）→ ${md5(buf)}`);
-          pending.delete(e.name); rep++;
+          pending.delete(e.name); rep++; rewritten.push(e.name);
           yield { name: e.name, data: buf };
         } else {
           yield { ...e, raw: readRawAt(fd, e.csize, e.dataOffset) };
         }
       }
       for (const [name, buf] of pending) {
-        add++;
+        add++; added.push(name);
         log(`  新增 ${name}（${buf.length} 字节）`);
         yield { name, data: buf, store: false };
       }
     } finally { fs.closeSync(fd); }
   }
-  // 保险：overlay 里形如 <pkg>/lib/index.js 但 payload 里不存在同名条目 → 必须报出来（打错路径会静默无效）
-  if (missing.length) die('overlay 路径在 payload 中不存在: ' + missing.join(', '));
   writeZip(entries(), zipOut);
   log(`✓ 写出 ${zipOut}（替换 ${rep}，新增 ${add}，总条目 ${es.length + add}，${fs.statSync(zipOut).size} 字节）`);
+  // 2026-11-07：补丁痕迹必须可核对，光看产物不行。
+  // 背景：14 个真补丁早就烘进 295 出货包，于是「patch 阶段没跑」和「跑了但结果与底包相同」
+  // 在产物上完全看不出区别；哪次漏跑，谁都不会发现。所以两样东西必须留下：
+  //   ① 一行计数：overlay 多少文件 → 实际改写多少条 / 新增多少条；
+  //   ② 一份 .patched.txt：被改写的条目名，事后能逐条核对。
+  // 另外和 forced 清单对一遍：forced 清单（assets/dshroot_forced.txt）决定设备端开机强刷哪些文件，
+  // 改写过的条目**必须**在里面，否则包内是新的、设备上还是旧的，症状是「改了没生效」。
+  const patchedSide = zipOut + '.patched.txt';
+  fs.writeFileSync(patchedSide, rewritten.length ? rewritten.join('\n') + '\n' : '');
+  const norm = (n) => n.replace(/^dshroot\//, '');
+  // forced 清单只管**内核树**。`assets/dshroot_forced.txt` 是设备端「开机强制覆盖哪些文件」的白名单，
+  // 而真正发出去的两份（1.48/295 共 119 条、1.48.1/297 共 123 条）里一条 dshhome 都没有 ——
+  // dshhome/（DSH_HOME 种子：技能、profiles、员工名册）和 pet/（电子宠物）属**用户空间**，
+  // 设备侧另有 DSHHOME_CONFIG_PATHS（官方配置，随包覆盖）与 DSHHOME_USER_PATHS（用户数据，永不覆盖）
+  // 两张白名单在管；把它们塞进 forced 会连用户数据一起盖掉。
+  // 所以这里只对内核树要求「入清单」，用户空间按前缀豁免 —— 且是**列名**，不是「非内核即豁免」：
+  // 将来 payload 里出现新的顶层段，默认仍然要求入清单（会红），要豁免就显式加一行。
+  const NON_FORCED_SCOPE = ['dshhome/', 'pet/'];
+  let forcedNote = '（未提供 forced 清单，跳过对账）';
+  const forcedList = process.env.DSH_FORCED_LIST;
+  if (forcedList && fs.existsSync(forcedList)) {
+    const forced = new Set(fs.readFileSync(forcedList, 'utf8').split('\n').map((x) => norm(x.trim())).filter(Boolean));
+    const touched = [...rewritten, ...added];            // 新增条目同样要进 forced 清单，否则设备端不会强刷
+    const inKernelScope = (n) => !NON_FORCED_SCOPE.some((p) => n.startsWith(p));
+    const notForced = touched.map(norm).filter((n) => inKernelScope(n) && !forced.has(n));
+    const userSpace = touched.map(norm).filter((n) => !inKernelScope(n));
+    forcedNote = notForced.length
+      ? `⚠ forced 清单 ${forced.size} 条，但本轮动过的 ${notForced.length} 条内核文件不在其中（设备端开机不会强刷，改了等于没改）：${notForced.slice(0, 5).join(', ')}`
+      : `✓ 本轮动过的内核文件（改写 ${rewritten.length} + 新增 ${added.length} 共 ${touched.length} 条里的 ${touched.length - userSpace.length} 条）全在 forced 清单里（清单共 ${forced.size} 条）；另有 ${userSpace.length} 条用户空间种子（${NON_FORCED_SCOPE.join(' ')}）按设备侧白名单处理，不进 forced`;
+    if (notForced.length) process.exitCode = 1;
+  }
+  log(`✓ patch 痕迹：overlay ${map.size} 个文件 → 改写 ${rep} 条 / 新增 ${add} 条（清单 ${patchedSide}）`);
+  log(`  ${forcedNote}`);
+  // 2026-11-07 修死代码：原来这里是
+  //     if (missing.length) die('overlay 路径在 payload 中不存在: ...')
+  // 但 `missing` 声明后从来没人 push，而这一行还在 entries() 生成器**之前**求值 ——
+  // 等于"overlay 多出来的路径静默追加进 payload"完全没人管。.bak / 打错路径能混进包，
+  // 走的就是这条通道（payload-patch 只按路径整文件覆盖，不做世代校验）。
+  //
+  // 追加本身是合法能力（新插件、新技能、locale 靠它），所以分三档：
+  //   默认     ：整棵目录在 payload 里都不存在的路径 → 直接 die（打错路径的典型形态）；
+  //              塞进已存在的包、开发备份名 → 只警告（版本升级会合法地多出文件）；
+  //   STRICT=1 ：任何追加都 die（发行构建用，宁可停也别猜）；
+  //   STRICT=0 ：连默认那一档也降级成警告（开发调试用）。
+  // 为什么默认要挡「整棵目录不存在」：296 那次的 .bak 之所以能进包，就是因为追加路径
+  // 没人管；而 `dshroot/nonexistent-dir/x.js` 这种形状没有任何合法版本升级会长出来。
+  if (added.length) {
+    const side = zipOut + '.added.txt';
+    fs.writeFileSync(side, added.join('\n') + '\n');
+    log(`⚠ overlay 里有 ${added.length} 条路径 payload 本来没有，已作为新文件追加（清单：${side}）`);
+    const allNames = new Set(es.map((e) => e.name));
+    // payload 里已存在的目录集合：用来判断「这棵目录树本来在不在」
+    const knownDirs = new Set();
+    for (const n of allNames) {
+      let d = n;
+      while (true) {
+        const k = d.lastIndexOf('/');
+        if (k < 0) break;
+        d = d.slice(0, k);
+        knownDirs.add(d);
+      }
+    }
+    // 这些容器下长出全新子树是正常的（新包/新技能/新 profile 文件）
+    const NEW_SUBTREE_OK = [/\/node_modules\//, /^dshhome\/skills\//, /^dshhome\/profiles\//];
+    const mode = process.env.DSH_PATCH_STRICT; // '1' 全严格 / '0' 全警告 / 其它=默认
+    const fatal = [];
+    for (const n of added) {
+      const tag = [];
+      if (/(^|\/)(\.[^/]*\.)?[^/]*\.(bak|orig|old|rej|swp|tmp)(-|$)/.test(n) || /~$/.test(n)) tag.push('开发备份名');
+      let wholeNewTree = false;
+      const parent = n.slice(0, n.lastIndexOf('/'));
+      if (parent && !knownDirs.has(parent) && !NEW_SUBTREE_OK.some((rx) => rx.test(n))) {
+        tag.push('整棵目录在 payload 里不存在');
+        wholeNewTree = true;
+      }
+      // 找最近的、payload 里已有 package.json 的祖先目录 = 已存在的包 → 往老包里塞新文件多半是路径打错。
+      // 走到 node_modules 边界就停：那是"新包安放在该在的位置"，不是打错路径；版本升级也会合法多出文件。
+      let d = parent;
+      for (let i = 0; i < 6 && d && d.includes('/'); i++) {
+        if (d.slice(d.lastIndexOf('/') + 1) === 'node_modules') break;
+        if (allNames.has(d + '/package.json')) { tag.push(`塞进已存在的包 ${d.slice(d.lastIndexOf('/') + 1)}`); break; }
+        d = d.slice(0, d.lastIndexOf('/'));
+      }
+      if (tag.length) {
+        log(`    ⚠ ${n}  ← ${tag.join(' / ')}`);
+        suspicious.push(`    ${n}  ← ${tag.join(' / ')}`);
+      }
+      if (mode === '1' || (wholeNewTree && mode !== '0')) fatal.push(`${n}（${tag.join(' / ')}）`);
+    }
+    if (suspicious.length) {
+      log(`⚠ 其中 ${suspicious.length} 条可疑（塞进已存在的包 / 开发备份名，默认只警告）`);
+    }
+    if (fatal.length) {
+      fs.rmSync(zipOut, { force: true });
+      die(`overlay 追加了 ${fatal.length} 条不该存在的路径，已删除输出、不打下去了：\n    ${fatal.join('\n    ')}\n` +
+          `  判据：整棵目录在 payload 里不存在（多半是打错路径），或 DSH_PATCH_STRICT=1。\n` +
+          `  真要新增这棵目录：确认路径无误后加 DSH_PATCH_STRICT=0 重跑，并在构建日志里留一句为什么。`);
+    }
+  }
 }
 
 else if (cmd === 'apk-pack') {
@@ -332,8 +435,9 @@ else if (cmd === 'check') {
   for (const raw of lines) {
     const line = raw.trim();
     if (!line || line.startsWith('#')) continue;
-    const [rel, wantMd5, keyword, policy = 'all'] = line.split('|').map((s) => (s || '').trim());
+    const [rel, wantMd5, keyword, policy = 'all', why = '', kwmin] = line.split('|').map((s) => (s || '').trim());
     if (!['all', 'local'].includes(policy)) die('未知清单策略: ' + policy);
+    if (!keyword) die(`清单条目缺关键字列（路径后面第二根竖线是空的）: ${rel}`);
     if (args.includes('--dist') && policy === 'local') { skip++; continue; }
     let buf = null;
     if (isZip) {
@@ -346,18 +450,23 @@ else if (cmd === 'check') {
     if (!buf) { fail++; fails.push(`${rel}\n    ✗ 文件不存在`); continue; }
     const got = md5(buf);
     const okMd5 = wantMd5 === '-' || !wantMd5 || got === wantMd5;
+    // 关键字门槛：老清单只有「命中 ≥1」，新清单第 6 列写死最低次数。
+    // 只查 >0 挡不住「补丁被削掉一半但这个词还在」的退化。
+    const kwMin = keyword === '-' ? 0 : (kwmin === undefined || kwmin === '' ? 1 : parseInt(kwmin, 10));
+    if (Number.isNaN(kwMin)) die(`清单条目第 6 列（最低命中次数）不是数字: ${rel}`);
     let okKw = true, kwCount = 0;
     if (keyword && keyword !== '-') {
       kwCount = (buf.toString('utf8').split(keyword).length - 1);
-      okKw = kwCount > 0;
+      okKw = kwCount >= kwMin;
     }
     if (okMd5 && okKw) { pass++; }
     else {
       fail++;
-      const why = [];
-      if (!okMd5) why.push(`md5 ${got} ≠ 期望 ${wantMd5}`);
-      if (!okKw) why.push(`关键字「${keyword}」命中 0 次`);
-      fails.push(`${rel}\n    ✗ ${why.join('；')}`);
+      const p = [];
+      if (!okMd5) p.push(`md5 ${got} ≠ 期望 ${wantMd5}`);
+      if (!okKw) p.push(`关键字「${keyword}」命中 ${kwCount} 次，要求 ≥${kwMin} 次`);
+      if (!okKw && why) p.push(`这个词代表: ${why}`);
+      fails.push(`${rel}\n    ✗ ${p.join('；')}`);
     }
   }
   log(`检查 ${isZip ? 'zip' : '目录'}: ${target}`);

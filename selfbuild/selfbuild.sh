@@ -39,7 +39,9 @@ PY=/data/user/0/com.deepseek.harness/files/payload/bin/python3
 TC=/data/user/0/com.deepseek.harness/files/toolchain
 KEYS=/data/user/0/com.deepseek.harness/files/keys
 PAYLOAD_DIR=/data/user/0/com.deepseek.harness/files/payload
-BASE=${DSH_BASE:-$WORK/base-current-175.apk}
+# 底包的路径与 sha256 只在 lib/base-apk.js 里声明一处（以前这里默认 175、发行动用 295，
+# 于是 `selfbuild.sh base` 刷新的是 175，出了包却用 295 那份 —— 换了骨架等于没换，产物上也看不出来）。
+BASE=${DSH_BASE:-$("$NODE" "$SB/lib/base-apk.js" --path)}
 export LD_LIBRARY_PATH="/data/user/0/com.deepseek.harness/files/payload/runtime/lib:${LD_LIBRARY_PATH:-}"
 # 换内核后底本不再是 1.38 的 payload-old.zip；用 DSH_PAY_OLD 指到新内核底本（默认仍是老的）
 PAY_OLD=${DSH_PAY_OLD:-$WORK/payload-old.zip}
@@ -76,6 +78,10 @@ base)
   ;;
 payload)
   [ -f "$BASE" ] || { echo "✗ 没有骨架，先跑 base（或手动放 $BASE）"; exit 1; }
+  # 默认底包必须与声明一致：同名不同内容的包换进来，产物看起来可能一模一样，事后无法反推。
+  if [ -z "${DSH_BASE:-}" ]; then
+    "$NODE" "$SB/lib/base-apk.js" --verify || { echo '✗ 默认底包校验失败（见上）；要用别的底包请显式设 DSH_BASE'; exit 1; }
+  fi
   "$NODE" "$SB/lib/selfbuild.js" payload-extract "$BASE" "$PAY_OLD"
   ;;
 patch)
@@ -94,19 +100,61 @@ patch)
   # v118/dsh-patches/overlay（30 条历史补丁，部分路径在 payload 里早已不存在）——
   # build-overlay 里的内核文件改得再对，设备上 fast 同步也不会覆盖，新包等于白打。
   # 两个来源取并集，重复由 sort -u 收敛。
-  ( cd "$SB/build-overlay" && find dshroot -type f | sed 's|^dshroot/||' ) > "$WORK/forced-a.txt"
-  ( cd "$SB/../v118/dsh-patches/overlay" && find . -type f | sed 's|^\./||; s|^dshroot/||' ) > "$WORK/forced-b.txt"
+  # 2026-11-07：find 必须过滤开发备份。v1.48 包里 assets/dshroot_forced.txt 曾列进
+  # client.js.bak-0.2.1rc5-20261106 / dsh-bg.css.bak-hashdrift-20261106 —— 就是这两行 find
+  # 不过滤带出来的（payload-patch 的 walk 会滤，但 forced 清单走的是 find，不是 walk）。
+  # 跳过集**唯一真相是 lib/overlay-skip.js**：这里的 find 参数由它生成，与 payload-patch 的
+  # walk 同源。以前各写一份名单，find 挡 .DS_Store/~/.orig/.rej 而 walk 挡 .md5/.sha256，
+  # 往 overlay 放个 .md5 就会出现「进包了但清单不知道」——两份规则必然漂移，所以合并。
+  SKIP_ARGS=$("$NODE" -e 'process.stdout.write(require(process.argv[1]).findArgs().join(" "))' "$SB/lib/overlay-skip.js")
+  ovl_find() {
+    # shellcheck disable=SC2086  # 这里就要分词成 ! -name x 若干组
+    find "$1" -type f $SKIP_ARGS
+  }
+  ( cd "$SB/build-overlay" && ovl_find dshroot | sed 's|^dshroot/||' ) > "$WORK/forced-a.txt"
+  ( cd "$SB/../v118/dsh-patches/overlay" && ovl_find . | sed 's|^\./||; s|^dshroot/||' ) > "$WORK/forced-b.txt"
   cat "$WORK/forced-a.txt" "$WORK/forced-b.txt" | sed '/^$/d' | sed 's|^|dshroot/|' | sort -u > "$WORK/dshroot_forced.txt"
   rm -f "$WORK/forced-a.txt" "$WORK/forced-b.txt"
   echo "  REVISION(构建号)=$REV_STAMP；overlay 强制清单 $(wc -l < "$WORK/dshroot_forced.txt") 条"
-  "$NODE" "$SB/lib/selfbuild.js" payload-patch "$PAY_OLD" "$PAY_NEW" "$SB/build-overlay"
+  # DSH_FORCED_LIST：让 payload-patch 自己对账「动的条目是否都在 forced 清单里」。
+  # 缺一条就说明设备端开机不会强刷它 —— 包内是新的、手机上是旧的，症状是「改了没生效」。
+  DSH_FORCED_LIST="$WORK/dshroot_forced.txt" "$NODE" "$SB/lib/selfbuild.js" payload-patch "$PAY_OLD" "$PAY_NEW" "$SB/build-overlay"
 
-  # ⚠️ 门禁：overlay 里的 open-in-app/lib/client.js 是"上游干净版"，
-  #    而背景图靠这个文件里的一段本地注入才会加载。overlay 一覆盖，
-  #    注入就没了 → 装上去背景图完全不显示。
-  #    2026-10-01 就是这么把已发布的 v1.27 弄坏的（实测 v1.26 有注入、v1.27 = 0）。
-  #    这里一应用完 overlay 就验，缺了直接让出包失败。
-  "$NODE" "$SB/scripts/check-bg-injection.js"     "$SB/build-overlay/dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-open-in-app/lib/client.js"
+  # ⚠️ 门禁：背景图注入必须真在**随包发出去的那份 payload** 里。
+  #    背景图靠 open-in-app/lib/client.js 里的一段本地注入才会被加载（/dsh-bg.css?rev=）；
+  #    而这段代码历史上只存在于骨架 APK 的那份文件里，overlay 里那份是"上游干净版"——
+  #    overlay 一覆盖注入就没了，装上去背景图完全不显示（v1.27 发布版就是这么坏的）。
+  #    所以判据是**结果**：payload 里那条条目里必须有注入。
+  #    overlay 若还留着这个文件，也必须有注入 —— 那种情况它会在 patch 阶段盖掉好版本，
+  #    正是事故的形状；两处都拦，缺一处都不算验过。
+  BG_ENTRY="dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-open-in-app/lib/client.js"
+  BG_OVL="$SB/build-overlay/$BG_ENTRY"
+  BG_ZIP_OK=0
+  "$NODE" "$SB/scripts/check-bg-injection.js" --zip "$PAY_NEW" --entry "$BG_ENTRY" && BG_ZIP_OK=1
+  if [ -f "$BG_OVL" ]; then
+    "$NODE" "$SB/scripts/check-bg-injection.js" "$BG_OVL" || {
+      echo "✗ overlay 里那份 $BG_ENTRY 没有背景图注入。它会在 patch 阶段覆盖掉带注入的版本，"
+      echo "  装上去背景图不显示（v1.27 事故）。要么从 overlay 删掉这个文件（底包那份是对的），"
+      echo "  要么把它换成带注入的版本。"
+      exit 1
+    }
+  fi
+  if [ "$BG_ZIP_OK" != 1 ]; then
+    echo "✗ 背景图注入整体丢失，不是覆盖问题："
+    echo "  底包 295 里那条 $BG_ENTRY（61,189 B）是带注入的，现在包里也没有、overlay 里也没有，"
+    echo "  说明这条文件整个没进 payload（或进的是别处的干净版本）→ 装上去背景图不会加载。"
+    echo "  修：确认底包是 base-current-295.apk，且 overlay 没有同名文件把它盖掉。"
+    exit 1
+  fi
+
+  # 内核基线（2026-11-07）：包里的内核字节必须等于「底包 + overlay」推出来的字节。
+  # 判据是**推导**出来的，不是上一份已发货包，也不是手写 md5 清单：
+  #   拿已发货包当基线 → 上次的错会被继承（底包 295 自己就是脏的）；
+  #   拿 checks.manifest 的 md5 当基线 → 那份 md5 是 patch-check.sh --regen 从手机运行树刷的，
+  #   改一次 overlay 就必红，红得没有意义。期望值能推导，这道闸门才可能常绿。
+  # overlay 里有就取 overlay、没有就取底包 —— 这正好是 patch 的定义。
+  # 关键字判定（补丁语义还在不在）留在 verify 阶段做，这里只管字节。
+  "$NODE" "$SB/scripts/check-kernel-baseline.js" --payload "$PAY_NEW" --base-payload "$PAY_OLD" --overlay "$SB/build-overlay" || exit 1
   ;;
 pack)
   # 用法: pack [--dex <classes.dex>] [--asset <本地文件>:<APK 内条目名>]...
@@ -195,16 +243,33 @@ verify)
   [ -f "$APK" ] || { echo '✗ 需要明确的已签名 last-apk.txt 产物'; exit 1; }
   echo '— 必须通过真实签名验证 —'
   sh "$RUN" java -cp /tc/apksigner.jar com.android.apksigner.ApkSignerTool verify --verbose --print-certs "$APK"
-  echo '— 包内 payload 必须通过清单 —'
+  echo '— 包内 payload 必须等于「底包 + overlay」推出来的那份 —'
   "$NODE" "$SB/lib/selfbuild.js" payload-extract "$APK" "$WORK/payload-check.zip" >/dev/null
-  set +e
-  # 发行包（DSH_DIST=1）跳过清单里 policy=local 的行（例如只属于本机自建包的个人壁纸）；
-  # 本机自建包仍全量校验，隐私资产缺失不会被悄悄放过。
-  if [ "${DSH_DIST:-0}" = "1" ]; then
-    "$NODE" "$SB/lib/selfbuild.js" check "$WORK/payload-check.zip" "$SB/checks.manifest" --dist
+  # 2026-11-07 整改：原来这里是「拿 checks.manifest 的 md5 当闸门」，而那份 md5 是
+  # patch-check.sh --regen 从**手机运行时树**刷出来的 —— 判据的来源和被测对象不是同一个东西：
+  # 改 overlay → 打包 → 拿手机上的旧内容当期望 → 必红；想绿只能先装机再 regen，
+  # 可那时验的又是已经装上的那份。改成两件事分开问：
+  #   · 包对不对：字节必须等于「底包 + overlay」推导值（红就 exit 1）
+  #   · 手机上被改过什么：只出漂移报告，不参与判定
+  # checks.manifest 的关键字列还留着 —— 但只判「补丁语义还在不在」，不再认它的 md5；
+  # 而且分两类报：本次打包丢的（红） vs 基线里就没有的（⚠ 基线缺口，补丁在更早换代时丢了）。
+  # 注：strip 是 make-dist-apk.sh 里的事；将来若对 dist 包跑 verify，被 strip 摘掉的条目会判「丢了」，
+  #     届时按 strip 清单加豁免，别为此放宽这道闸门。
+  KB_ARGS="--payload $WORK/payload-check.zip --overlay $SB/build-overlay --keywords $SB/checks.manifest"
+  if [ -f "$BASE" ]; then
+    KB_ARGS="$KB_ARGS --base $BASE"
+  elif [ -f "$PAY_OLD" ]; then
+    KB_ARGS="$KB_ARGS --base-payload $PAY_OLD"
   else
-    "$NODE" "$SB/lib/selfbuild.js" check "$WORK/payload-check.zip" "$SB/checks.manifest"
+    echo "✗ 内核基线没有判据：底包 APK（$BASE）和底包 payload（$PAY_OLD）都不在"
+    rm -f "$WORK/payload-check.zip"
+    exit 1
   fi
+  LIVE_TREE=${DSH_LIVE_PAYLOAD:-/data/user/0/com.deepseek.harness/files/payload}
+  if [ -d "$LIVE_TREE" ]; then KB_ARGS="$KB_ARGS --drift $LIVE_TREE"; fi
+  set +e
+  # shellcheck disable=SC2086  # KB_ARGS 要分词成若干组 --k v
+  "$NODE" "$SB/scripts/check-kernel-baseline.js" $KB_ARGS
   CHK=$?
   set -e
   [ "$(realpath "$WORK/payload-check.zip")" = "$(realpath "$WORK")/payload-check.zip" ] || exit 1
@@ -253,7 +318,19 @@ all)
   sh "$SB/selfbuild.sh" patch
   sh "$SB/selfbuild.sh" pack
   sh "$SB/selfbuild.sh" mark
+  # 2026-11-07：这一步原来在这个序列里根本没有 —— payload/patch/pack/mark/sign 每步都返回 0，
+  #   签出来的包里清单还是骨架的 1.51.1/281。App 的 checkForUpdate 拿 GitHub tag 比本机
+  #   versionName，于是装了自建包的人永远认为「已是最新」，收不到任何更新提示。
+  PLAN=$("$NODE" "$SB/scripts/version-check.js" --plan) || { echo "✗ 版本闸门未通过"; exit 1; }
+  VN=$(printf '%s\n' "$PLAN" | sed -n 's/^name=//p')
+  VC=$(printf '%s\n' "$PLAN" | sed -n 's/^code=//p')
+  [ -n "$VN" ] && [ -n "$VC" ] || { echo "✗ 版本计划解析失败：$PLAN"; exit 1; }
+  echo "— 写入版本 $VN($VC)"
+  sh "$SB/selfbuild.sh" version "$VN" "$VC"
   sh "$SB/selfbuild.sh" sign
+  # 补步骤还不够：步骤会被人删、会被参数绕过，所以读回签名包自己判一次。
+  #   这一行是断言不是流程 —— 包里的号不等于声明的号就 exit 1，宁可不往下走。
+  "$NODE" "$SB/scripts/assert-apk-version.js" "$(cat "$WORK/last-apk.txt")" --name "$VN" --code "$VC" || exit 1
   sh "$SB/selfbuild.sh" verify
   ;;
 *)

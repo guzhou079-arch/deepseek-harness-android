@@ -28,18 +28,26 @@ if (!fs.existsSync(BACKUP_DIR)) {
 }
 
 // 收集目录下的所有文件
-function walk(dir, base = '') {
+function walk(dir, base = '', depth = 0) {
   const results = [];
   if (!fs.existsSync(dir)) return results;
+  if (depth > 40) return results;
   const list = fs.readdirSync(dir);
   for (const item of list) {
     // 忽略锁文件、临时目录与临时缓存
     if (item === '.DS_Store' || item.endsWith('.lock') || item.endsWith('.tmp') || item === 'cache') continue;
     const full = path.join(dir, item);
     const rel = base ? `${base}/${item}` : item;
-    const stat = fs.statSync(full);
+    // 死链（指向已卸载插件残留的 .bin 软链）会让 statSync 抛 ENOENT；
+    // 跳过这一条就行，别为一条坏链让整次备份白跑。
+    let stat;
+    try {
+      stat = fs.statSync(full);
+    } catch {
+      continue;
+    }
     if (stat.isDirectory()) {
-      results.push(...walk(full, rel));
+      results.push(...walk(full, rel, depth + 1));
     } else if (stat.isFile()) {
       results.push({ fullPath: full, relPath: rel, size: stat.size, mtime: stat.mtimeMs });
     }

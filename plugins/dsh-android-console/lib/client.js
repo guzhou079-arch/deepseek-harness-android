@@ -218,7 +218,7 @@ window.__ModuleLoader__.load({
       const [voiceHub, setVoiceHub] = react.useState({
         config: {
           hotword_enabled: '1',
-          wake_words: '小鲸鱼,DeepSeek',
+          wake_words: '流光,小鲸鱼,DeepSeek',
           wake_mode: 'single_breath',
           stt_engine: 'system',
           tts_engine: 'edge',
@@ -852,7 +852,7 @@ window.__ModuleLoader__.load({
 
     /**
      * 全部账目页：按天分组、每页 60 笔、可「加载更多」。
-     * 入口在「💰 今日记账与消费流水」卡片底部 —— 那张卡片只列**今天**，
+     * 入口在「💰 今日记账与消费流水」卡片底部 —— 那张卡片只列**今天**（用户 2026-10-15 要求），
      * 更早的账都在这里翻。
      */
     function LedgerPage({ onBack }) {
@@ -953,6 +953,102 @@ window.__ModuleLoader__.load({
       ] });
     }
 
+    /**
+     * 时光机快照页：列出 /sdcard/Download/DSH_Backups 里的快照，选中一个还原。
+     *
+     * 还原是不可逆动作（覆盖记忆库、会话与配置），所以点「还原」先出确认弹层。
+     * 真正干活的是插件 node 侧的 /android-console-snapshot，它转手交给备份脚本；
+     * 脚本自带哈希校验与还原前安全快照，这里只负责挑包与报结果。
+     */
+    function SnapshotPage(props) {
+      const onBack = props.onBack || function() {};
+      const [items, setItems] = react.useState(null);
+      const [err, setErr] = react.useState('');
+      const [pick, setPick] = react.useState(null);
+      const [busy, setBusy] = react.useState('');
+      const [result, setResult] = react.useState(null);
+      const load = react.useCallback(function() {
+        setErr('');
+        fetch('/android-console-snapshot', { credentials: 'same-origin', cache: 'no-store' })
+          .then(function(r) { return r.json(); })
+          .then(function(d) {
+            if (d && d.ok) {
+              setItems(d.items || []);
+              if (d.missing) setErr('备份目录里还没有快照，先点「立即备份」生成一个。');
+            } else {
+              setErr((d && d.error) || '读取失败');
+            }
+          })
+          .catch(function() { setErr('读取失败'); });
+      }, []);
+      react.useEffect(function() { load(); }, [load]);
+      const sizeText = function(n) {
+        if (!n) return '0 B';
+        if (n < 1048576) return (n / 1024).toFixed(0) + ' KB';
+        return (n / 1048576).toFixed(1) + ' MB';
+      };
+      const timeText = function(s) {
+        if (!s) return '';
+        const d = new Date(s);
+        if (isNaN(d.getTime())) return String(s).replace('T', ' ').slice(0, 19);
+        const pad = function(n) { return String(n).length < 2 ? '0' + n : String(n); };
+        return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+      };
+      const restore = function(item) {
+        setPick(null);
+        setBusy(item.file);
+        setResult(null);
+        fetch('/android-console-snapshot', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ file: item.file }),
+        })
+          .then(function(r) { return r.json(); })
+          .then(function(d) { setResult(d || { ok: false, error: '没有返回内容' }); })
+          .catch(function(e) { setResult({ ok: false, error: '请求失败：' + (e && e.message ? e.message : '网络中断') }); })
+          .then(function() { setBusy(''); });
+      };
+      const rows = (items || []).map(function(item) {
+        return jsx(Row, {
+          key: item.file,
+          title: timeText(item.createdAt) || item.file,
+          desc: sizeText(item.size) + ' · ' + item.sessions + ' 个会话 · ' + item.files + ' 个文件' + (item.tag ? ' · ' + item.tag : ''),
+          right: jsx(Button, {
+            variant: 'outline',
+            size: 'sm',
+            disabled: !!busy,
+            onClick: function(ev) { ev.stopPropagation(); setPick(item); },
+            children: busy === item.file ? '还原中…' : '还原',
+          }),
+        }, item.file);
+      });
+      return jsxs('div', { className: 'ctl-root', children: [
+        jsx(Back, { title: '时光机快照', onBack: onBack }),
+        jsx(Note, { children: '这里列出 /sdcard/Download/DSH_Backups 里的快照包。还原会覆盖当前的记忆库、会话与配置；脚本执行前会自动打一份 BeforeRestore 安全快照，中途出错可以拿它回滚。还原完成后重启一次引擎才会完全生效。' }),
+        jsx('div', { className: 'ctl-sep' }),
+        items === null && !err ? jsx(Row, { title: '正在读取…', desc: '' }) : null,
+        err ? jsx(Row, { title: '读取失败', desc: err, descWarn: true }) : null,
+        items && items.length === 0 && !err ? jsx(Row, { title: '还没有快照', desc: '回到上一页点「立即备份」生成第一个。' }) : null,
+        rows,
+        busy ? jsx(Row, { title: '正在还原…', desc: '包越大越久，几分钟都可能。别退出这一页。' }) : null,
+        result && result.ok ? jsx(Row, { title: '还原完成', desc: '到控制台首页重启一次引擎，新数据才会完全生效。' }) : null,
+        result && !result.ok ? jsx(Row, { title: '还原失败', desc: (result.error || '未知错误') + '（可用 BeforeRestore 安全快照回滚）', descWarn: true }) : null,
+        jsx('div', { className: 'ctl-bar', children: jsx(Button, { variant: 'ghost', size: 'sm', disabled: !!busy, onClick: load, children: '刷新列表' }) }),
+        pick ? jsx(Modal, {
+          open: true,
+          onClose: function() { setPick(null); },
+          title: '还原这份快照',
+          closeLabel: '关闭',
+          description: '把 ' + timeText(pick.createdAt) + ' 的快照还原回来？当前记忆库、会话与配置会被覆盖。脚本会先自动打一份安全快照。',
+          footer: jsxs(Fragment, { children: [
+            jsx(Button, { variant: 'outline', onClick: function() { setPick(null); }, children: '取消' }),
+            jsx(Button, { variant: 'primary', onClick: function() { restore(pick); }, children: '确认还原' }),
+          ] }),
+        }) : null,
+      ] });
+    }
+
     function ConsoleSection(ownerProps) {
       ensureCss();
       const close = ownerProps && typeof ownerProps.close === 'function' ? ownerProps.close : () => {};
@@ -998,6 +1094,8 @@ window.__ModuleLoader__.load({
       if (page === 'models') return jsx(ModelRoutingPage, { services: ownerProps.modelServices, onBack: () => setPage('main') });
 
       if (page === 'ledger') return jsx(LedgerPage, { onBack: () => setPage('life') });
+
+      if (page === 'snapshot') return jsx(SnapshotPage, { onBack: () => setPage('main') });
 
       if (!state) {
         return jsx('div', { className: 'ctl-empty', children: [
@@ -1130,7 +1228,7 @@ window.__ModuleLoader__.load({
         const fresh = store.filter((b) => !b.installed);
         return jsxs('div', { className: 'ctl-root', children: [
           jsx(Back, { title: '引擎内核', onBack: () => setPage('main') }),
-          jsx(Note, { children: '内核就是引擎跑的那棵 node 包（bin.js + node_modules）。内核包是 tar.gz + manifest.json，从 /sdcard 装进应用私有目录（内部 ext4），不占主屏可见空间。内置 rc5 永远在 APK 里：切换失败、内核坏掉、启动超时，都会自动回落，不会有起不来的风险。' }),
+          jsx(Note, { children: '内核就是引擎跑的那棵 node 包（bin.js + node_modules）。内核包是 tar.gz + manifest.json，从 /sdcard 装进应用私有目录（内部 ext4），不占主屏可见空间。内置内核永远随 APK 一起：切换失败、内核坏掉、启动超时，都会自动回落，不会有起不来的风险。' }),
           jsx('div', { className: 'ctl-sep' }),
           jsx(Row, {
             title: '当前：' + (kn.activeText || '内置内核'),
@@ -1151,7 +1249,7 @@ window.__ModuleLoader__.load({
                 variant: 'ghost',
                 size: 'sm',
                 disabled: b.active,
-                onClick: () => ask('删除内核 ' + b.version, '删掉这份已解压的内核，不影响内置 rc5。', 'kernel.remove', b.version, '已删除'),
+                onClick: () => ask('删除内核 ' + b.version, '删掉这份已解压的内核，不影响内置内核。', 'kernel.remove', b.version, '已删除'),
                 children: '删除',
               }),
             ] }),
@@ -1172,7 +1270,7 @@ window.__ModuleLoader__.load({
             variant: 'ghost',
             size: 'sm',
             disabled: !active,
-            onClick: () => ask('回退到内置内核', '删掉激活记录，下次启动引擎用 APK 里的 rc5。受管内核出问题时用。', 'kernel.deactivate', '', '已回退，下次启动引擎生效'),
+            onClick: () => ask('回退到内置内核', '删掉激活记录，下次启动引擎用 APK 内置的那份。受管内核出问题时用。', 'kernel.deactivate', '', '已回退，下次启动引擎生效'),
             children: '回退到内置内核',
           }) }),
           confirmBar,
@@ -1186,7 +1284,7 @@ window.__ModuleLoader__.load({
         const vCfg = voiceHub.config || {};
         const presets = voiceHub.presets || [];
         const isHotword = vCfg.hotword_enabled === '1' || vo.hotwordEnabled;
-        const currentWords = vCfg.wake_words || vo.wakeWords || '小鲸鱼,DeepSeek';
+        const currentWords = vCfg.wake_words || vo.wakeWords || '流光,小鲸鱼,DeepSeek';
         const currentVoice = vCfg.tts_voice || 'zh-CN-XiaoxiaoNeural';
         const currentSpeed = vCfg.tts_speed || '1.0';
         const currentEngine = vCfg.tts_engine || 'edge';
@@ -1929,7 +2027,7 @@ window.__ModuleLoader__.load({
         }),
         jsx(Row, {
           title: '引擎内核',
-          desc: '换运行时内核版本（实验）；内置 rc5 永远兜底',
+          desc: '换运行时内核版本（实验）；内置内核永远兜底',
           right: jsxs(Fragment, { children: [
             jsx('span', { className: 'ctl-state', children: (state.kernel && state.kernel.activeText) || '内置内核' }),
             jsx(primitives.IconChevronRightOutlineRegular, { size: 14 }),
@@ -1948,8 +2046,11 @@ window.__ModuleLoader__.load({
         }),
         jsx(Row, {
           title: '时光机全站备份',
-          desc: '一键打包记忆库、历史会话与配置',
-          right: jsx(Button, { variant: 'outline', size: 'sm', onClick: () => run('snapshot', ''), children: '立即备份' }),
+          desc: '一键打包记忆库、历史会话与配置；「还原」可回到某个快照',
+          right: jsxs(Fragment, { children: [
+            jsx(Button, { variant: 'outline', size: 'sm', onClick: (ev) => { ev.stopPropagation(); run('snapshot', '', '正在打包快照…'); }, children: '立即备份' }),
+            jsx(Button, { variant: 'outline', size: 'sm', onClick: (ev) => { ev.stopPropagation(); setPage('snapshot'); }, children: '还原' }),
+          ] }),
         }),
         jsx(Row, {
           title: '界面主题',

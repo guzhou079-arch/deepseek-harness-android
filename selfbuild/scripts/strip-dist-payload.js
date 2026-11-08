@@ -23,11 +23,14 @@ const { readZip, writeZip } = require(path.join(__dirname, '..', 'lib', 'ziptool
 
 const zip = process.argv[2];
 const checkOnly = process.argv.includes('--check-only');
-if (!zip) { console.error('用法：node strip-dist-payload.js <payload.zip> [--check-only]'); process.exit(1); }
+// DSH_KEEP_USER_BG=1 的自用包：机主壁纸要随包走，否则 CSS 引用了它必然 404
+// （dsh-bg.css 的 url 与这张图是一体的，只留一个等于留下一个坏引用）。
+const keepUserBg = process.argv.includes('--keep-user-bg');
+if (!zip) { console.error('用法：node strip-dist-payload.js <payload.zip> [--check-only] [--keep-user-bg]'); process.exit(1); }
 
 // 发行包里绝不该出现的东西
 const BAD = [
-  [/dsh-web-frontend\/dist\/dsh-bg-user\.(png|jpe?g|webp)$/i, '个人壁纸'],
+  ...(keepUserBg ? [] : [[/dsh-web-frontend\/dist\/dsh-bg-user\.(png|jpe?g|webp)$/i, '个人壁纸']]),
   [/whale-shota\/(assets|preview)\//i, '桌宠源图/预览'],
   [/archive-2\.5d\/layers\//i, '派生美术'],
   [/MainActivity\.java\.(bak|pre-lan)/i, '源码备份'],
@@ -67,7 +70,21 @@ const KEEP = new Set([
   'dshroot/CHANGELOG.md',
   'dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/CHANGELOG.md',
 ]);
-const matchBad = (name) => (KEEP.has(name) ? null : BAD.find(([re]) => re.test(name)) || null);
+// 精确放行（先查放行，再看 BAD）：`dshhome/tools/` 是 `dshhome/skills/dsh-crew/` 技能的运行时依赖
+// —— 那份 SKILL.md 正文写着 `node $DSH_HOME/tools/crew.js`，工具不在包里，技能就指向空路径
+// （新装用户必然踩，老用户靠盘上副本侥幸不踩）。所以它属功能不属个人数据，必须随包。
+//
+// 为什么是文件级而不是把 `tools` 加进上面那条 dshhome 白名单：目录级放行等于赌「这个目录
+// 以后再出现的都是同类东西」。今天是「目录级白名单把该留的删了」，明天就是「把不该留的放进来」。
+// 逐文件列名后，往里新丢一个文件默认仍是「删」——要发就得在这里显式加一行，谁加谁负责。
+//
+// weekly.js 不在放行之列：它默认把初稿写进 `crew/quill/inbox/`，写死了成员名，
+// 服务对象是特定成员而不是通用功能（且进包文件不许带人称）。
+const ALLOW = new Set([
+  'dshhome/tools/crew.js',
+  'dshhome/tools/crew-selftest.sh',
+]);
+const matchBad = (name) => (ALLOW.has(name) || KEEP.has(name) ? null : BAD.find(([re]) => re.test(name)) || null);
 
 const es = readZip(zip);
 const hits = es.filter((e) => matchBad(e.name));

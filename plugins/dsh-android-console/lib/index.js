@@ -1,6 +1,6 @@
 /** Android console data routes. Native actions remain in the WebView bridge. */
 import { createRequire } from 'node:module';
-import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync, openSync, readSync, closeSync, readdirSync, statSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 
@@ -8,6 +8,35 @@ const require = createRequire(import.meta.url);
 const packagedLife = process.env.DSH_HOME && join(process.env.DSH_HOME, 'skills/dsh-life/scripts/life.js');
 /** 生活守护脚本：优先用包内那份，退回 /sdcard 的运行副本。 */
 const lifeScriptPath = packagedLife && existsSync(packagedLife) ? packagedLife : '/sdcard/DeepSeekHarness/tools/life.js';
+
+// —— 时光机快照仓库（列表 / 还原）——
+// 控制台原先只挂了「立即备份」，还原只有命令行入口，普通用户够不到。
+// 这里把备份脚本包成两条 HTTP：读清单只读文件头、不碰压缩体；还原交给脚本自己做，
+// 它自带哈希校验与还原前安全快照。
+const snapshotDir = process.env.DSH_BACKUP_DIR || '/sdcard/Download/DSH_Backups';
+const snapshotScript = (() => {
+  const packaged = process.env.DSH_HOME && join(process.env.DSH_HOME, 'skills/dsh-backup/scripts/backup.mjs');
+  if (packaged && existsSync(packaged)) return packaged;
+  return existsSync('/sdcard/DeepSeekHarness/tools/backup.mjs') ? '/sdcard/DeepSeekHarness/tools/backup.mjs' : null;
+})();
+const SNAPSHOT_FILE = /^[A-Za-z0-9._-]+\.dshbackup$/;
+
+/** 只读快照头：魔数 + 清单长度 + 清单 JSON。整包动辄几百 MB，不进内存。 */
+function readSnapshotManifest(filePath) {
+  const fd = openSync(filePath, 'r');
+  try {
+    const head = Buffer.alloc(8);
+    if (readSync(fd, head, 0, 8, 0) !== 8) throw new Error('文件已损坏：长度过短');
+    if (head.subarray(0, 4).toString('utf8') !== 'DSHB') throw new Error('未知备份格式');
+    const manifestLen = head.readUInt32BE(4);
+    if (manifestLen <= 0 || manifestLen > 4194304) throw new Error('清单长度异常');
+    const manifestBuf = Buffer.alloc(manifestLen);
+    if (readSync(fd, manifestBuf, 0, manifestLen, 8) !== manifestLen) throw new Error('文件已损坏：元数据截断');
+    return JSON.parse(manifestBuf.toString('utf8'));
+  } finally {
+    closeSync(fd);
+  }
+}
 
 /**
  * App 启动即拉起生活中枢守护（幂等，只在引擎启动时打一次）。
@@ -169,5 +198,85 @@ export function apply(ctx) {
         return send(200, { ok: true, saved: clean.length });
       },
     }), 'android-console: model roles route');
+
+    // 时光机快照仓库：GET 列快照 / POST 还原。
+    // 走 HTTP 而不加原生动作：原生只认 apk 里编译进去的 action id，加一个要重新出包；
+    // 备份脚本本来就在 node 侧，插件自己就能调它。
+    webCtx.effect(() => webCtx.webServer.register({
+      kind: 'prefix',
+      path: '/android-console-snapshot',
+      handler: async (req, res) => {
+        if (!admitConsoleRequest(webCtx, req, res)) return;
+        const send = (status, body) => {
+          res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+          res.end(JSON.stringify(body));
+        };
+        if (req.method === 'GET') {
+          let names = [];
+          try { names = readdirSync(snapshotDir); }
+          catch (_e) { return send(200, { ok: true, dir: snapshotDir, items: [], missing: true }); }
+          const items = [];
+          for (const name of names) {
+            if (!SNAPSHOT_FILE.test(name)) continue;
+            const full = join(snapshotDir, name);
+            try {
+              const stat = statSync(full);
+              if (!stat.isFile()) continue;
+              const manifest = readSnapshotManifest(full);
+              const stats = manifest.stats || {};
+              items.push({
+                file: name,
+                size: stat.size,
+                mtime: stat.mtimeMs,
+                createdAt: manifest.createdAt || '',
+                tag: manifest.tag || '',
+                sessions: stats.sessionsCount || 0,
+                memoryBytes: stats.memoryDbSize || 0,
+                files: stats.filesCount || 0,
+              });
+            } catch (_e) { /* 坏包跳过，不挡其它快照 */ }
+          }
+          items.sort((a, b) => (a.file < b.file ? 1 : -1));
+          return send(200, { ok: true, dir: snapshotDir, items });
+        }
+        if (req.method !== 'POST') return send(405, { ok: false, error: 'method not allowed' });
+        const chunks = [];
+        let size = 0;
+        try {
+          for await (const chunk of req) {
+            const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+            size += buf.length;
+            if (size > 8192) return send(413, { ok: false, error: 'too large' });
+            chunks.push(buf);
+          }
+        } catch (_e) { return send(400, { ok: false, error: 'read failed' }); }
+        let body;
+        try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); }
+        catch (_e) { return send(400, { ok: false, error: 'bad json' }); }
+        const name = body && typeof body.file === 'string' ? body.file : '';
+        if (!SNAPSHOT_FILE.test(name)) return send(400, { ok: false, error: 'bad file name' });
+        const target = join(snapshotDir, name);
+        if (!existsSync(target)) return send(404, { ok: false, error: 'snapshot not found' });
+        if (!snapshotScript) return send(500, { ok: false, error: 'backup script missing' });
+        const result = await new Promise((resolve) => {
+          let out = '';
+          let child;
+          try {
+            child = spawn(process.execPath, [snapshotScript, 'restore', target, '--yes'], { stdio: ['ignore', 'pipe', 'pipe'] });
+          } catch (error) {
+            resolve({ ok: false, error: error instanceof Error ? error.message : String(error), log: '' });
+            return;
+          }
+          const cap = (chunk) => { out += chunk.toString(); if (out.length > 65536) out = out.slice(-65536); };
+          child.stdout.on('data', cap);
+          child.stderr.on('data', cap);
+          // 几百 MB 的包实测分钟级；给足 20 分钟，超时就杀掉，别让请求永远挂着。
+          const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_e) {} }, 20 * 60 * 1000);
+          child.on('error', (error) => { clearTimeout(timer); resolve({ ok: false, error: error.message, log: out }); });
+          child.on('close', (code) => { clearTimeout(timer); resolve({ ok: code === 0, code: code, log: out }); });
+        });
+        return send(result.ok ? 200 : 500, result);
+      },
+    }), 'android-console: snapshot route');
   });
 }

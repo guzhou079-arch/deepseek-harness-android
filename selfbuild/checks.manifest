@@ -7,61 +7,61 @@
 # App /overlay 实际返回的 visible/appForeground/fluid/vscreen/debug 五个字段 ——
 # 此前 additionalProperties:false 导致每次调用都被输出校验打回（工具必报错）。
 # 2026-10-26：三个特权插件统一使用 App 探测并传入的 ROOT_SU；仅更新这三条的预期 MD5。
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-android/lib/index.js|2837a44fce0da5f2f341b11d40670e00|appShellCmd
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-android/lib/index.js|2837a44fce0da5f2f341b11d40670e00|appShellCmd|all||2
 # ⚠️ 2026-10-15 更新 md5：该插件在 overlay 里故意加了「定时任务查看/取消走 3081 桥」
 #    与 schedule 回传 taskId/triggerAt（+80 行，df53d58a→0ec8ea14）。不是随机漂移：
 #    同一批未发布功能，Java 侧有 ScheduleBridge/ScheduleAlarms/ScheduledTaskStore。
 #    注意别用 `patch-check.sh --regen` 修这条 —— 它按**装机运行副本**重算，
 #    而副本还是旧版，会把这次漂移洗白。
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-shizuku/lib/index.js|23f5332c5cc92f5bedaf0df8ba79ca20|appShellCmd
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-shizuku/lib/index.js|23f5332c5cc92f5bedaf0df8ba79ca20|appShellCmd|all||3
 # ② 无障碍：三个 render 不能吞真实结果（v1.14）+ 通知读取 3 工具（v1.23）
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-accessibility/lib/index.js|a7ae1f251cb055d8dcda4a3de4688a0f|renderA11yStatus
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-accessibility/lib/index.js|a7ae1f251cb055d8dcda4a3de4688a0f|android_notifications_wait
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-accessibility/lib/index.js|a7ae1f251cb055d8dcda4a3de4688a0f|renderA11yStatus|all||2
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-accessibility/lib/index.js|a7ae1f251cb055d8dcda4a3de4688a0f|android_notifications_wait|all||1
 # ③ NFC 读卡（v1.16）
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-nfc/lib/index.js|83c552775dab64b32a697a08a58b82a0|nfcPost
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-nfc/lib/index.js|83c552775dab64b32a697a08a58b82a0|nfcPost|all||3
 # ④ 虚拟屏（移植自 Operit）
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-vscreen/lib/index.js|903d8579ec4c1f0dfebcab515298ecfb|android_vscreen_create
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-vscreen/lib/index.js|3ab7b0534269f458cf59e0b2c749c27d|android_vscreen_create|all||5
 # ⑤ 交付文件「打开」的引擎侧 android 分支（v1.15）
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-native-command/lib/index.js|9e7299c51ef5183ee6c31cc1fe803681|androidBridgeOpen
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-native-command/lib/index.js|9e7299c51ef5183ee6c31cc1fe803681|androidBridgeOpen|all||3
 # ⑤b app-boot 的 warn/error 落地日志（DSH_ANDROID_PLUGIN_LOG）—— 2026-11-06 补进清单
 # 这条补丁此前**没有脚本、不在 overlay、不在清单**，全靠人肉 diff，是排障唯一的眼睛
 # （2026-11-05 就是靠它看见「6 个自研包 failed to import」）。现在由
 # selfbuild/scripts/patch-app-boot-plugin-log.js 定点变换，脚本已用 pristine rc.5 原包
 # 反向验证过：变换结果与装机副本**逐字节一致**。
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-app-boot/lib/index.js|7d75a6c2a12442df88c3f85dc5110276|androidPluginLog
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-app-boot/lib/index.js|c756b9d593bc7c6a14156de62eb8d4b5|androidPluginLog|all|把插件 warn/error 落到 DSH_ANDROID_PLUGIN_LOG；丢了这个词，起不来时没有任何日志可看|5
 # ⑥ 移动端 UI 改造
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-layout/lib/client.js|12d4084bf0c805536c803e04aac78ca8|sidebarCollapsed
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-layout/lib/client.js|83edf83815dd741195cc9ea2b64852a2|sidebarCollapsed|all||11
 # ui-cordis：2026-09-30 查实 —— 旧期望值 499056c4… 是「cordis 插件按钮」补丁(header.utilities)
 # 在老内核时代的 md5；该标记在 0.2.0 bundle 里确实已不存在（实测命中 0 次），补丁随之作废。
 # 当前 md5 = APK payload 里的上游原版（实测与 payload 逐字节一致）。
 # 结论：漂移源于清单过期，文件本身健康。只做漂移检测。
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-cordis/lib/client.js|7fc35ed60a574463083ebfbec2607ed2|-
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/mobile.css|04d3fa17942558e0ea74581f752b3917|role="tooltip"
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-cordis/lib/client.js|7fc35ed60a574463083ebfbec2607ed2|-|all|没有补丁，只做漂移检测（见上方注释），所以不设关键字|0
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/mobile.css|f957dac672f2f80d81af0796dc21d075|role="tooltip"|all||1
 # ⑦ v1.24：静态资源门禁（非 index 资产也要过围栏+cookie 鉴权，堵住用户背景图等无鉴权可读面）
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-host-frontend-static/lib/index.js|562f5de090f0923bbbb9d5925b75d272|guardAsset
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-host-frontend-static/lib/index.js|d2fc943953f6c7ff508369525fb28811|assetRefusal|all|-|1
 # ⑧ v1.28：两条客户端路由加鉴权 —— **那一版已作废并隔离**（改 inject 把引擎装到起不来，
 #    详见 PATCH-NOTES-v1.28-postmortem.md；文件在 selfbuild/work/quarantine-v128/）
 # ⑨ v1.30：同样两条路由，换成**懒取 connection**的安全变体，已过隔离预检
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-modules/lib/index.js|0294e09f6bd035099eb3b4fd06a43de9|__verdict.rejection
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-hmr/lib/index.js|8c4b260c5bf8894beabc54e8cbe73ce2|__verdict.rejection
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-modules/lib/index.js|ec11dc0b6d6b36c5238cced56b72f7f2|requestRejection|all|两条客户端路由的懒取 connection 门禁；丢了这个词，鉴权缺口回来了|1
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-hmr/lib/index.js|8c4b260c5bf8894beabc54e8cbe73ce2|__verdict.rejection|all||4
 # ⑩ v1.31：update-check 状态路由加懒门禁
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-update-check/lib/index.js|1ee407849236643b41ab354e3ff8b02e|__verdict.rejection
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-update-check/lib/index.js|1ee407849236643b41ab354e3ff8b02e|__verdict.rejection|all||4
 # ⑪ v1.31：背景图资产进 payload（重装/重解压不再丢）
 #    ⚠ dsh-bg-user.png 只存在于**本机自建包**；发行包由 strip-dist-payload.js 主动剔除（隐私），
 #      所以这一行标 local —— 发行校验跳过它，本机自建包仍照常校验。
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/dsh-bg.svg|83e42b419ed900dcdcba7f1e6b9e1650|svg
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/dsh-bg-user.png|c4b5a66b33ea99892a76f2c485beed1d|-|local
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-open-in-app/lib/client.js|fb5cca87fab0b347b373a54509504f31|dsh-user-bg
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/dsh-bg.svg|83e42b419ed900dcdcba7f1e6b9e1650|svg|all||4
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/dsh-bg-user.png|c4b5a66b33ea99892a76f2c485beed1d|-|local|本机专用背景图，发行包主动剔除（policy=local），字节无法用关键字判语义，只判存在与 md5|0
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-open-in-app/lib/client.js|4118281f195e95e4658b09f209f5b3a4|dsh-user-bg|all||1
 # ⑫ v1.32：局域网绑定需要 DSH_ALLOW_LAN=1（默认仍拒绝 0.0.0.0）
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-app/lib/startup.js|d43e847fd89abedb7b8bcfa2c50206b1|DSH_ALLOW_LAN
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-app/lib/startup.js|d43e847fd89abedb7b8bcfa2c50206b1|DSH_ALLOW_LAN|all||1
 # ⑬ v1.35 起：应用更新日志（随包分发 + 界面可打开 /CHANGELOG.md）
 #    ⛔ 这两条**不钉 md5**，只验「文件在 + 还是更新日志」：正文每发一版都会加章节，
 #       钉死 md5 = 每次发版都必然过期。实测它已连续过期 4 次（724934d7 → 08238f81 →
 #       e6eb41e7 → 88ea18c3），而 verify 里的 `|| true` 又把它吞了 → 四版没人发现。
 #       内容对不对由发版前人工过目保证，不由 md5 保证（md5 在此只制造假警报）。
 #    ⚠ 顺带一条：只换 dex 的包（不动 payload）里这份日志来自骨架版本，本来就比 overlay 旧。
-dshroot/CHANGELOG.md|b853168662b1c413bacee24fb17430b5|更新日志
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/CHANGELOG.md|b853168662b1c413bacee24fb17430b5|更新日志
+dshroot/CHANGELOG.md|85507fbbd1fa32fdeffb0350d92bfe52|更新日志|all||5
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/CHANGELOG.md|b853168662b1c413bacee24fb17430b5|更新日志|all||5
 # ⑭ v1.36：账户 UI —— 放开上游「桌面独占」门禁（apply 首行 dshDesktop 检查）
 #    刻意不注入全局 dshDesktop，以免挤掉 settings-models 的 API Key 引导。
 #    ⚠ 2026-10-17 换 0.2.1 时发现：上游自己把这道门禁去掉了（apply 里只剩
@@ -75,47 +75,47 @@ dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-fron
 #    ② 登录流程不开弹窗：`window.open("about:blank")` → null，拿到授权地址后
 #       用 `window.location.assign()` 走主框架导航（App 的 shouldOverrideUrlLoading 交给系统浏览器）。
 #    关键字改成 `target: "_self"`：本补丁一旦丢就判失败，别让「没反应」再回来。
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/node-addon-require-builtin/lib/index.js|23c1201e436009f11de735dae37cd763|Android 适配
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/node-addon-system/lib/flock.js|38f9f04fc739afe95a6072ba2118f618|Lazy POSIX flock entry
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/node-addon-require-builtin/lib/index.js|598f272bb06180e78184813aedd97d05|js-expose-internals|all|这个 shim 的唯一存在理由：Android 没有原生 require-builtin 产物，靠 --expose-internals 冒充；getBindingInfo() 的 backend 字段就必须是 js-expose-internals，词没了说明替身没生效（真值来自运行期，不是注释）。注：旧 md5 23c1201e… 是别的树上的，一起校正|1
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/node-addon-system/lib/flock.js|38f9f04fc739afe95a6072ba2118f618|Lazy POSIX flock entry|all||1
 # ⑮ v1.37（rc.2 修复·问题3）：bash-local 的 sandboxMode 覆盖必须进 overlay。
 #    为什么以前不需要：rc.1 时代这个 getter 是**基础包 payload 自带**的，不在我们 overlay 里；
 #    rc.2 内核层一覆盖就把它顶没了 → dsh-permission-presets 构造抛 "no sandboxMode"
 #    → permission 不激活 → 所有会话 prompt 被拒（session/agent-busy）。这也是 rc.2 上机失败的直接原因。
 #    补丁脚本：selfbuild/scripts/patch-bash-local-sandbox.js（幂等、带真解析+语义校验）
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-bash-local/lib/index.js|6f9dab7fe2d3d1eb018655bf272956cf|get sandboxMode
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-bash-local/lib/index.js|6f9dab7fe2d3d1eb018655bf272956cf|get sandboxMode|all||1
 
 # ⑯ v1.38（2026-09-30）：登录成功后把 App 自动拉回前台。
 #    平台的「打开应用」按钮用本机未注册的 scheme，点了没反应（实测）；
 #    改为引擎直接调 App 特权桥执行 am start（shell uid 2000）。
 #    补丁脚本：selfbuild/scripts/patch-bring-to-front.js
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-deepseek-account-platform/lib/index.js|c83acb5ad065aa1e80ecd651731a64bb|dsh-android-patch v4 (bring-to-front)
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/index.html|e9618f5235598ccd3b2dc45ae80d3808|/mobile.css
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/mobile.js|ad907fd1fc84e4da84501e45c7eb2f50|dsh-update-banner
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-deepseek-account-platform/lib/index.js|c83acb5ad065aa1e80ecd651731a64bb|dsh-android-patch v4 (bring-to-front)|all||1
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/index.html|e869e305d7148c95d07b5b100938bb49|/mobile.css|all||1
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/mobile.js|c79cab9a143c7ec9d149d2028093d979|dsh-update-banner|all||4
 # ④ Android 运行环境适配（2026-10-03 rc.2 事故后补录：这 6 个文件的补丁原先只手工塞在 payload 里，
 #    换内核时随上游改动一起被覆盖 → 每轮 EACCES。纳入清单后，装机前的 verify 就能拦住）
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/index.js|4c0b92b8f85f030b51aa7da75ce46b27|open(currentPath, "wx")
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-fs-local/lib/index.js|9612532ae447891802d15fb144862fc6|isHardlinkUnsupported
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-attachment-local/lib/index.js|b5e9b6cb09ef34747c6e9449cfaf2f94|sharp-shim
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-llm-deepseek/lib/index.js|5dcbccf6481423d825eeee58752326f7|isAttachmentError
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-ptc-runtime-node/lib/index.js|2222f584f928ed1c056bd193d38d8d7f|LD_LIBRARY_PATH
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-fs-search/lib/index.js|a4e290d7e60914351f0173c9ed0941eb|ripgrep is unavailable
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/index.js|790253ee14cec22c133256bd180ca708|open(currentPath, "wx")|all||1
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-fs-local/lib/index.js|0baf3997dddc60eb58d945d87ca7e2f3|isHardlinkUnsupported|all||2
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-attachment-local/lib/index.js|79fb0d08ac8e40fdd32ca8d9d68bb586|sharp-shim|all||3
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-llm-deepseek/lib/index.js|2d8c330c0f4686268b485cb268eca939|isAttachmentError|all|把附件读取失败识别成可读错误而不是崩；丢了这个词，发图片/文件会整轮失败|2
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-ptc-runtime-node/lib/index.js|44125b6d058c0ffe349f91606934f011|LD_LIBRARY_PATH|all||2
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-fs-search/lib/index.js|f7d91050202b47b617c0b98fcdf9a988|ripgrep is unavailable|all||1
 
 # ② 分享进来的可见性与落盘副本（2026-10-15 事故：两份副本里服务的是"瘦"的那份，
 #    且"到货卡片"只挂在会话页 → 用户分享进来的文件收下了却没人看见。
 #    这两条把「带 shell.overlay 到货横幅的那一份」钉死，两份副本都必须一致）
 # 2026-11-04：设置页「控制台」加 QQ 群入口（群号 1050918023），md5 随改动更新。
-dshhome/profiles/web/node_modules/dsh-android-console/lib/client.js|f5eb4795b30f63b94af38d7078ef6782|android-share-notice
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-android-console/lib/client.js|f5eb4795b30f63b94af38d7078ef6782|android-share-notice
+dshhome/profiles/web/node_modules/dsh-android-console/lib/client.js|e7c419b4e2ebac6dfe8ccb1a88bb4808|android-share-notice|all||1
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-android-console/lib/client.js|e7c419b4e2ebac6dfe8ccb1a88bb4808|android-share-notice|all||1
 # ⚠️ 2026-10-15 之前这条清单**没覆盖**这两个文件，于是"源码改了、包里带的还是旧的"
 #    能一路通过 verify。装 1.39 之前，patch-check 对这两条会报漂移（装机副本还是旧的）——那是**正确**的。
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-plugin-auto-summary-policy/lib/index.js|d0beb2db51a199d1d7b4a45b5cc74936|0.1.2-effective-policy
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-plugin-auto-summary-policy/lib/index.js|d0beb2db51a199d1d7b4a45b5cc74936|0.1.2-effective-policy|all||1
 # ②b 同一批插件的 **profile 落点**（引擎真正加载的那一层）也要随包一致 —— v1.38-fix（2026-10-15）补。
 #     解析优先级实验（check-session-create-isolated.sh 的 PLANT_USERLAYER_* 对照）证明：
 #     base profile 盖住用户层 ⇒ 只要这一层随包更新，老副本永远挡不住源码改动。
 #     两侧都由 build-overlay 同一份源复制而来；清单钉住 profile 侧，防止以后只更新一边。
-dshhome/profiles/web/node_modules/dsh-plugin-auto-summary-policy/lib/index.js|d0beb2db51a199d1d7b4a45b5cc74936|0.1.2-effective-policy
-dshhome/profiles/web/node_modules/dsh-plugin-session-rewind/lib/index.js|d70735de575f2015d7a6b047747b9dbe|rewindSession
-dshhome/profiles/web/node_modules/dsh-plugin-turn-notify/lib/index-v3.js|71e14071c19e791a9e24843fd32d8706|turn-notify
+dshhome/profiles/web/node_modules/dsh-plugin-auto-summary-policy/lib/index.js|d0beb2db51a199d1d7b4a45b5cc74936|0.1.2-effective-policy|all||1
+dshhome/profiles/web/node_modules/dsh-plugin-session-rewind/lib/index.js|d70735de575f2015d7a6b047747b9dbe|rewindSession|all||2
+dshhome/profiles/web/node_modules/dsh-plugin-turn-notify/lib/index-v3.js|22515a72db8c552d706c343b8be65c0f|turn-notify|all||7
 # ③ App 每次冷启动都会用包里的 dshhome/cordis.patch.yml 覆盖用户家目录（最后生效的一层）——
 #    同 id 条目会替换前一层并**静默丢掉它的 config**，1.38 的"新建会话失败"就是这么来的
 # 2026-10-24 更新 md5：新增 dsh-smart-search，并把 web.searchProvider 设为 auto-search。
@@ -123,43 +123,43 @@ dshhome/profiles/web/node_modules/dsh-plugin-turn-notify/lib/index-v3.js|71e1407
 # 2026-11-06 更新 md5：发行隐私整改，本文件顶部注释改写（7 个私人插件的 insert 声明仍在，
 # 只是加了脱敏说明）。内容差异仅注释，条目/配置零变化；关键字标记 dsh-doc-media 仍命中。
 # 提醒：改这个文件必须在 payload-new.zip 上复跑 payload-check，md5 与 overlay 必须一致（已核 62da1f13…）。
-dshhome/cordis.patch.yml|62da1f13e8e6965b16028d5896f3ca4b|dsh-doc-media
+dshhome/cordis.patch.yml|028e79f7b7550a9d1c62d5f173b5fa6f|dsh-doc-media|all||1
 
 # 2026-10-21 v1.42：文件预览视频播放 + 安卓文件动作。两个都是纯客户端插件，
 # Node 半边（lib/index.js）只为让 Loader 能解析包入口，必须随包，否则启动日志报
 # ERR_PACKAGE_PATH_NOT_EXPORTED（17:11 那版就漏了这两个文件）。
-dshhome/profiles/web/node_modules/dsh-doc-media/package.json|14da7cd85a49a158016c945f2a168748|dsh-doc-media
-dshhome/profiles/web/node_modules/dsh-doc-media/lib/index.js|7dbb4a8f650d34075f653ff92d706dcf|dsh-doc-media
-dshhome/profiles/web/node_modules/dsh-doc-media/lib/client.js|4ea81d80c519c8c1939d8f028272f2f5|<video
-dshhome/profiles/web/node_modules/dsh-doc-actions/package.json|89feeb75fd4b64772ff5fd04904da3c2|dsh-doc-actions
-dshhome/profiles/web/node_modules/dsh-doc-actions/lib/index.js|f8a9ae506cc5c1318f3098ce42d3ad0c|dsh-doc-actions
-dshhome/profiles/web/node_modules/dsh-doc-actions/lib/client.js|f2824720b87c167d5ce66e22bf9184fa|127.0.0.1:3081/open
+dshhome/profiles/web/node_modules/dsh-doc-media/package.json|14da7cd85a49a158016c945f2a168748|dsh-doc-media|all||1
+dshhome/profiles/web/node_modules/dsh-doc-media/lib/index.js|7dbb4a8f650d34075f653ff92d706dcf|dsh-doc-media|all||2
+dshhome/profiles/web/node_modules/dsh-doc-media/lib/client.js|4ea81d80c519c8c1939d8f028272f2f5|<video|all||1
+dshhome/profiles/web/node_modules/dsh-doc-actions/package.json|89feeb75fd4b64772ff5fd04904da3c2|dsh-doc-actions|all||1
+dshhome/profiles/web/node_modules/dsh-doc-actions/lib/index.js|f8a9ae506cc5c1318f3098ce42d3ad0c|dsh-doc-actions|all||2
+dshhome/profiles/web/node_modules/dsh-doc-actions/lib/client.js|f2824720b87c167d5ce66e22bf9184fa|127.0.0.1:3081/open|all||1
 
 # 2026-10-18 v1.39.5：文档预览引擎改为按需下载（不随包），插件提供
 # /dsh-office-kit/status 与 /install 两条路由；装了引擎才解析得到。
-dshhome/profiles/web/node_modules/@deepseek-ai/dsh-office-kit/lib/index.js|9c334d372670a245396bdb730b604c5a|office-kit: status route
+dshhome/profiles/web/node_modules/@deepseek-ai/dsh-office-kit/lib/index.js|9c334d372670a245396bdb730b604c5a|office-kit: status route|all||1
 # 2026-10-19 v1.40：删除会话（/delete-session + /dsh-session-admin/*）；内核无 delete 原语。
-dshhome/profiles/web/node_modules/@deepseek-ai/dsh-session-admin/lib/index.js|74dc064fb265805dcc1b4fcc5a95315b|session-admin: /delete-session
+dshhome/profiles/web/node_modules/@deepseek-ai/dsh-session-admin/lib/index.js|74dc064fb265805dcc1b4fcc5a95315b|session-admin: /delete-session|all||1
 
 # 2026-10-19 v1.40.1：侧边栏会话列表长按（/ 右键）删除。纯客户端插件，不改内核前端。
-dshhome/profiles/web/node_modules/dsh-session-delete/package.json|3bdc3facb75ffa77bebae7e136e63431|dsh-session-delete
-dshhome/profiles/web/node_modules/dsh-session-delete/cordis.patch.yml|ab91020b5d7bc179e36fc143d93361a4|dsh-session-delete
-dshhome/profiles/web/node_modules/dsh-session-delete/lib/index.js|348f3274289ac550b7ab7a6226273a5b|dsh-session-delete
-dshhome/profiles/web/node_modules/dsh-session-delete/lib/client.js|2025320c13b37025ed13a7fe7e53d47d|data-dsd-confirm
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-experimental-agent-team/lib/index.js|f749f84b715a4d0f2fc0c1cb34f32a04|agentOptions
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-experimental-tool-agent-team/lib/index.js|f31f3b71a168defb527f2e652626353f|top-level array of roles
+dshhome/profiles/web/node_modules/dsh-session-delete/package.json|3bdc3facb75ffa77bebae7e136e63431|dsh-session-delete|all||1
+dshhome/profiles/web/node_modules/dsh-session-delete/cordis.patch.yml|ab91020b5d7bc179e36fc143d93361a4|dsh-session-delete|all||3
+dshhome/profiles/web/node_modules/dsh-session-delete/lib/index.js|348f3274289ac550b7ab7a6226273a5b|dsh-session-delete|all||2
+dshhome/profiles/web/node_modules/dsh-session-delete/lib/client.js|2025320c13b37025ed13a7fe7e53d47d|data-dsd-confirm|all||1
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-experimental-agent-team/lib/index.js|3b45c39de893c8d7d01684ea01fb033a|agentOptions|all||4
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-experimental-tool-agent-team/lib/index.js|f31f3b71a168defb527f2e652626353f|top-level array of roles|all||1
 
 # 2026-10-26 v1.42.13：双人会议、PPT 生成/渲染、侧栏功能收纳和会审通道兼容。
 # 2026-10-27 v1.43：当前会话多模型顺序回答、重复配置、成员污染与注入消息误判修复；31 项测试通过后重算入口哈希。
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-sidebar/lib/client.js|9ea110a305edfd3d534acb6d7d658c32|dsh.sidebar.featurePanelsOpen
-dshhome/skills/dsh-review/scripts/review-channels.mjs|44a6de8ae7525a06b8d23a22a73325db|unlisted
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-sidebar/lib/client.js|9ea110a305edfd3d534acb6d7d658c32|dsh.sidebar.featurePanelsOpen|all||3
+dshhome/skills/dsh-review/scripts/review-channels.mjs|44a6de8ae7525a06b8d23a22a73325db|unlisted|all||4
 
 # 2026-11-02 完整审计轮新增：四个安全修复必须能随包校验（此前都没进门禁）。
 # Excel 预览 window.open 补 noopener（反向 tabnabbing）
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-sidebar-documentpreview/lib/client.excel.js|80d1bc747d2d6693038ff0d7bb7e3265|noopener,noreferrer
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-sidebar-documentpreview/lib/client.excel.js|5b11df5469540aad528c70521b2ea7fe|noopener,noreferrer|all|-|1
 # WebServer 三处 disposer 改成幂等、只删自己那次注册（旧 disposer 不能删掉新路由）
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-host-webserver/lib/index.js|441640d43d5089e6bd83b551b1be7b43|table.get(route.path) === route
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-host-webserver/lib/index.js|677f2e76f595741f0d79ae8457ba7cfc|table.get(route.path) === route|all|七处 disposer 幂等、只删自己那次注册；丢了这个词，旧 disposer 会删掉新路由，已认证请求 400|1
 # spill 清理放行 Android 系统目录与本 App setgid 目录（否则清缓存直接失败）
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-spill-local/lib/index.js|d21ebc6ba4e0fd6a154fdc39354cc4a5|isAndroidProtectedAncestor
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-spill-local/lib/index.js|d21ebc6ba4e0fd6a154fdc39354cc4a5|isAndroidProtectedAncestor|all||2
 # MCP 跨源 307 不再转发自定义鉴权头（X-Api-Key 等）
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-mcp-client/lib/index.js|d54c36ee60dd2d6b6e689fffdc0cc2a5|sameOriginRedirectFetch
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-mcp-client/lib/index.js|d54c36ee60dd2d6b6e689fffdc0cc2a5|sameOriginRedirectFetch|all||2
