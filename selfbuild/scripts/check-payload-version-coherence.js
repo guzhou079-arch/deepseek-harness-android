@@ -125,6 +125,10 @@ function openPayload(p) {
 }
 
 // 参考树/旧世代树都是磁盘目录；crc 按需算（fnv 不做，直接 crc32，与 zip 中央目录同源）
+// 参考树可以是目录，也可以是 payload.zip —— 后者才是真正干净的基准：
+// 运行树会被冷启动重铺、也会被人手工 patch 过，拿它当基准等于用动过的尺子量。
+let refTree = null;
+
 const crcCache = new Map();
 function diskStat(dir, name, hint) {
   const fp = path.join(dir, name);
@@ -255,7 +259,7 @@ function checkOldGeneration(payload, opts, out) {
     if (!KERNEL_RE.test(n)) continue;
     if (allow(n)) { out.allowed.push(n); continue; }
     const mine = payload.stat(n);
-    const refSt = diskStat(opts.ref, n, mine);
+    const refSt = refTree ? refTree.stat(n) : diskStat(opts.ref, n, mine);
     if (!refSt) { absent++; out.warnings.push(`参考树里没有 ${n}（新增文件，未参与世代比对）`); continue; }
     if (same(mine, refSt)) continue;
     compared++;
@@ -297,7 +301,7 @@ function checkOverlay(opts, out) {
       continue;
     }
     const mine = diskStat(opts.overlay, n);
-    const refSt = opts.ref ? diskStat(opts.ref, n, mine) : null;
+    const refSt = refTree ? refTree.stat(n) : (opts.ref ? diskStat(opts.ref, n, mine) : null);
     if (refSt && same(mine, refSt)) continue;
     const hits = opts.old.map((d) => ({ d, st: diskStat(d, n, mine) })).filter((x) => same(mine, x.st));
     if (hits.length) {
@@ -329,6 +333,13 @@ function checkInputs(opts, out) {
 function runChecks(opts) {
   const out = { violations: [], warnings: [], allowed: [], notes: [], kernelVersion: null };
   checkInputs(opts, out);
+  if (opts.ref) {
+    try {
+      refTree = openPayload(opts.ref);
+    } catch (e) {
+      out.warnings.push(`--ref 打不开（${opts.ref}：${e.message}）→ old-generation 检查退化`);
+    }
+  }
   let payload;
   try {
     payload = openPayload(opts.payload);
@@ -343,9 +354,9 @@ function runChecks(opts) {
     checkVersionLine(payload, opts.expectVersion, out);
     // 参考树自己的内核版本也要对得上，否则"与干净树不同"这个判据会整体偏掉
     if (opts.ref) {
-      const rk = path.join(opts.ref, KERNEL_JSON);
       try {
-        const rv = JSON.parse(fs.readFileSync(rk, 'utf8')).version;
+        const raw = refTree ? refTree.read(KERNEL_JSON) : fs.readFileSync(path.join(opts.ref, KERNEL_JSON));
+        const rv = JSON.parse(raw.toString('utf8')).version;
         if (out.kernelVersion && rv !== out.kernelVersion) {
           out.warnings.push(`参考树内核版本 ${rv} ≠ 本包 ${out.kernelVersion} → 世代比对基准过期，old-generation 结果只作参考`);
         }

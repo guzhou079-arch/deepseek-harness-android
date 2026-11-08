@@ -119,7 +119,8 @@ function createBackup(customTag = '') {
   }
 
   manifest.stats.filesCount = filesToPack.length;
-  manifest.stats.totalUncompressedBytes = filesToPack.reduce((acc, f) => acc + f.size, 0);
+  // 总长在打包循环里按实际读到的字节累加，stat 的 size 会因文件增长而过期
+  let packedBytes = 0;
 
   // 打包结构：使用标准轻量级 archive 容器
   // [4B 魔数 DSHB][4B manifest 长度][manifest JSON 数据 UTF-8][压缩的文件内容块...]
@@ -129,12 +130,15 @@ function createBackup(customTag = '') {
     const hash = crypto.createHash('sha256').update(content).digest('hex');
     manifest.entries.push({
       path: f.relPath,
-      size: f.size,
+      size: content.length,
       sha256: hash,
       mtime: f.mtime
     });
     payloadBuffers.push(content);
+    packedBytes += content.length;
   }
+
+  manifest.stats.totalUncompressedBytes = packedBytes;
 
   const manifestJson = JSON.stringify(manifest, null, 2);
   const manifestBuf = Buffer.from(manifestJson, 'utf-8');
@@ -167,6 +171,10 @@ function createBackup(customTag = '') {
   const outPath = path.join(BACKUP_DIR, filename);
 
   fs.writeFileSync(outPath, finalBuffer);
+
+  // 写盘后立刻自检：清单长度与哈希必须跟载荷自洽。
+  // 不过这关就当场失败——「创建成功」却还原不了，比直接失败更糟。
+  loadVerifiedBackup(outPath);
 
   const duration = ((Date.now() - startTime) / 1000).toFixed(2);
   console.log('✅ 全站快照备份创建成功！');
