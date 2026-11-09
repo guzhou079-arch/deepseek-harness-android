@@ -174,7 +174,14 @@ function createBackup(customTag = '') {
 
   // 写盘后立刻自检：清单长度与哈希必须跟载荷自洽。
   // 不过这关就当场失败——「创建成功」却还原不了，比直接失败更糟。
-  loadVerifiedBackup(outPath);
+  // 失败时顺手删掉这份坏包：留在 Download/DSH_Backups 里，`list` 会把它当可用备份列出来，
+  // 用户拿去还原才发现坏，比当场失败更糟。
+  try {
+    loadVerifiedBackup(outPath);
+  } catch (err) {
+    try { fs.unlinkSync(outPath); } catch (ignored) {}
+    throw new Error(`自检未通过，已删除损坏的快照 ${filename}：${err && err.message ? err.message : err}`);
+  }
 
   const duration = ((Date.now() - startTime) / 1000).toFixed(2);
   console.log('✅ 全站快照备份创建成功！');
