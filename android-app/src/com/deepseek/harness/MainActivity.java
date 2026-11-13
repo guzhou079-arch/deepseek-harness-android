@@ -106,7 +106,7 @@ public class MainActivity extends Activity {
     // 每 2.5 秒重新 loadUrl（最多 120 次），用户面前始终是一块纯白：既不知道在等什么，
     // 也点不到任何东西（原生控制台已降级，连日志都导不出来）。
     // 现在改成：失败即切一张**不经过引擎**的静态页（assets/fallback.html），
-    // 上面有状态、版本、WebView 内核、日志路径和四个动作；后台继续探测，
+    // 上面有状态、版本、WebView 内核、日志路径和六个动作；后台继续探测，
     // 引擎一通就自动切回主界面。整条路径不碰引擎、不碰插件、不碰原生控制台。
     private static final String FALLBACK_URL = "file:///android_asset/fallback.html";
     private volatile boolean fallbackActive = false;   // 主文档当前是兜底页
@@ -6808,6 +6808,11 @@ public class MainActivity extends Activity {
         engineCmd.add("web");
         engineCmd.add("--host"); engineCmd.add(bindHost);
         engineCmd.add("--port"); engineCmd.add(String.valueOf(enginePort));
+        // 安卓上没有 xdg-open：内核起 web 后会自动去唤起系统浏览器，这次 spawn 必然失败，并在
+        // 每次启动时打一条「could not open the default browser because spawn xdg-open ENOENT」。
+        // 壳自己用 WebView 加载 127.0.0.1，不需要外部浏览器；关掉自动打开这次子进程即可。
+        // printUrl 默认开启，带 token 的启动 URL 照常打印、壳照常解析。
+        engineCmd.add("--no-open");
         engineCmd.addAll(extraArgs);
         ProcessBuilder pb = new ProcessBuilder(engineCmd);
         if (lanOn) pb.environment().put("DSH_ALLOW_LAN", "1");
@@ -7533,6 +7538,19 @@ public class MainActivity extends Activity {
                     reextractPending = false;
                     Log.w(TAG, "fallback reextract restart failed", t);
                     return "{\"ok\":false,\"msg\":\"未能自动重启，请手动重开 App 继续重建\"}";
+                }
+            }
+            if ("openinbrowser".equals(id)) {
+                // 安卓上只能用 intent 唤起系统浏览器（内核走的 xdg-open 在安卓根本不存在）。
+                // 页面卡住但引擎其实在的时候，这是绕开壳的一条活路。
+                try {
+                    Intent view = new Intent(Intent.ACTION_VIEW, Uri.parse(webHomeUrl()));
+                    view.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    startActivity(view);
+                    return "{\"ok\":true,\"msg\":\"已交给系统浏览器；没弹出来说明这台机器没装浏览器\"}";
+                } catch (Throwable t) {
+                    Log.w(TAG, "fallback open-in-browser failed", t);
+                    return "{\"ok\":false,\"msg\":\"没能唤起浏览器，先装一个再用，或把诊断发群里\"}";
                 }
             }
             if ("enter".equals(id)) {
