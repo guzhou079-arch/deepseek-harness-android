@@ -90,10 +90,10 @@ dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-bash-loc
 #    补丁脚本：selfbuild/scripts/patch-bring-to-front.js
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-deepseek-account-platform/lib/index.js|c83acb5ad065aa1e80ecd651731a64bb|dsh-android-patch v4 (bring-to-front)|all||1
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/index.html|e869e305d7148c95d07b5b100938bb49|/mobile.css|all||1
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/mobile.js|c79cab9a143c7ec9d149d2028093d979|dsh-update-banner|all||4
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/mobile.js|bf0ac56f9e063a6509f50dbccc393d40|dsh-update-banner|all||4
 # ④ Android 运行环境适配（2026-10-03 rc.2 事故后补录：这 6 个文件的补丁原先只手工塞在 payload 里，
 #    换内核时随上游改动一起被覆盖 → 每轮 EACCES。纳入清单后，装机前的 verify 就能拦住）
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/index.js|790253ee14cec22c133256bd180ca708|open(currentPath, "wx")|all||1
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/index.js|395ea781e336848cd748b5fdfba383da|open(currentPath, "wx")|all||1
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-fs-local/lib/index.js|0baf3997dddc60eb58d945d87ca7e2f3|isHardlinkUnsupported|all||2
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-attachment-local/lib/index.js|79fb0d08ac8e40fdd32ca8d9d68bb586|sharp-shim|all||3
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-llm-deepseek/lib/index.js|2d8c330c0f4686268b485cb268eca939|isAttachmentError|all|把附件读取失败识别成可读错误而不是崩；丢了这个词，发图片/文件会整轮失败|2
@@ -163,3 +163,13 @@ dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-host-web
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-spill-local/lib/index.js|d21ebc6ba4e0fd6a154fdc39354cc4a5|isAndroidProtectedAncestor|all||2
 # MCP 跨源 307 不再转发自定义鉴权头（X-Api-Key 等）
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-mcp-client/lib/index.js|d54c36ee60dd2d6b6e689fffdc0cc2a5|sameOriginRedirectFetch|all||2
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-workspace/lib/index.js|7b076699cc97185e2347f2c332de0468|DSH_PATCH_list_degrade|all|会话列表读失败时降级启动：一条坏会话不该让 workspaceRegistry 消失、目录选择器全灰|1
+
+# 2026-11-13：一条坏会话不该毁掉整个 workspace。线上形状：一条会话的身份校验抛裸 Error，
+# 会话清单枚举整体抛掉，workspaceRegistry 永不可用 → 目录选择器空列表、按钮全灰。
+# ① 会话根下点开头的目录不是项目目录（回收站 / 半途移动 / 临时目录），不进去索引
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/index.js|395ea781e336848cd748b5fdfba383da|DSH_PATCH_skip_dot_dirs|all|点开头目录被当项目目录索引，回收站里的会话会被当成某个项目的会话列出来|1
+# ② 身份不符按「存储损坏」处理，上层才能按单条会话降级，而不是裸 Error 冒到枚举层
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/index.js|395ea781e336848cd748b5fdfba383da|does not match header id|all|身份不符退回裸 Error，枚举层不认这种错，整条链一起挂|1
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/index.js|395ea781e336848cd748b5fdfba383da|header id cannot name a storage path|all|header 的 id 拼不出存储路径时也必须能降级|1
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/index.js|395ea781e336848cd748b5fdfba383da|and cwd identify|all|header 的 cwd 与物理位置不符时也必须能降级|1

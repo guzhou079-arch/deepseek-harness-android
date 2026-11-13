@@ -4,7 +4,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+const require = createRequire(import.meta.url);
 import { project, sb, shaFile, readJson, insist } from './release-receipts.mjs';
 export function localFor(repo) {
   if (repo.startsWith('android-app/')) return 'v118/' + repo;
@@ -55,6 +57,6 @@ function main(argv) {
   if (untracked.length) console.log('Stage explicitly selected files and run hygiene --staged before committing.');
   if (!argv.includes('--write') && (changed.length || argv.includes('--require-tracked') && untracked.length)) process.exitCode = 1;
 }
-// 同 release-receipts.mjs：/sdcard 是软链接，path.resolve 比较会恒假 → 脚本静默不跑。
-const isMain = (() => { try { return !!process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url)); } catch { return false; } })();
-if (isMain) { try { main(process.argv.slice(2)); } catch (e) { console.error('✗ ' + e.message); process.exitCode = 2; } }
+// 同 release-receipts.mjs：/sdcard 是软链接，path.resolve 比较会恒假 → 脚本静默不跑；
+// realpath 在 App 进程里又会 ENOENT。入口判定统一走 lib/is-main.js（按 inode 比）。
+if (require('../lib/is-main.js').isMain(import.meta.url)) { try { main(process.argv.slice(2)); } catch (e) { console.error('✗ ' + e.message); process.exitCode = 2; } }

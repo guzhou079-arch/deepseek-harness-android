@@ -146,8 +146,14 @@ function main(argv) {
     if (compareVersion(name0, declared.name) !== 0) {
       throw new Error(`发行包版本名 ${name0} 与 selfbuild/VERSION 的 ${declared.name} 不一致`);
     }
-    if (!same.length) throw new Error(`本机还没出过 ${declared.name} 的包；dist 只能发已出自用包的那一版`);
-    const code0 = Math.max(...same);
+    // 号有两个来源：out/ 里现存的包，和台账里记过这一版的号。只认 out/ 会把「发完货把产物
+    // 清掉」变成发不出去 —— 货已经在用户手上，闸门却说「本机还没出过」。台账本来就是号的
+    // 真相源（297 从没进过 out/，只能靠台账），所以 out/ 里没有这一版的包时退回台账里这一版
+    // 的号（作废行不算）；两处都没有才是真的没造过这一版。
+    const fromLedger = ledger.rows.filter(r => r.name === declared.name && r.status !== '作废').map(r => r.code);
+    const cand = same.length ? same : fromLedger;
+    if (!cand.length) throw new Error(`本机还没出过 ${declared.name} 的包；dist 只能发已出自用包的那一版`);
+    const code0 = Math.max(...cand);
     if (arg('code') !== undefined && Number(arg('code')) !== code0) {
       throw new Error(`发行包必须复用 ${declared.name} 已出的 versionCode ${code0}，你给的是 ${arg('code')}`);
     }
@@ -177,6 +183,8 @@ function main(argv) {
   else if (sameCodes.includes(code)) console.log(`✓ 版本闸门通过：${name}(${code})，这个版本已出过包，沿用同一个号`);
   else console.log(`✓ 版本闸门通过：${name}(${code}) > 本机最大 ${maxCode}`);
 }
-if (process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url))) {
+// 入口判定统一走 lib/is-main.js：本机 App 进程看不到 /storage/emulated，
+// 用 realpathSync 会在那一层 ENOENT（不 catch 就是崩溃，catch 版就是静默空跑）。
+if (require('../lib/is-main.js').isMain(import.meta.url)) {
   try { main(process.argv.slice(2)); } catch (e) { console.error('✗ ' + e.message); process.exitCode = 1; }
 }

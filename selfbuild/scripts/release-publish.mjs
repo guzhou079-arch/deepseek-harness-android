@@ -4,6 +4,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
 import { project, sb, VERSION, CODE, insist, checkArtifact, checkBaseline, checkEvidence, writeJson } from './release-receipts.mjs';
 import { checkSynced } from './release-sync.mjs';
 const argv = process.argv.slice(2);
@@ -95,6 +97,7 @@ async function main() {
   const uploaded = await publishVerifiedRelease({ request, artifact, tag, commit, title, body, name });
   console.log('Published and verified:', uploaded.browser_download_url);
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+// 入口判定走 lib/is-main.js：path.resolve 解不了 /sdcard 软链接 → 恒假、脚本静默不跑。
+if (require('../lib/is-main.js').isMain(import.meta.url)) {
   main().catch(e => { console.error('✗ ' + e.message); process.exitCode = 1; });
 }

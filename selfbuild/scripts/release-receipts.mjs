@@ -192,5 +192,6 @@ async function main(argv) {
 // path.resolve(argv[1]) 不会解它，而 import.meta.url 已被 Node 解成真实路径 →
 // 用 path.resolve 比较在 /sdcard 下**恒为假**，整个脚本静默不执行（exit 0、零输出）。
 // 后果是门禁全是假的（凭据写不出来、校验全部空转），已实测踩过。两侧都取 realpath。
-const isMain = (() => { try { return !!process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url)); } catch { return false; } })();
-if (isMain) main(process.argv.slice(2)).catch(e => { console.error('✗ ' + e.message); process.exitCode = 1; });
+// 但 realpath 在 App 进程里也走不通（看不到 /storage/emulated 这层，逐段 lstat 就 ENOENT），
+// 只能按 inode 比 —— 统一放在 lib/is-main.js，别在每个脚本里再抄一遍。
+if (require('../lib/is-main.js').isMain(import.meta.url)) main(process.argv.slice(2)).catch(e => { console.error('✗ ' + e.message); process.exitCode = 1; });

@@ -238,7 +238,14 @@ public class MainActivity extends Activity {
         // 它们不是本项目自研包，此前不在表内 —— 同内核版本走 fast 同步时不覆盖它们，
         // 补丁虽然进了安装包，运行树里却一直是旧文件（装机后实测两个文件仍是旧版）。
         "dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-terminal-bash/",
-        "dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-agent-preset-registry/"
+        "dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-agent-preset-registry/",
+        // v1.49.3：pi-ai 的工具调用分块按 id 归并（identity-over-index）。
+        // 上游 openai-completions 的 ensureToolCallBlock 先看 wire index —— 网关把并行工具调用
+        // 全部标成 index:0 时，两段参数 JSON 会被拼进同一个块，解析报非空白字符，第二个调用直接消失。
+        // 改的是依赖树里的第三方包，同内核版本走 fast/additive 同步时不在任何免检前缀内，
+        // 装机后跑的一直是旧文件（补丁进了包、设备上却没生效）。这里点名这一个包目录，
+        // 让每次冷启动都以安装包内的那份为准。
+        "dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@earendil-works/pi-ai/"
     };
     // 外部 dshroot 解压完成标记（App 在 dshroot 补齐后写入；清空/重置时随目录删除）。
     // 用于识别「解压中途被打断」：即使 REVISION 一致也强制补齐缺失文件。
@@ -337,6 +344,8 @@ public class MainActivity extends Activity {
     private boolean bootFilmOn, bootFilmReady, bootFilmDone;
     private String bootFilmPending;
     private float bootFilmP, bootFilmRate, bootFilmTarget;
+    private float bootFilmProgressTarget;
+    private long bootFilmProgressAt;
     private long bootFilmStartAt, bootFilmAt, bootEngineAt;
     private int bootStage;                          // 0 文件 1 引擎 2 连接 3 就绪
     private final Handler ui = new Handler(Looper.getMainLooper());
@@ -659,6 +668,7 @@ public class MainActivity extends Activity {
                 // 只有真正的主文档才算「加载成功」：开机动画那份 data: 文档不能记账，
                 // 否则它晚到一步就会把 stall 看门狗骗过去，白屏重新变成没人管。
                 pageLoadedAt = System.currentTimeMillis();
+                stallReloads = 0;
                 bootCycleFailures = 0;
                 everEnteredHome = true;
                 authReloadTries = 0;
@@ -1574,6 +1584,8 @@ public class MainActivity extends Activity {
         bootStage = 0;
         bootFilmStartAt = System.currentTimeMillis();
         bootFilmAt = bootFilmStartAt;
+        bootFilmProgressTarget = bootFilmTarget;
+        bootFilmProgressAt = android.os.SystemClock.elapsedRealtime();
         final String body = html.replace("<body>", "<body class=\"clean\">");
         webView.setBackgroundColor(0xFF04050A);
         webView.post(new Runnable() {
@@ -1605,11 +1617,21 @@ public class MainActivity extends Activity {
                     Log.w(TAG, "boot film tick failed", t);
                 }
             }
-            ui.postDelayed(this, 200);
+            if (bootFilmOn) ui.postDelayed(this, 200);
         }
     };
 
     private void bootFilmTickBody() {
+            // 平滑动画会自行前进，只有真实目标累计推进才续期，避免慢解压被总时限误伤。
+            long progressNow = android.os.SystemClock.elapsedRealtime();
+            if (bootFilmTarget - bootFilmProgressTarget >= 0.005f) {
+                bootFilmProgressTarget = bootFilmTarget;
+                bootFilmProgressAt = progressNow;
+            } else if (!bootFilmDone && progressNow - bootFilmProgressAt >= 120000L) {
+                bootFilmOn = false;
+                showBootFallback("启动动画 120 秒没有推进");
+                return;
+            }
             long now = System.currentTimeMillis();
             float dt = Math.min(1.5f, Math.max(0.05f, (now - bootFilmAt) / 1000f));
             bootFilmAt = now;
@@ -3758,6 +3780,8 @@ public class MainActivity extends Activity {
         overlayForeground = true;
         appForeground = true;                    // v1.16：NFC 待命生效的前提之一
         OverlayService.setOverlayVisible(false); // 回到前台：隐藏悬浮窗
+        // v1.54：后台期间不判加载超时（见 stallWatch），回前台若主页还没完成就重新给满 90 秒。
+        if (!fallbackActive && pageLoadedAt == 0L) scheduleStallWatch();
     }
 
     @Override
@@ -3976,6 +4000,13 @@ public class MainActivity extends Activity {
             sb.append("错误: ").append(errorMsg).append('\n');
             sb.append("enginePort=").append(enginePort).append(" notifyPort=").append(notifyPort()).append('\n');
             sb.append("node存活=").append(nodeProcess != null && nodeProcess.isAlive()).append('\n');
+            try {
+                sb.append("内部存储剩余=").append(getFilesDir().getUsableSpace() / (1024L * 1024L)).append(" MB\n");
+                sb.append("payload 目录=").append(new File(getFilesDir(), "payload").getAbsolutePath()).append('\n');
+                File marker = new File(getFilesDir(), "payload/.extracted");
+                sb.append("payload 戳=").append(marker.exists() ? "已写" : "未写（解压没走完）").append("\n");
+                sb.append("安装包读取自检=").append(payloadAssetSelfCheck()).append("\n");
+            } catch (Throwable ignored) {}
             File log = new File(getFilesDir(), "dsh-web.log");
             if (log.exists()) {
                 java.io.RandomAccessFile raf = new java.io.RandomAccessFile(log, "r");
@@ -5811,6 +5842,86 @@ public class MainActivity extends Activity {
         }
     }
 
+    /**
+     * closeEntry() 不只是清理状态：它为了把读指针对齐到下一条目录项，会再读一次流。
+     * 压缩流已经坏掉时（典型：invalid distance too far back），这次读会把同一个异常
+     * 原样抛出来 —— 于是调用方以为自己在「跳过一条坏数据」，实际是整轮解压被打断。
+     * 统一走这里，坏了一起收成 false，由调用方决定退出。
+     */
+    private boolean closeEntryQuiet(ZipInputStream zis, String where) {
+        try {
+            zis.closeEntry();
+            return true;
+        } catch (IOException t) {
+            Log.w(TAG, "closeEntry failed at " + where, t);
+            return false;
+        }
+    }
+
+    // 读一次 payload.zip 的 asset 元信息和首尾结构，**只用于诊断，不参与控制流**。
+    // 这个包是 STORED 的 160MB 大条目，Android 读它靠中央目录里的偏移直接 seek 文件；
+    // 偏移一旦被改过（二次打包、克隆应用重写 APK、ROM 对安装包做过处理），读到的就是
+    // 错位字节，inflate 只会说 "invalid distance too far back" —— 这句话既不像包不完整，
+    // 也不像设备问题。把头魔数、EOCD 声明的条目数、目录偏移是否落在文件内摆出来，
+    // 一眼能分开是「包不完整」还是「设备读错位」。任何异常都吞掉，只留一句自检未完成。
+    private String payloadAssetSelfCheck() {
+        java.io.InputStream is = null;
+        android.content.res.AssetFileDescriptor afd = null;
+        long len = -1;
+        try {
+            afd = getAssets().openFd("payload.zip");
+            len = afd.getLength();
+            afd.close();
+            afd = null;
+            is = getAssets().open("payload.zip");
+            byte[] head = new byte[4];
+            int got = 0;
+            while (got < 4) {
+                int n = is.read(head, got, 4 - got);
+                if (n <= 0) break;
+                got += n;
+            }
+            if (got < 4) return "asset 长度=" + len + "，头读取不足 4 字节";
+            final boolean pk = head[0] == 'P' && head[1] == 'K' && head[2] == 3 && head[3] == 4;
+            final String headTxt = pk ? "PK 0304" : "非 ZIP 魔数";
+            final int tailLen = (int) Math.min(len, 65557L);
+            long skipLeft = len - tailLen;
+            while (skipLeft > 0) {
+                long n = is.skip(skipLeft);
+                if (n <= 0) break;
+                skipLeft -= n;
+            }
+            byte[] tail = new byte[tailLen];
+            int have = 0;
+            while (have < tailLen) {
+                int n = is.read(tail, have, tailLen - have);
+                if (n <= 0) break;
+                have += n;
+            }
+            int eocd = -1;
+            for (int i = have - 22; i >= 0; i--) {
+                if (tail[i] == 'P' && tail[i + 1] == 'K' && tail[i + 2] == 5 && tail[i + 3] == 6) { eocd = i; break; }
+            }
+            if (eocd < 0) return "asset 长度=" + len + "，头=" + headTxt + "，EOCD 未找到（读到 " + have + " 字节尾部）";
+            int entries = (tail[eocd + 10] & 0xFF) | ((tail[eocd + 11] & 0xFF) << 8);
+            long cdSize = ((long) (tail[eocd + 12] & 0xFF)) | ((long) (tail[eocd + 13] & 0xFF) << 8)
+                    | ((long) (tail[eocd + 14] & 0xFF) << 16) | ((long) (tail[eocd + 15] & 0xFF) << 24);
+            long cdOff = ((long) (tail[eocd + 16] & 0xFF)) | ((long) (tail[eocd + 17] & 0xFF) << 8)
+                    | ((long) (tail[eocd + 18] & 0xFF) << 16) | ((long) (tail[eocd + 19] & 0xFF) << 24);
+            final long eocdPos = len - tailLen + eocd;
+            final boolean aligned = cdOff != 0xFFFFFFFFL && cdOff + cdSize <= eocdPos;
+            return "asset 长度=" + len + "，头=" + headTxt
+                    + "，EOCD 声明条目=" + (entries == 0xFFFF ? "zip64" : String.valueOf(entries))
+                    + "，目录偏移=" + (aligned ? "落在文件内" : "越界(off=" + cdOff + " size=" + cdSize + " eocd=" + eocdPos + ")");
+        } catch (Throwable t) {
+            return "自检未完成(" + t.getClass().getSimpleName() + (len > 0 ? "，asset 长度=" + len : "") + ")";
+        } finally {
+            if (is != null) { try { is.close(); } catch (Throwable ignored) {} }
+            if (afd != null) { try { afd.close(); } catch (Throwable ignored) {} }
+        }
+    }
+
+
     private void extractPayload(File destInternal, File externalRoot, String mode) throws IOException {
         // mode: "internal" = 只解压内部条目（runtime/bin/dshhome/rish，不含 dshroot）；
         //       "dshroot"  = 只解压 dshroot 条目（外部优先，回退内部）；
@@ -5824,6 +5935,17 @@ public class MainActivity extends Activity {
         final boolean internalOnly = "internal".equals(mode) || internalPatch;
         final boolean dshrootOnly = "dshroot".equals(mode) || fast || additive;
         if (!destInternal.exists() && !destInternal.mkdirs()) throw new IOException("mkdir failed: " + destInternal);
+        // 空间预检：payload 解开约 420MB；internal（runtime/bin/dshhome/rish）约 150MB，
+        // dshroot 全量约 270MB。阈值取保守的 200MB —— 比这更少必定写到一半就 ENOSPC，
+        // 而 ENOSPC 在那条写文件的 catch 里只会变成一句「写不进去」，看不出是空间不够。
+        // dshroot-fast 只更新几个白名单文件（几百 KB），不参与预检。
+        if (!"dshroot-fast".equals(mode)) {
+            long usablePreMb = destInternal.getUsableSpace() / (1024L * 1024L);
+            if (usablePreMb < 200) {
+                throw new IOException("内部存储空间不足：只剩 " + usablePreMb + " MB，解压至少要 200 MB。"
+                        + "清理出空间后再打开 App 即可，已解压的部分会保留");
+            }
+        }
         // 进度文案按实际动作说：首次解压才叫"解压"，升级同步叫"同步"，别让用户以为又在重装
         final String progressLabel = extractProgressLabel(mode);
         lastExtractLabel = progressLabel;
@@ -5841,12 +5963,37 @@ public class MainActivity extends Activity {
         int written = 0;
         int failed = 0;
         String firstFail = null;
-        while ((e = zis.getNextEntry()) != null) {
+        // 本轮新建的文件（绝对路径），压缩流半途损坏时回滚。不回滚的话半截文件留在盘上，
+        // 下次增量模式（dshroot-add / internal-patch）用 exists() 判「已存在」会永久跳过。
+        java.util.ArrayList<String> rolledByUs = new java.util.ArrayList<String>();
+        boolean streamBroken = false;
+        String brokenAt = null;
+        while (true) {
+            // getNextEntry 在流损坏时会抛 IOException（典型：invalid distance too far back）。
+            // 原实现没包这里，异常直接穿透整个 extractPayload，用户只看到「卡在 N 个文件」。
+            try {
+                e = zis.getNextEntry();
+            } catch (IOException ge) {
+                streamBroken = true;
+                if (brokenAt == null) brokenAt = "读取下一个目录项（" + ge.getMessage() + "）";
+                Log.w(TAG, "payload stream broken at getNextEntry", ge);
+                break;
+            }
+            if (e == null) break;
             String name = e.getName();
-            if (e.isDirectory() || name.startsWith("__MACOSX/") || name.startsWith("META-INF/")) { zis.closeEntry(); continue; }
+            if (e.isDirectory() || name.startsWith("__MACOSX/") || name.startsWith("META-INF/")) {
+                if (!closeEntryQuiet(zis, name)) { streamBroken = true; if (brokenAt == null) brokenAt = "跳过 " + name; break; }
+                continue;
+            }
             boolean isDshroot = name.startsWith("dshroot/");
-            if (dshrootOnly && !isDshroot) { zis.closeEntry(); continue; }
-            if (internalOnly && isDshroot) { zis.closeEntry(); continue; }
+            if (dshrootOnly && !isDshroot) {
+                if (!closeEntryQuiet(zis, name)) { streamBroken = true; if (brokenAt == null) brokenAt = "跳过 " + name; break; }
+                continue;
+            }
+            if (internalOnly && isDshroot) {
+                if (!closeEntryQuiet(zis, name)) { streamBroken = true; if (brokenAt == null) brokenAt = "跳过 " + name; break; }
+                continue;
+            }
             processed++;
 
             File target;
@@ -5901,7 +6048,7 @@ public class MainActivity extends Activity {
             if (!skipIfExists && isDshhomeUserFile(name) && target.exists()) skipIfExists = true;
 
             if (skipIfExists) {
-                zis.closeEntry();
+                if (!closeEntryQuiet(zis, name)) { streamBroken = true; if (brokenAt == null) brokenAt = "跳过 " + name; break; }
                 updateProgress(processed, total, written);
                 continue;
             }
@@ -5909,8 +6056,15 @@ public class MainActivity extends Activity {
             // v1.15.8：profile 清单是插件注册表，覆盖会抹掉已装插件（见 writeMergedProfileManifest）
             if (PROFILE_MANIFEST_PATH.equals(name)) {
                 prepareTarget(target);
-                writeMergedProfileManifest(target, new String(readZipEntry(zis), "UTF-8"));
-                zis.closeEntry();
+                try {
+                    writeMergedProfileManifest(target, new String(readZipEntry(zis), "UTF-8"));
+                } catch (java.util.zip.ZipException ze) {
+                    streamBroken = true;
+                    if (brokenAt == null) brokenAt = name + "（" + ze.getMessage() + "）";
+                    Log.w(TAG, "payload stream damaged at " + name, ze);
+                    break;
+                }
+                if (!closeEntryQuiet(zis, name)) { streamBroken = true; if (brokenAt == null) brokenAt = name; break; }
                 written++;
                 updateProgress(processed, total, written);
                 continue;
@@ -5924,33 +6078,87 @@ public class MainActivity extends Activity {
             // 文件是合法操作——旧进程继续持有旧 inode，新文件按新名字落地；临时文件放同一
             // 目录保证同一文件系统，rename 不会退化成跨设备拷贝。
             File tmp = new File(parent, target.getName() + ".tmp-" + System.nanoTime());
+            boolean existedBefore = target.exists();
+            FileOutputStream fos = null;
             try {
                 // 可执行位必须自己带过去：rename 保留的是 tmp 的权限（默认 0644），
                 // payload 里的 python/node/bash 全靠这一位才能跑。
-                boolean wasExecutable = target.exists() && target.canExecute();
-                FileOutputStream fos = new FileOutputStream(tmp);
+                boolean wasExecutable = existedBefore && target.canExecute();
+                fos = new FileOutputStream(tmp);
                 int n;
                 while ((n = zis.read(buf)) > 0) fos.write(buf, 0, n);
                 fos.close();
+                fos = null;
                 if (wasExecutable) tmp.setExecutable(true, true);
-                if (!tmp.renameTo(target)) throw new IOException("rename failed: " + target);
+                if (!tmp.renameTo(target)) {
+                    // v1.49.1：重解内核后首次启动实测撞到 rename 失败（解压写 profile 里
+                    // pnpm 结构的文件时，目标目录正被另一边重建，rename 拿到瞬时 ENOENT/EACCES）。
+                    // 删掉目标重试一次；仍失败退化为流拷贝。一个附属文件不该把整轮解压判死，
+                    // 否则用户看到的是「重解完还是起不来」，只能再开一次 App 才恢复。
+                    if (target.exists()) target.delete();
+                    if (!tmp.renameTo(target)) {
+                        copyFile(tmp, target);
+                        if (wasExecutable) target.setExecutable(true, true);
+                        if (tmp.exists()) tmp.delete();
+                    }
+                }
                 // v1.13.5：dex 必须**不可写**——Android 14+ 的 ART 拒绝加载可写 dex
                 // （logcat: SecurityException: Writable dex file '…' is not allowed → 进程直接
                 //  SIGABRT/exit 134，终端上只看到一个 "Aborted"）。payload.zip 内所有条目都不带
                 // unix 权限（external_attr=0），文件权限完全由本函数决定，所以这里对 *.dex 收成 0444。
                 if (name.endsWith(".dex")) secureDexPermissions(target);
                 written++;
+                // 只记「本轮新建的」：覆盖写的旧文件不能删（删了连原文件都没了）
+                if (!existedBefore) rolledByUs.add(target.getAbsolutePath());
+            } catch (java.util.zip.ZipException ze) {
+                // 压缩流本身坏了（典型：invalid distance too far back）。它一旦坏，后面每一条
+                // 都会把同一个异常再抛一遍 —— 原地重试没有意义，只能整轮退出。
+                if (fos != null) { try { fos.close(); } catch (Throwable ignored) {} fos = null; }
+                if (tmp.exists()) tmp.delete();
+                streamBroken = true;
+                if (brokenAt == null) brokenAt = name + "（" + ze.getMessage() + "）";
+                Log.w(TAG, "payload stream damaged at " + name, ze);
+                break;
             } catch (IOException ioe) {
+                if (fos != null) { try { fos.close(); } catch (Throwable ignored) {} fos = null; }
                 if (tmp.exists()) tmp.delete();
                 // 单个条目失败不中断整体（否则一次 EACCES 就能让整轮解压白干），最后汇总报错
                 failed++;
                 if (firstFail == null) firstFail = name + "（" + ioe.getMessage() + "）";
                 Log.w(TAG, "extract entry failed: " + name, ioe);
             }
-            zis.closeEntry();
+            // closeEntry 为了对齐下一条会再读一次流：流已坏时它把同一个异常原样再抛一遍。
+            // 原实现把它放在 try/catch 外面，于是上面那句「单个条目失败不中断整体」从来没生效过。
+            if (!closeEntryQuiet(zis, name)) {
+                streamBroken = true;
+                if (brokenAt == null) brokenAt = "跳到 " + name;
+                break;
+            }
             updateProgress(processed, total, written);
         }
-        zis.close();
+        try { zis.close(); } catch (IOException ce) {
+            if (!streamBroken) { streamBroken = true; if (brokenAt == null) brokenAt = "关闭压缩流（" + ce.getMessage() + "）"; }
+        }
+        if (streamBroken) {
+            int rolled = rolledByUs.size();
+            for (String abs : rolledByUs) {
+                try { new File(abs).delete(); } catch (Throwable ignored) {}
+            }
+            rolledByUs.clear();
+            long assetMb = -1;
+            try {
+                android.content.res.AssetFileDescriptor afd = getAssets().openFd("payload.zip");
+                assetMb = afd.getLength() / (1024L * 1024L);
+                afd.close();
+            } catch (Throwable ignored) {}
+            long usableMb = destInternal.getUsableSpace() / (1024L * 1024L);
+            throw new IOException("安装包数据损坏：解压到第 " + processed + " / " + total + " 个文件时压缩流报错"
+                    + (brokenAt == null ? "" : "（" + brokenAt + "）")
+                    + "；已回滚本轮新建的 " + rolled + " 个文件，内部存储剩余 " + usableMb + " MB，"
+                    + "本机读到的安装包 payload 大小 " + assetMb + " MB。"
+                    + "设备侧读取自检：" + payloadAssetSelfCheck() + "。"
+                    + "绝大多数情况是安装包下载不完整或被设备侧改写，请换网络从官方渠道重新下载完整包后再装");
+        }
         // 增量补齐收尾：清理"新树里已不存在"的顶层插件包，防止旧副本被 Node 优先解析。
         // 只清 @deepseek-ai 插件层（包管理范畴，AI 不会改），不动整棵树。
         if (additive && addPkgs != null && !addPkgs.isEmpty()) {
@@ -6154,16 +6362,26 @@ public class MainActivity extends Activity {
         ZipInputStream zis = new ZipInputStream(in);
         ZipEntry e;
         int n = 0;
-        while ((e = zis.getNextEntry()) != null) {
-            String name = e.getName();
-            if (e.isDirectory() || name.startsWith("__MACOSX/") || name.startsWith("META-INF/")) { zis.closeEntry(); continue; }
-            boolean isDshroot = name.startsWith("dshroot/");
-            if (dshrootOnly && !isDshroot) { zis.closeEntry(); continue; }
-            if (internalOnly && isDshroot) { zis.closeEntry(); continue; }
-            n++;
-            zis.closeEntry();
+        // 这一步只数文件，但它同样从头过一遍压缩流 —— 包坏了会在这里就先炸。
+        // 不翻译的话用户拿到的是英文 ZipException 原文，看不出是安装包的问题。
+        try {
+            while ((e = zis.getNextEntry()) != null) {
+                String name = e.getName();
+                if (e.isDirectory() || name.startsWith("__MACOSX/") || name.startsWith("META-INF/")) {
+                    zis.closeEntry(); continue;
+                }
+                boolean isDshroot = name.startsWith("dshroot/");
+                if (dshrootOnly && !isDshroot) { zis.closeEntry(); continue; }
+                if (internalOnly && isDshroot) { zis.closeEntry(); continue; }
+                n++;
+                zis.closeEntry();
+            }
+        } catch (java.util.zip.ZipException ze) {
+            throw new IOException("安装包压缩数据损坏（第 " + n + " 个条目之后）：" + ze.getMessage()
+                    + " —— 请从官方渠道重新下载完整安装包");
+        } finally {
+            try { zis.close(); } catch (IOException ignored) {}
         }
-        zis.close();
         return n;
     }
 
@@ -6220,12 +6438,36 @@ public class MainActivity extends Activity {
 
     private void copyFile(File src, File dst) throws IOException {
         FileInputStream in = new FileInputStream(src);
-        FileOutputStream out = new FileOutputStream(dst);
-        byte[] b = new byte[128 * 1024];
-        int n;
-        while ((n = in.read(b)) > 0) out.write(b, 0, n);
-        out.close();
-        in.close();
+        FileOutputStream out = null;
+        File tmp = null;
+        try {
+            // 写临时文件再 rename：rename 是原子提交，失败时 dst 仍是完整的旧内容。
+            // 直接 FileOutputStream(dst) 在 ENOSPC / 读流中断时会留下半截文件，而这里的
+            // dst 往往是内核或配置的正式路径，半截文件比「复制失败」更难收拾。
+            File parent = dst.getParentFile();
+            if (parent == null) parent = new File(".");
+            tmp = new File(parent, dst.getName() + ".copytmp-" + System.nanoTime());
+            out = new FileOutputStream(tmp);
+            byte[] b = new byte[128 * 1024];
+            int n;
+            while ((n = in.read(b)) > 0) out.write(b, 0, n);
+            out.getFD().sync();
+            out.close();
+            out = null;
+            if (tmp.length() != src.length()) {
+                throw new IOException("copy size mismatch: " + tmp.length() + " != " + src.length());
+            }
+            if (!tmp.renameTo(dst)) {
+                // rename 失败通常是目标目录正被另一边重建（瞬时 ENOENT/EACCES），删目标重试一次
+                if (dst.exists() && !dst.delete()) throw new IOException("cannot replace: " + dst);
+                if (!tmp.renameTo(dst)) throw new IOException("rename failed: " + dst);
+            }
+            tmp = null;
+        } finally {
+            if (out != null) { try { out.close(); } catch (Throwable ignored) {} }
+            try { in.close(); } catch (Throwable ignored) {}
+            if (tmp != null && tmp.exists()) tmp.delete();
+        }
     }
 
     private void setExecutables(File payload) {
@@ -6322,12 +6564,18 @@ public class MainActivity extends Activity {
             if (userCfg.isFile() && !userCfg.getAbsolutePath().equals(out.getAbsolutePath())) {
                 sb.append("[include]\n\tpath = ").append(userCfg.getAbsolutePath()).append("\n");
             }
+            // pnpm 解析 git 依赖时会拼出 git+ssh://git@<host>:/<path> —— scheme 与 scp 式冒号
+            // 同时出现，前缀与「无冒号 scheme」「ssh://」「纯 scp」三种都不同。漏掉这一条就会
+            // 原样去连 22 端口，而本机不带 ssh，表现是 git ls-remote 直接 exit 128。
+            // 四条必须都留：insteadOf 是前缀替换，任何一条都不能替另一条兜底。
             sb.append("[url \"https://github.com/\"]\n");
             sb.append("\tinsteadOf = git+ssh://git@github.com/\n");
+            sb.append("\tinsteadOf = git+ssh://git@github.com:/\n");
             sb.append("\tinsteadOf = ssh://git@github.com/\n");
             sb.append("\tinsteadOf = git@github.com:\n");
             sb.append("[url \"https://gitee.com/\"]\n");
             sb.append("\tinsteadOf = git+ssh://git@gitee.com/\n");
+            sb.append("\tinsteadOf = git+ssh://git@gitee.com:/\n");
             sb.append("\tinsteadOf = ssh://git@gitee.com/\n");
             sb.append("\tinsteadOf = git@gitee.com:\n");
             if (caBundle != null) {
@@ -7018,11 +7266,18 @@ public class MainActivity extends Activity {
     /** 引擎起来前那次「再等两轮」的探测是否已在跑（防重入，v1.53）。 */
     private volatile boolean bootRechecking = false;
 
+    /** 本轮主页加载已做过几次「静默重载」（v1.54：先重载一次再兜底，别把一次慢加载按死）。 */
+    private int stallReloads = 0;
+
+    /** 本轮主页加载的计时起点（v1.54：配合 removeCallbacks，同一次加载只留一个 stall 定时器）。 */
+    private long stallWatchAt = 0L;
+
     private void loadHomeGuarded() {
         final WebView wv = webView;
         if (wv == null) return;
         fallbackWhy = null;
         fallbackReady = false;
+        stallReloads = 0;              // 每次新的主页加载重新计数
         if (healthOk()) {
             pageLoadedAt = 0L;
             wv.loadUrl(webHomeUrl());
@@ -7059,14 +7314,39 @@ public class MainActivity extends Activity {
         }}, "boot-recheck").start();
     }
 
-    /** 主页面 loadUrl 之后 90 秒还没 onPageFinished（前端崩 / 资源 404）也交给兜底页。 */
-    private void scheduleStallWatch() {
-        final long expectAfter = System.currentTimeMillis();
-        ui.postDelayed(new Runnable() { @Override public void run() {
+    /**
+     * 主页面 loadUrl 之后 90 秒还没 onPageFinished（前端崩 / 资源 404）也交给兜底页。
+     *
+     * v1.54 两处修正：
+     * ① 后台不算失败。onPause 会 webView.pauseTimers() 把渲染和 JS 一起冻住，而本看门狗走的是
+     *    Handler（主线程照跑）—— 退后台/锁屏期间照样 90 秒倒计时，回前台前能连刷几十轮兜底。
+     *    实测兜底全落在无人时段（06:08–06:33 连 18 轮），人一回来页面立刻就好了。
+     * ② 超时先静默重载一次主页再兜底，别把一次慢加载直接按成「90 秒一轮」。
+     */
+    private final Runnable stallWatch = new Runnable() {
+        @Override public void run() {
             if (fallbackActive) return;
-            if (pageLoadedAt >= expectAfter) return;
+            if (!appForeground) return;                 // 后台/锁屏不计时，回前台重新给满
+            if (pageLoadedAt >= stallWatchAt) return;
+            if (stallReloads < 1) {
+                final WebView wv = webView;
+                if (wv != null) {
+                    stallReloads++;
+                    diagLog("FALLBACK", "page stall 90s, silent reload #" + stallReloads);
+                    pageLoadedAt = 0L;
+                    wv.loadUrl(webHomeUrl());
+                    scheduleStallWatch();
+                    return;
+                }
+            }
             showBootFallback("页面 90 秒没有加载完成");
-        }}, 90000L);
+        }
+    };
+
+    private void scheduleStallWatch() {
+        ui.removeCallbacks(stallWatch);
+        stallWatchAt = System.currentTimeMillis();
+        ui.postDelayed(stallWatch, 90000L);
     }
 
     /** 切到兜底页，并在后台继续探测引擎。幂等：已经在兜底页就只更新原因。 */
@@ -7208,6 +7488,8 @@ public class MainActivity extends Activity {
 
     /** 兜底页专用桥：只在兜底页文档上生效，方法就这几个，不给任何文件 / 命令能力。 */
     private final class BootBridge {
+        private boolean reextractPending;
+
         @android.webkit.JavascriptInterface
         public String state() {
             return fallbackActive ? fallbackStateJson() : "{}";
@@ -7216,6 +7498,43 @@ public class MainActivity extends Activity {
         @android.webkit.JavascriptInterface
         public String action(final String id) {
             if (!fallbackActive) return "{\"ok\":false,\"msg\":\"当前不是兜底页\"}";
+            if (reextractPending) return "{\"ok\":false,\"msg\":\"正在重解并重启，请稍等\"}";
+            if ("reextract".equals(id)) {
+                try {
+                    // 只清重建标记，避免把会话、记忆与设置混入程序恢复范围。
+                    File payload = payloadDir();
+                    File extracted = new File(payload, ".extracted");
+                    File complete = new File(payload, "dshroot/.complete");
+                    if ((extracted.exists() && !extracted.delete())
+                            || (complete.exists() && !complete.delete())
+                            || extracted.exists() || complete.exists()) {
+                        return "{\"ok\":false,\"msg\":\"重建标记删除失败，未重启，请导出日志\"}";
+                    }
+                    reextractPending = true;
+                    engineStartAborted = true;
+                    engineStoppedByUser = true;
+                    // 桥运行在 WebView 后台线程，停旧引擎的等待不能阻塞主线程。
+                    killEngineNow();
+                    android.app.AlarmManager alarms = (android.app.AlarmManager) getSystemService(ALARM_SERVICE);
+                    if (alarms == null) throw new IllegalStateException("alarm service unavailable");
+                    Intent restart = new Intent(MainActivity.this, MainActivity.class);
+                    restart.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+                    android.app.PendingIntent launch = android.app.PendingIntent.getActivity(
+                            MainActivity.this, 7318, restart,
+                            android.app.PendingIntent.FLAG_IMMUTABLE | android.app.PendingIntent.FLAG_UPDATE_CURRENT);
+                    // 先确保系统接手重启，再退出旧进程，避免精确闹钟授权缺失时失去恢复入口。
+                    alarms.setAlarmClock(new android.app.AlarmManager.AlarmClockInfo(
+                            System.currentTimeMillis() + 1000L, launch), launch);
+                    ui.postDelayed(new Runnable() { @Override public void run() {
+                        android.os.Process.killProcess(android.os.Process.myPid());
+                    }}, 300L);
+                    return "{\"ok\":true,\"msg\":\"正在重解并重启；没自动回来就点桌面图标继续重建\"}";
+                } catch (Throwable t) {
+                    reextractPending = false;
+                    Log.w(TAG, "fallback reextract restart failed", t);
+                    return "{\"ok\":false,\"msg\":\"未能自动重启，请手动重开 App 继续重建\"}";
+                }
+            }
             if ("enter".equals(id)) {
                 if (bootCycleFailures >= 2) {
                     return "{\"ok\":false,\"msg\":\"已经连着 " + bootCycleFailures + " 次没进去，先点「重新连接」\"}";

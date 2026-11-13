@@ -13,8 +13,9 @@
  * 所以这里直接对 payload.zip 动手：删条目 —— 而不是"指望上游没带进来"。
  *
  * 用法：
- *   node strip-dist-payload.js <payload.zip>              # 就地剔除
- *   node strip-dist-payload.js <payload.zip> --check-only # 只报告，不改
+ *   node strip-dist-payload.js <payload.zip> [--base <底包 payload.zip>]
+ *   node strip-dist-payload.js <payload.zip> --check-only [--base <...>] # 只报告，不改
+ *   node strip-dist-payload.js <payload.zip> --base <...> --keep-user-bg  # 自用包留壁纸
  * 退出码：0 = 干净（或已修好）；1 = --check-only 且发现不该有的
  */
 const fs = require('fs');
@@ -61,6 +62,13 @@ const BAD = [
   // 只留一份墓碑 SKILL.md —— 它覆盖旧文件，装机侧再把整个目录移进 skills-retired/；
   // 万一迁移没跑成，这份也写着"别加载本技能"。
   [/^dshhome\/skills\/dsh-yijing\/(?!SKILL\.md$).+/i, '旧技能 dsh-yijing 残留'],
+  // 2026-11-11：pi-ai 的工具调用「按 id 归并」（identity-over-index）是本机补丁，不进发行包。
+  // 为什么拦在这里、也只拦在这里：@earendil-works/pi-ai 是依赖树里的第三方包，不是我们维护的内核；
+  // 发行版必须与上游 npm 版字节一致 —— 否则上游哪天真修了同一处，我们这份**整文件覆盖**
+  // 会把官方修法盖回去，而且没人能从版本号看出发生过这件事。
+  // 两条出包路径正好由这一步分开：make-dist-apk.sh 跑 strip（删），
+  // make-install-apk.sh 明确不跑 strip（留）。一处判据，两边自然分叉，不用各写一份名单。
+  [/@earendil-works\/pi-ai\/dist\/api\/openai-completions\.js$/i, '本机 pi-ai 补丁（仅自用，不随发行包）'],
 ];
 
 // 例外白名单：这两份 CHANGELOG 是**我们自己的**应用内更新日志，必须随包分发，

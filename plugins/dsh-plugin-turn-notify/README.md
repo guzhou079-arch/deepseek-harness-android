@@ -9,22 +9,6 @@ DSH 自己没有"回答结束"的通知 —— 通知只在模型主动调 `andr
 
 本插件挂在 `agent/turn-stopping` 事件上，自己发通知。
 
-## 装法（本机）
-
-```sh
-F=/data/user/0/com.deepseek.harness/files
-SRC=/sdcard/DeepSeekHarness/projects/dsh-plugin-turn-notify
-DST=$F/payload/dshhome/profiles/web/node_modules/dsh-plugin-turn-notify
-rm -rf "$DST" && cp -r "$SRC" "$DST"
-
-# 把 insert 追加到 profile patch（先备份）
-P=$F/payload/dshhome/profiles/web/cordis.patch.yml
-cp -p "$P" "$P.bak-before-turn-notify-$(date +%Y%m%d-%H%M%S)"
-cat "$SRC/cordis.patch.yml" | grep -A3 '^- insert:' >> "$P"
-```
-
-⚠️ 改完 patch **要重启引擎**（patchReload 不是热加载）。
-
 ## 配置 `/sdcard/DeepSeekHarness/turn-notify.json`
 
 ```json

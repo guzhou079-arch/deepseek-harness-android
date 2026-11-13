@@ -371,22 +371,41 @@ else if (cmd === 'apk-marks') {
   const ki = args.indexOf('--kernel');
   const ri = args.indexOf('--revision');
   let kernel = ki >= 0 ? args[ki + 1] : null;
-  const revision = ri >= 0 ? args[ri + 1] : stamp(new Date());
+  // revision 的期望值是 **payload 里那份 dshroot/REVISION**，不是「写标记这一刻的时钟」。
+  // 为什么（2026-11-11 查实）：patch 阶段先把本次构建号写进 build-overlay/dshroot/REVISION
+  // 再套进 payload；mark 阶段若各自取一次 new Date()，两个戳会差几秒到几分钟（实测差 16s）。
+  // App 侧 dshrootRevisionChanged() 比的是「APK 里 dshroot_revision.txt」与「设备上 dshroot/REVISION」——
+  // 两者本该相等，各戳一次的时刻永远不等 ⇒ 每次冷启动都判「revision 变了」而多跑一轮同步。
+  // 留空 → 从 payload 读；读不到直接报错，不退回墙上时钟（那正是这个 bug 的成因）。
+  let revision = ri >= 0 ? args[ri + 1] : null;
   // 2026-10-19：流式。原来 readZip 整读 APK，再 writeFileSync(data(p)) 复制一份 155MB payload。
   const es = readZip(apk, { load: false });
-  if (!kernel) {
-    const p = es.find((e) => e.name === ASSET);
-    if (!p) die('APK 里没有 ' + ASSET + '，无法读出内核版本（可用 --kernel 指定）');
-    if (p.method !== 0) die('内层 payload 不是 STORE，暂不支持（method=' + p.method + '）');
+  if (!kernel || !revision) {
+    const pe = es.find((e) => e.name === ASSET);
+    if (!pe) die('APK 里没有 ' + ASSET + '，无法读出内核版本与 revision（可用 --kernel/--revision 指定）');
+    if (pe.method !== 0) die('内层 payload 不是 STORE，暂不支持（method=' + pe.method + '）');
     // ziptool 只吃路径 → 内层 payload 分块落一次临时文件（用完即删），不整读进堆
     const tmp = path.join(process.env.DSH_WORK || path.dirname(out), '.marks-inner-payload.zip');
-    copyRange(apk, p, tmp);
-    const pkg = readZip(tmp, { load: false }).find((e) => e.name === KERNEL_PKG);
-    if (!pkg) { fs.unlinkSync(tmp); die('payload 里没有 ' + KERNEL_PKG); }
-    kernel = JSON.parse(readEntryData(tmp, pkg).toString('utf8')).version;
-    fs.unlinkSync(tmp);
+    copyRange(apk, pe, tmp);
+    const inner = readZip(tmp, { load: false });
+    let fail = null;
+    try {
+      if (!kernel) {
+        const pkg = inner.find((e) => e.name === KERNEL_PKG);
+        if (!pkg) fail = 'payload 里没有 ' + KERNEL_PKG;
+        else kernel = JSON.parse(readEntryData(tmp, pkg).toString('utf8')).version;
+      }
+      if (!fail && !revision) {
+        const rev = inner.find((e) => e.name === 'dshroot/REVISION');
+        const v = rev ? readEntryData(tmp, rev).toString('utf8').trim() : '';
+        if (!v) fail = 'payload 里没有 dshroot/REVISION —— 先跑 patch（构建号由它写），或用 --revision 指定';
+        else revision = v;
+      }
+    } finally { fs.unlinkSync(tmp); }
+    if (fail) die(fail);
   }
   if (!kernel) die('读不出内核版本，请用 --kernel 指定');
+  if (!/^[0-9]{14}$/.test(String(revision))) die('revision 形态不对（期望 14 位 yyyyMMddHHmmss）：' + revision);
   let written = 0;
   function* marked() {
     const afd = fs.openSync(apk, 'r');

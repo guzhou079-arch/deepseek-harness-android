@@ -27,13 +27,13 @@ if [ "${1:-}" = "--print-plan" ]; then
   printf 'version=%s\ncode=%s\noutput=DeepSeekHarness-v%s-code%s-<timestamp>-<pid>-dist.apk\n' "$V" "$C" "$V" "$C"
   exit 0
 fi
-BASE="${DSH_BASE_APK:-$SB/work/base-current-295.apk}"
-[ -f "$BASE" ] || { echo '✗ Missing base-current-295.apk'; exit 1; }
+BASE="${DSH_BASE_APK:-$("$NODE" "$SB/lib/base-apk.js" --dist --path)}"
+[ -f "$BASE" ] || { echo "✗ 底包不存在：$BASE（发行底包见 selfbuild/lib/base-apk.js 的 PINNED_DIST）"; exit 1; }
 # 底包钉 sha256：`/selfbuild/work/*` 被 .gitignore，这份 162MB 是本机缓存，被清掉或换成
 # 另一个同名包时**没有任何告警**；而 295 的产物看起来可能和原来一模一样（current 真补丁
 # 早烘进底包了），事后无法从产物反推底包被换过。所以存在性检查之外再验内容。
-# 合法换底包：改下面这行默认值，或 DSH_BASE_SHA256=<新值> 覆盖（逃生口）。
-BASE_SHA256="${DSH_BASE_SHA256:-edf0043c4b617e67c694b315847929b62f9d708fce7c40f019b53d0e1392854c}"
+# 声明值只有一处：lib/base-apk.js 的 PINNED_DIST。逃生口：DSH_BASE_SHA256=<新值>。
+BASE_SHA256="${DSH_BASE_SHA256:-$("$NODE" "$SB/lib/base-apk.js" --dist --sha256)}"
 case "$BASE_SHA256" in
   *[!0-9a-f]*|'') echo '✗ DSH_BASE_SHA256 必须是 64 位小写十六进制'; exit 2 ;;
 esac

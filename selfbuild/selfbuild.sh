@@ -141,9 +141,9 @@ patch)
   fi
   if [ "$BG_ZIP_OK" != 1 ]; then
     echo "✗ 背景图注入整体丢失，不是覆盖问题："
-    echo "  底包 295 里那条 $BG_ENTRY（61,189 B）是带注入的，现在包里也没有、overlay 里也没有，"
+    echo "  底包里那条 $BG_ENTRY 是带注入的，现在包里也没有、overlay 里也没有，"
     echo "  说明这条文件整个没进 payload（或进的是别处的干净版本）→ 装上去背景图不会加载。"
-    echo "  修：确认底包是 base-current-295.apk，且 overlay 没有同名文件把它盖掉。"
+    echo "  修：确认底包是 $("$NODE" "$SB/lib/base-apk.js" --path) 里那份（lib/base-apk.js 的 PINNED），且 overlay 没有同名文件把它盖掉。"
     exit 1
   fi
 
