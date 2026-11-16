@@ -105,7 +105,7 @@ fi
 # 防止把开发机上的用户插件 .pnpm / 个人状态打进发行包 —— 多一个条目就失败退出。
 PROF_MOD="$OVL/dshhome/profiles/web/node_modules"
 if [ -d "$PROF_MOD" ]; then
-  PROF_ALLOW="dsh-android-console dsh-plugin-auto-summary-policy dsh-plugin-session-rewind dsh-plugin-turn-notify dsh-session-delete dsh-codex-power-slider dsh-doc-media dsh-doc-actions dsh-smart-search dsh-plugin-roundtable dsh-ppt fflate @deepseek-ai @office-kit dsh-memory-ui dsh-user-profile dsh-plugin-another-me dsh-plugin-neuron-hub dsh-tool-gate dsh-plugin-food-card dsh-settings-extensions dsh-self-card"
+  PROF_ALLOW="dsh-android-console dsh-plugin-auto-summary-policy dsh-plugin-session-rewind dsh-plugin-turn-notify dsh-session-delete dsh-codex-power-slider dsh-doc-media dsh-doc-actions dsh-smart-search dsh-plugin-roundtable dsh-ppt fflate @deepseek-ai @office-kit dsh-memory-ui dsh-user-profile dsh-plugin-another-me dsh-plugin-neuron-hub dsh-tool-gate dsh-multi-edit dsh-plugin-food-card dsh-settings-extensions dsh-self-card"
   for child in "$PROF_MOD"/* "$PROF_MOD"/.[!.]* "$PROF_MOD"/..?*; do
     [ -e "$child" ] || continue
     pname=$(basename "$child")
@@ -114,7 +114,15 @@ if [ -d "$PROF_MOD" ]; then
     esac
   done
 fi
-DHOME_ALLOW="skills cordis.patch.yml profiles"
+# tools：班组工具（crew.js / crew-selftest.sh / weekly.js / browser.js）的唯一发行来源。
+# 底包只带前三样，browser.js 由班组技能引用却从来没进过任何底包，装出来的机器上那份技能
+# 等于指着一个不存在的脚本。收进来之前已逐字节核对：overlay 里与底包同名的三份完全一致，
+# 所以这里不会引入任何行为变化，只是让"新增的工具文件"有路可走。
+# tool-gate.json：发行版默认值，不是个人配置。插件在缺文件时按 enabled:true 走
+# （dsh-tool-gate/lib/index.js 的 DEFAULT），用户装上去开局只看见 bash 和 tool_load，
+# 翻工具列表会以为高级功能没随包。overlay 里这份是 {"enabled": false}，与开发机
+# 运行树里那份同名同义 —— 收进来才能做到"出厂即全量工具"。
+DHOME_ALLOW="skills cordis.patch.yml profiles tools tool-gate.json"
 if [ -d "$OVL/dshhome" ]; then
   for source in "$OVL/dshhome"/* "$OVL/dshhome"/.[!.]* "$OVL/dshhome"/..?*; do
     [ -e "$source" ] || continue
@@ -161,6 +169,16 @@ runlog "$NODE" "$SB/scripts/fix-frontend-cache-token.js" "$SB/work/payload-new.z
 STRIP_EXTRA=""
 [ "${DSH_KEEP_USER_BG:-0}" = "1" ] && STRIP_EXTRA="--keep-user-bg"
 runlog "$NODE" "$SB/scripts/strip-dist-payload.js" "$SB/work/payload-new.zip" $STRIP_EXTRA
+# pi-ai 的 openai-completions.js 必须是**上游 npm 原版字节**。
+# strip 从 2026-11-15 起不再删这个文件（删了 lazy 入口的 import 就指向空模块，任何
+# OpenAI 兼容自定义端点调用即崩），改由 overlay 放上游原版覆盖底包里那份本机补丁版。
+# 覆盖靠人记得改 overlay 不可靠，所以这里按 md5 锁死：不匹配就中止，不出签名包。
+runlog "$PY" -c 'import sys,zipfile,hashlib
+n="dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@earendil-works/pi-ai/dist/api/openai-completions.js"
+d=zipfile.ZipFile(sys.argv[1]).read(n)
+a=hashlib.md5(d).hexdigest()
+print("pi-ai openai-completions: %d B  %s" % (len(d), a))
+sys.exit(0 if a=="88cdd3ec91759efdcdecc798d73526fe" else 1)' "$SB/work/payload-new.zip"
 # 2026-11-06 发行隐私整改：脱敏必须作用在**最终 payload** 上。
 # 底包 base-current-175.apk 里躺的是未脱敏的旧插件文案，patch 阶段会把旧版盖回来；
 # 反过来设备运行树也会被冷启动 FORCE_OVERWRITE 重铺 —— 两头都不可信，只信这里。

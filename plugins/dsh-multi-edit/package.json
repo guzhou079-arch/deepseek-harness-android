@@ -1,0 +1,11 @@
+{
+  "name": "dsh-multi-edit",
+  "version": "0.1.0",
+  "private": true,
+  "description": "事务性多文件编辑引擎：一批操作先规划、查冲突、结构化定位、校验，全过才落盘，失败整体回滚，留审计轨迹",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": { ".": "./lib/index.js", "./package.json": "./package.json" },
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
+  "peerDependencies": { "@deepseek-ai/dsh": ">=0.1.7-rc.1", "@deepseek-ai/cordis": "^4.0.1" }
+}

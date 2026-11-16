@@ -207,11 +207,13 @@ def scan(apk, overlay, wallpaper):
                 if not isinstance(dependencies, dict) or dependencies:
                     problems.append('distribution profile dependencies must be empty')
             # Only distributable seed configuration may survive under dshhome.
-            # dshhome/tools/ 例外到**文件级**：crew.js 与 crew-selftest.sh 是 dsh-crew 技能的运行时
+            # dshhome/tools/ 例外到**文件级**：crew.js / crew-selftest.sh / browser.js 是技能的运行时
             # 依赖，技能文档直接引用它们，缺了就指向空路径。逐文件列名而不是整个 tools/ 放行 ——
             # 目录级放行会让以后丢进来的私人脚本一起过闸。
-            allowed = {'skills', 'cordis.patch.yml', 'profiles'}
-            tools_allow = {'dshhome/tools/crew.js', 'dshhome/tools/crew-selftest.sh'}
+            # tool-gate.json 是发行默认值（enabled:false），不是个人配置：
+            # 缺它时 dsh-tool-gate 按 enabled:true 走，用户装上去开局只剩 bash + tool_load。
+            allowed = {'skills', 'cordis.patch.yml', 'profiles', 'tool-gate.json'}
+            tools_allow = {'dshhome/tools/crew.js', 'dshhome/tools/crew-selftest.sh', 'dshhome/tools/browser.js'}
             for n in names:
                 if not n.startswith('dshhome/') or len(n.split('/')) < 2:
                     continue

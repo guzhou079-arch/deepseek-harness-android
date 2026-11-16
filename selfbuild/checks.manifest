@@ -22,7 +22,7 @@ dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-nfc
 # ④ 虚拟屏（移植自 Operit）
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-vscreen/lib/index.js|3ab7b0534269f458cf59e0b2c749c27d|android_vscreen_create|all||5
 # ⑤ 交付文件「打开」的引擎侧 android 分支（v1.15）
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-native-command/lib/index.js|9e7299c51ef5183ee6c31cc1fe803681|androidBridgeOpen|all||3
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-native-command/lib/index.js|6b2e9e9eeb7c9e7bdb53b830155705dc|androidBridgeOpen|all||3
 # ⑤b app-boot 的 warn/error 落地日志（DSH_ANDROID_PLUGIN_LOG）—— 2026-11-06 补进清单
 # 这条补丁此前**没有脚本、不在 overlay、不在清单**，全靠人肉 diff，是排障唯一的眼睛
 # （2026-11-05 就是靠它看见「6 个自研包 failed to import」）。现在由
@@ -36,7 +36,7 @@ dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-u
 # 当前 md5 = APK payload 里的上游原版（实测与 payload 逐字节一致）。
 # 结论：漂移源于清单过期，文件本身健康。只做漂移检测。
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-cordis/lib/client.js|7fc35ed60a574463083ebfbec2607ed2|-|all|没有补丁，只做漂移检测（见上方注释），所以不设关键字|0
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/mobile.css|f957dac672f2f80d81af0796dc21d075|role="tooltip"|all||1
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/mobile.css|ce454e9ac3b7afb03fc7a91b9ad78c93|role="tooltip"|all||1
 # ⑦ v1.24：静态资源门禁（非 index 资产也要过围栏+cookie 鉴权，堵住用户背景图等无鉴权可读面）
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-host-frontend-static/lib/index.js|d2fc943953f6c7ff508369525fb28811|assetRefusal|all|-|1
 # ⑧ v1.28：两条客户端路由加鉴权 —— **那一版已作废并隔离**（改 inject 把引擎装到起不来，
@@ -93,7 +93,7 @@ dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-fron
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/mobile.js|bf0ac56f9e063a6509f50dbccc393d40|dsh-update-banner|all||4
 # ④ Android 运行环境适配（2026-10-03 rc.2 事故后补录：这 6 个文件的补丁原先只手工塞在 payload 里，
 #    换内核时随上游改动一起被覆盖 → 每轮 EACCES。纳入清单后，装机前的 verify 就能拦住）
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/index.js|395ea781e336848cd748b5fdfba383da|open(currentPath, "wx")|all||1
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/index.js|487373500d5acbc292a66f0f0a906db2|open(currentPath, "wx")|all||1
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-fs-local/lib/index.js|0baf3997dddc60eb58d945d87ca7e2f3|isHardlinkUnsupported|all||2
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-attachment-local/lib/index.js|79fb0d08ac8e40fdd32ca8d9d68bb586|sharp-shim|all||3
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-llm-deepseek/lib/index.js|2d8c330c0f4686268b485cb268eca939|isAttachmentError|all|把附件读取失败识别成可读错误而不是崩；丢了这个词，发图片/文件会整轮失败|2
@@ -104,8 +104,8 @@ dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-fs-
 #    且"到货卡片"只挂在会话页 → 用户分享进来的文件收下了却没人看见。
 #    这两条把「带 shell.overlay 到货横幅的那一份」钉死，两份副本都必须一致）
 # 2026-11-04：设置页「控制台」加 QQ 群入口（群号 1050918023），md5 随改动更新。
-dshhome/profiles/web/node_modules/dsh-android-console/lib/client.js|e7c419b4e2ebac6dfe8ccb1a88bb4808|android-share-notice|all||1
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-android-console/lib/client.js|e7c419b4e2ebac6dfe8ccb1a88bb4808|android-share-notice|all||1
+dshhome/profiles/web/node_modules/dsh-android-console/lib/client.js|47f9e60f1237e740180467a1e799bc02|android-share-notice|all||1
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-android-console/lib/client.js|47f9e60f1237e740180467a1e799bc02|android-share-notice|all||1
 # ⚠️ 2026-10-15 之前这条清单**没覆盖**这两个文件，于是"源码改了、包里带的还是旧的"
 #    能一路通过 verify。装 1.39 之前，patch-check 对这两条会报漂移（装机副本还是旧的）——那是**正确**的。
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-plugin-auto-summary-policy/lib/index.js|d0beb2db51a199d1d7b4a45b5cc74936|0.1.2-effective-policy|all||1
@@ -123,7 +123,7 @@ dshhome/profiles/web/node_modules/dsh-plugin-turn-notify/lib/index-v3.js|22515a7
 # 2026-11-06 更新 md5：发行隐私整改，本文件顶部注释改写（7 个私人插件的 insert 声明仍在，
 # 只是加了脱敏说明）。内容差异仅注释，条目/配置零变化；关键字标记 dsh-doc-media 仍命中。
 # 提醒：改这个文件必须在 payload-new.zip 上复跑 payload-check，md5 与 overlay 必须一致（已核 62da1f13…）。
-dshhome/cordis.patch.yml|028e79f7b7550a9d1c62d5f173b5fa6f|dsh-doc-media|all||1
+dshhome/cordis.patch.yml|350949d4dbe01e399a1f0f99a9528bb3|dsh-doc-media|all||1
 
 # 2026-10-21 v1.42：文件预览视频播放 + 安卓文件动作。两个都是纯客户端插件，
 # Node 半边（lib/index.js）只为让 Loader 能解析包入口，必须随包，否则启动日志报
@@ -168,8 +168,9 @@ dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-workspac
 # 2026-11-13：一条坏会话不该毁掉整个 workspace。线上形状：一条会话的身份校验抛裸 Error，
 # 会话清单枚举整体抛掉，workspaceRegistry 永不可用 → 目录选择器空列表、按钮全灰。
 # ① 会话根下点开头的目录不是项目目录（回收站 / 半途移动 / 临时目录），不进去索引
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/index.js|395ea781e336848cd748b5fdfba383da|DSH_PATCH_skip_dot_dirs|all|点开头目录被当项目目录索引，回收站里的会话会被当成某个项目的会话列出来|1
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/index.js|487373500d5acbc292a66f0f0a906db2|DSH_PATCH_skip_dot_dirs|all|点开头目录被当项目目录索引，回收站里的会话会被当成某个项目的会话列出来|1
 # ② 身份不符按「存储损坏」处理，上层才能按单条会话降级，而不是裸 Error 冒到枚举层
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/index.js|395ea781e336848cd748b5fdfba383da|does not match header id|all|身份不符退回裸 Error，枚举层不认这种错，整条链一起挂|1
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/index.js|395ea781e336848cd748b5fdfba383da|header id cannot name a storage path|all|header 的 id 拼不出存储路径时也必须能降级|1
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/index.js|395ea781e336848cd748b5fdfba383da|and cwd identify|all|header 的 cwd 与物理位置不符时也必须能降级|1
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/index.js|487373500d5acbc292a66f0f0a906db2|does not match header id|all|身份不符退回裸 Error，枚举层不认这种错，整条链一起挂|1
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/index.js|487373500d5acbc292a66f0f0a906db2|header id cannot name a storage path|all|header 的 id 拼不出存储路径时也必须能降级|1
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/index.js|487373500d5acbc292a66f0f0a906db2|and cwd identify|all|header 的 cwd 与物理位置不符时也必须能降级|1
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/index.js|487373500d5acbc292a66f0f0a906db2|DSH_PATCH_skip_dot_session_dirs|all|工程目录里出现的点开头目录（回收站、半截移动）也不当会话目录索引，否则一条坏日志照样拖死整个列表|1

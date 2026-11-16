@@ -218,5 +218,29 @@
   {
     "local": "selfbuild/scripts/make-kernel-bundle.sh",
     "repo": "selfbuild/scripts/make-kernel-bundle.sh"
+  },
+  {
+    "repo": "plugins/dsh-multi-edit/package.json",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-multi-edit/package.json"
+  },
+  {
+    "repo": "plugins/dsh-multi-edit/cordis.patch.yml",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-multi-edit/cordis.patch.yml"
+  },
+  {
+    "repo": "plugins/dsh-multi-edit/lib/index.js",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-multi-edit/lib/index.js"
+  },
+  {
+    "repo": "skills/dsh-crew/scripts/browser.js",
+    "local": "selfbuild/build-overlay/dshhome/tools/browser.js"
+  },
+  {
+    "repo": "android-app/src/com/deepseek/harness/VoiceCapture.java",
+    "local": "v118/android-app/src/com/deepseek/harness/VoiceCapture.java"
+  },
+  {
+    "repo": "plugins/dsh-android-console/lib/client.js",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-android-console/lib/client.js"
   }
 ]
