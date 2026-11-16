@@ -770,6 +770,45 @@ public class MainActivity extends Activity {
         // 附件/文件选择：官方前端用 <input type="file"> 选文件，Android WebView 必须实现
         // onShowFileChooser 才会弹系统文件选择器，否则点「添加附件」没有任何反应。
         webView.setWebChromeClient(new WebChromeClient() {
+            // WebView 的默认行为是拒绝一切权限请求，而拒绝是静默的：不实现本回调，
+            // 前端 navigator.mediaDevices.getUserMedia 直接抛 NotAllowedError，
+            // 页面连一次授权弹窗都拿不到。语音输入整条链路（浏览器侧 MediaStream 收音
+            // → 本地语音识别）就卡在这里，与运行时 RECORD_AUDIO 是否已授权无关。
+            // 只在主文档确实来自本机回环时放行采集；其余来源一律拒绝。
+            @Override
+            public void onPermissionRequest(final android.webkit.PermissionRequest request) {
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            if (!trustedWebDocument) {
+                                request.deny();
+                                return;
+                            }
+                            String[] requested = request.getResources();
+                            java.util.List<String> allow = new java.util.ArrayList<String>();
+                            if (requested != null) {
+                                for (String r : requested) {
+                                    if (android.webkit.PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(r)
+                                            || android.webkit.PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(r)) {
+                                        allow.add(r);
+                                    }
+                                }
+                            }
+                            if (allow.isEmpty()) {
+                                request.deny();
+                            } else {
+                                request.grant(allow.toArray(new String[allow.size()]));
+                            }
+                        } catch (Throwable t) {
+                            try {
+                                request.deny();
+                            } catch (Throwable ignored) {}
+                        }
+                    }
+                });
+            }
+
             // 2026-10-19 诊断用：WebView 里的 JS 异常与 console 输出以前**完全看不到**
             // （没有 onConsoleMessage 转发），插件加载失败的原因只能靠猜。
             // ERROR/WARNING 全记；INFO/LOG 只在含插件相关关键词时记，避免刷爆 256KiB 环形缓冲。
@@ -4986,7 +5025,21 @@ public class MainActivity extends Activity {
                 return "{\"ok\":true,\"speaking\":true}";
             } else if ("stop".equals(action)) {
                 vm.stopSpeaking();
+                vm.stopAudioPlayback();
                 return "{\"ok\":true,\"speaking\":false}";
+            } else if ("playAudio".equals(action)) {
+                // 云端 TTS 合成好的音频走这条路：系统播报只吃文字，喂不了文件。
+                String audioPath = jsonField(raw, "path");
+                if (audioPath.isEmpty()) audioPath = queryField(path, "path");
+                if (audioPath.isEmpty()) {
+                    return "{\"ok\":false,\"error\":\"path 字段不能为空\"}";
+                }
+                java.io.File audioFile = new java.io.File(audioPath);
+                if (!audioFile.isFile()) {
+                    return "{\"ok\":false,\"error\":\"音频文件不存在\"}";
+                }
+                vm.playAudioFile(audioFile.getAbsolutePath());
+                return "{\"ok\":true,\"speaking\":true}";
             } else if ("status".equals(action)) {
                 return "{\"ok\":true,\"isSpeaking\":" + vm.isSpeaking() + "}";
             }

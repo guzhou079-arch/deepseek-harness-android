@@ -218,26 +218,20 @@ window.__ModuleLoader__.load({
       const [voiceHub, setVoiceHub] = react.useState({
         config: {
           hotword_enabled: '1',
-          wake_words: '流光,小鲸鱼,DeepSeek',
+          wake_words: '小鲸鱼,DeepSeek',
           wake_mode: 'single_breath',
           stt_engine: 'system',
-          tts_engine: 'edge',
-          tts_voice: 'zh-CN-XiaoxiaoNeural',
+          tts_engine: 'deepseek',
+          tts_voice: 'stella',
           tts_speed: '1.0',
           custom_api_url: '',
           custom_api_key: '',
           custom_model_name: 'tts-1',
         },
         presets: [
-          { id: 'zh-CN-XiaoxiaoNeural', name: '晓晓 · 温柔女声', engine: 'edge', gender: 'female', tags: '清晰/自然/推荐' },
-          { id: 'zh-CN-YunxiNeural', name: '云希 · 沉稳男声', engine: 'edge', gender: 'male', tags: '沉稳/磁性/播报' },
-          { id: 'zh-CN-YunjianNeural', name: '云健 · 阳光男声', engine: 'edge', gender: 'male', tags: '活力/解说' },
-          { id: 'zh-CN-XiaoyiNeural', name: '晓伊 · 灵动少女', engine: 'edge', gender: 'female', tags: '甜美/对话' },
-          { id: 'nova', name: 'Nova · 温暖知性 (OpenAI)', engine: 'openai', gender: 'female', tags: '高保真/细腻' },
-          { id: 'shimmer', name: 'Shimmer · 元气甜美 (OpenAI)', engine: 'openai', gender: 'female', tags: '清脆/活力' },
-          { id: 'alloy', name: 'Alloy · 科技极客 (OpenAI)', engine: 'openai', gender: 'neutral', tags: '中性/平衡' },
-          { id: 'onyx', name: 'Onyx · 低沉浑厚 (OpenAI)', engine: 'openai', gender: 'male', tags: '磁性/低音' },
-          { id: 'system_default', name: '系统原生 · 默认音色', engine: 'system', gender: 'auto', tags: '零延迟/离线' },
+          { id: 'stella', name: '星蓝 · 官方女声', engine: 'deepseek', gender: 'female', tags: '官方/自然/沉稳' },
+          { id: 'tide', name: '潮汐 · 官方男声', engine: 'deepseek', gender: 'male', tags: '官方/低沉/叙事' },
+          { id: 'custom', name: '自定义模型', engine: 'custom', gender: 'auto', tags: '填自己的 URL / Key / 模型名' },
         ],
       });
 
@@ -510,7 +504,7 @@ window.__ModuleLoader__.load({
     /**
      * 二次确认：**必须用弹层**（Modal 会 portal 到 body，永不随页面滚动跑出视野）。
      *
-     * 血的教训（2026-10-07 用户当场报）：第一版把确认条与提示写成页面 JSX 末尾的一行，
+     * 血的教训：第一版把确认条与提示写成页面 JSX 末尾的一行，
      * 于是点「重启」时它在屏幕外 —— 用户以为"按钮没绑功能"，划到最底才看到。
      * 凡是"点了要有反馈"的东西，都不能放在滚动容器的末尾。
      */
@@ -580,7 +574,7 @@ window.__ModuleLoader__.load({
       { id: 'ds', label: '日常工作', provider: 'opencode-go', model: 'deepseek-v4.1-flash', effort: 'high', use: '日常问答、常规脚本、文档和一般工具任务', cost: 'Go · DeepSeek high' },
       { id: 'cheap', label: '轻量与重复任务', provider: 'opencode-go', model: 'deepseek-v4.1-flash', effort: 'low', use: '取数、转格式、摘要、分类和批量重复任务', cost: 'Go · DeepSeek low' },
     ];
-    // 2026-10-25：角色表改成用户可编辑。默认值仍是 MODEL_ROLES，改动存 localStorage，刷新仍在。
+    // 角色表改成可编辑。默认值仍是 MODEL_ROLES，改动存 localStorage，刷新仍在。
     // 2026-10-25：模型清单走官方 RPC remote.session.modelCatalog()（设置页的模型项也是读它）。
     let PROVIDER_CTX = null;
     const readAnyService = name => {
@@ -852,7 +846,7 @@ window.__ModuleLoader__.load({
 
     /**
      * 全部账目页：按天分组、每页 60 笔、可「加载更多」。
-     * 入口在「💰 今日记账与消费流水」卡片底部 —— 那张卡片只列**今天**（用户 2026-10-15 要求），
+     * 入口在「💰 今日记账与消费流水」卡片底部 —— 那张卡片只列**今天**，
      * 更早的账都在这里翻。
      */
     function LedgerPage({ onBack }) {
@@ -953,102 +947,6 @@ window.__ModuleLoader__.load({
       ] });
     }
 
-    /**
-     * 时光机快照页：列出 /sdcard/Download/DSH_Backups 里的快照，选中一个还原。
-     *
-     * 还原是不可逆动作（覆盖记忆库、会话与配置），所以点「还原」先出确认弹层。
-     * 真正干活的是插件 node 侧的 /android-console-snapshot，它转手交给备份脚本；
-     * 脚本自带哈希校验与还原前安全快照，这里只负责挑包与报结果。
-     */
-    function SnapshotPage(props) {
-      const onBack = props.onBack || function() {};
-      const [items, setItems] = react.useState(null);
-      const [err, setErr] = react.useState('');
-      const [pick, setPick] = react.useState(null);
-      const [busy, setBusy] = react.useState('');
-      const [result, setResult] = react.useState(null);
-      const load = react.useCallback(function() {
-        setErr('');
-        fetch('/android-console-snapshot', { credentials: 'same-origin', cache: 'no-store' })
-          .then(function(r) { return r.json(); })
-          .then(function(d) {
-            if (d && d.ok) {
-              setItems(d.items || []);
-              if (d.missing) setErr('备份目录里还没有快照，先点「立即备份」生成一个。');
-            } else {
-              setErr((d && d.error) || '读取失败');
-            }
-          })
-          .catch(function() { setErr('读取失败'); });
-      }, []);
-      react.useEffect(function() { load(); }, [load]);
-      const sizeText = function(n) {
-        if (!n) return '0 B';
-        if (n < 1048576) return (n / 1024).toFixed(0) + ' KB';
-        return (n / 1048576).toFixed(1) + ' MB';
-      };
-      const timeText = function(s) {
-        if (!s) return '';
-        const d = new Date(s);
-        if (isNaN(d.getTime())) return String(s).replace('T', ' ').slice(0, 19);
-        const pad = function(n) { return String(n).length < 2 ? '0' + n : String(n); };
-        return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
-      };
-      const restore = function(item) {
-        setPick(null);
-        setBusy(item.file);
-        setResult(null);
-        fetch('/android-console-snapshot', {
-          method: 'POST',
-          credentials: 'same-origin',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ file: item.file }),
-        })
-          .then(function(r) { return r.json(); })
-          .then(function(d) { setResult(d || { ok: false, error: '没有返回内容' }); })
-          .catch(function(e) { setResult({ ok: false, error: '请求失败：' + (e && e.message ? e.message : '网络中断') }); })
-          .then(function() { setBusy(''); });
-      };
-      const rows = (items || []).map(function(item) {
-        return jsx(Row, {
-          key: item.file,
-          title: timeText(item.createdAt) || item.file,
-          desc: sizeText(item.size) + ' · ' + item.sessions + ' 个会话 · ' + item.files + ' 个文件' + (item.tag ? ' · ' + item.tag : ''),
-          right: jsx(Button, {
-            variant: 'outline',
-            size: 'sm',
-            disabled: !!busy,
-            onClick: function(ev) { ev.stopPropagation(); setPick(item); },
-            children: busy === item.file ? '还原中…' : '还原',
-          }),
-        }, item.file);
-      });
-      return jsxs('div', { className: 'ctl-root', children: [
-        jsx(Back, { title: '时光机快照', onBack: onBack }),
-        jsx(Note, { children: '这里列出 /sdcard/Download/DSH_Backups 里的快照包。还原会覆盖当前的记忆库、会话与配置；脚本执行前会自动打一份 BeforeRestore 安全快照，中途出错可以拿它回滚。还原完成后重启一次引擎才会完全生效。' }),
-        jsx('div', { className: 'ctl-sep' }),
-        items === null && !err ? jsx(Row, { title: '正在读取…', desc: '' }) : null,
-        err ? jsx(Row, { title: '读取失败', desc: err, descWarn: true }) : null,
-        items && items.length === 0 && !err ? jsx(Row, { title: '还没有快照', desc: '回到上一页点「立即备份」生成第一个。' }) : null,
-        rows,
-        busy ? jsx(Row, { title: '正在还原…', desc: '包越大越久，几分钟都可能。别退出这一页。' }) : null,
-        result && result.ok ? jsx(Row, { title: '还原完成', desc: '到控制台首页重启一次引擎，新数据才会完全生效。' }) : null,
-        result && !result.ok ? jsx(Row, { title: '还原失败', desc: (result.error || '未知错误') + '（可用 BeforeRestore 安全快照回滚）', descWarn: true }) : null,
-        jsx('div', { className: 'ctl-bar', children: jsx(Button, { variant: 'ghost', size: 'sm', disabled: !!busy, onClick: load, children: '刷新列表' }) }),
-        pick ? jsx(Modal, {
-          open: true,
-          onClose: function() { setPick(null); },
-          title: '还原这份快照',
-          closeLabel: '关闭',
-          description: '把 ' + timeText(pick.createdAt) + ' 的快照还原回来？当前记忆库、会话与配置会被覆盖。脚本会先自动打一份安全快照。',
-          footer: jsxs(Fragment, { children: [
-            jsx(Button, { variant: 'outline', onClick: function() { setPick(null); }, children: '取消' }),
-            jsx(Button, { variant: 'primary', onClick: function() { restore(pick); }, children: '确认还原' }),
-          ] }),
-        }) : null,
-      ] });
-    }
-
     function ConsoleSection(ownerProps) {
       ensureCss();
       const close = ownerProps && typeof ownerProps.close === 'function' ? ownerProps.close : () => {};
@@ -1069,6 +967,7 @@ window.__ModuleLoader__.load({
       const [lanInput, setLanInput] = react.useState('');
       const [testText, setTestText] = react.useState('你好！我是 DeepSeek 智能语音分身，随时为您服务。');
       const [isAuditioning, setIsAuditioning] = react.useState(false);
+      const [fetchedVoices, setFetchedVoices] = react.useState([]);
       const state = rawState ? Object.assign({}, rawState, { life: lifeData }) : null;
       const flashTimer = react.useRef(null);
 
@@ -1094,8 +993,6 @@ window.__ModuleLoader__.load({
       if (page === 'models') return jsx(ModelRoutingPage, { services: ownerProps.modelServices, onBack: () => setPage('main') });
 
       if (page === 'ledger') return jsx(LedgerPage, { onBack: () => setPage('life') });
-
-      if (page === 'snapshot') return jsx(SnapshotPage, { onBack: () => setPage('main') });
 
       if (!state) {
         return jsx('div', { className: 'ctl-empty', children: [
@@ -1284,10 +1181,10 @@ window.__ModuleLoader__.load({
         const vCfg = voiceHub.config || {};
         const presets = voiceHub.presets || [];
         const isHotword = vCfg.hotword_enabled === '1' || vo.hotwordEnabled;
-        const currentWords = vCfg.wake_words || vo.wakeWords || '流光,小鲸鱼,DeepSeek';
-        const currentVoice = vCfg.tts_voice || 'zh-CN-XiaoxiaoNeural';
+        const currentWords = vCfg.wake_words || vo.wakeWords || '小鲸鱼,DeepSeek';
+        const currentVoice = vCfg.tts_voice || 'stella';
         const currentSpeed = vCfg.tts_speed || '1.0';
-        const currentEngine = vCfg.tts_engine || 'edge';
+        const currentEngine = vCfg.tts_engine || 'deepseek';
 
         return jsxs('div', { className: 'ctl-root', children: [
           jsx(Back, { title: '语音交互与 TTS 调音台', onBack: () => setPage('main') }),
@@ -1341,26 +1238,40 @@ window.__ModuleLoader__.load({
 
           // ========== 第二板块：🔊 TTS 语音模型与音色调音台 ==========
           jsx('div', { className: 'ctl-group', children: '🔊 TTS 语音模型与音色调音台' }),
+
+          // 自动朗读：开了之后助手正文一边出就一边念，不需要任何按钮占位。
+          jsxs('div', { style: { padding: '8px 0 6px' }, children: [
+            jsx('div', { className: 'ctl-title', children: '自动朗读' }),
+            jsx('div', { className: 'ctl-desc', style: { marginBottom: '8px' }, children: '开启后助手每条回复自动朗读；关掉就完全安静' }),
+            jsx(SegmentGrid, {
+              columns: 2,
+              value: vCfg.auto_read === '1' ? '1' : '0',
+              options: [
+                { value: '1', label: '开启' },
+                { value: '0', label: '关闭' },
+              ],
+              onChange: (v) => saveVoiceConfig({ auto_read: v }),
+            }),
+          ] }),
           jsxs('div', { style: { padding: '8px 0 6px' }, children: [
             jsx('div', { className: 'ctl-title', children: 'TTS 播报引擎' }),
-            jsx('div', { className: 'ctl-desc', style: { marginBottom: '8px' }, children: '选择语音合成服务来源（微软自然音 / OpenAI / 系统原生 / 自定义 API）' }),
+            jsx('div', { className: 'ctl-desc', style: { marginBottom: '8px' }, children: '官方接口或你自己的模型，两条都真能出声' }),
             jsx(SegmentGrid, {
               columns: 2,
               value: currentEngine,
               options: [
-                { value: 'edge', label: '微软自然音' },
-                { value: 'openai', label: 'OpenAI' },
-                { value: 'system', label: '系统原生' },
-                { value: 'custom', label: '自定义 API' },
+                { value: 'deepseek', label: 'DeepSeek 官方' },
+                { value: 'custom', label: '自定义模型' },
               ],
               onChange: (eng) => saveVoiceConfig({ tts_engine: eng }),
             }),
           ] }),
 
-          // 预设音色库卡片选择
-          jsx('div', { style: { padding: '8px 0 2px' }, children: [
-            jsx('div', { className: 'ctl-title', style: { fontSize: '13px', marginBottom: '6px' }, children: '精选音色预设库（点击切换）' }),
-            jsx('div', { className: 'ctl-voice-grid', children: presets.map((p) => {
+          // 音色属于模型本身：官方只有两个 voice_id 值得列，
+          // 自定义模型的音色由那个模型自己定义，不替它规定。
+          currentEngine === 'deepseek' ? jsx('div', { style: { padding: '8px 0 2px' }, children: [
+            jsx('div', { className: 'ctl-title', style: { fontSize: '13px', marginBottom: '6px' }, children: '官方音色（点击切换）' }),
+            jsx('div', { className: 'ctl-voice-grid', children: presets.filter((p) => p.engine === 'deepseek').map((p) => {
               const active = currentVoice === p.id;
               return jsxs('div', {
                 key: p.id,
@@ -1375,7 +1286,7 @@ window.__ModuleLoader__.load({
                 ],
               });
             }) }),
-          ] }),
+          ] }) : null,
 
           // 语速微调
           jsxs('div', { style: { padding: '8px 0 6px' }, children: [
@@ -1395,7 +1306,7 @@ window.__ModuleLoader__.load({
           ] }),
 
           // 自定义 API 折叠配置
-          (currentEngine === 'custom' || currentEngine === 'openai') ? jsxs('div', { className: 'ctl-life-card', style: { marginTop: '8px' }, children: [
+          (currentEngine === 'custom') ? jsxs('div', { className: 'ctl-life-card', style: { marginTop: '8px' }, children: [
             jsx('div', { className: 'ctl-life-card-title', children: '⚙️ 云端 TTS / 中转站 API 配置' }),
             jsx('div', { className: 'ctl-desc', children: '支持 OpenAI、CosyVoice、豆包TTS、FishSpeech 等兼容接口' }),
             jsx('input', {
@@ -1420,6 +1331,41 @@ window.__ModuleLoader__.load({
               value: vCfg.custom_model_name || 'tts-1',
               onChange: (e) => saveVoiceConfig({ custom_model_name: e.target.value }),
             }),
+            jsx('input', {
+              className: 'ctl-voice-input',
+              style: { marginTop: '6px' },
+              placeholder: '音色名（可选，照你的模型文档填，如 alloy / zh_female_1）',
+              value: vCfg.custom_voice || '',
+              onChange: (e) => saveVoiceConfig({ custom_voice: e.target.value }),
+            }),
+            jsx(Button, {
+              variant: 'outline',
+              size: 'sm',
+              style: { marginTop: '6px' },
+              onClick: async () => {
+                const r = await fetch('/voice-hub/api/voices').then((x) => x.json()).catch(() => ({ ok: false }));
+                if (r && r.ok && Array.isArray(r.voices)) {
+                  setFetchedVoices(r.voices);
+                  say('拉到 ' + r.voices.length + ' 个音色');
+                } else {
+                  setFetchedVoices([]);
+                  say((r && r.error) || '没拉到音色，手填就行');
+                }
+              },
+              children: '🔄 拉取音色列表',
+            }),
+            fetchedVoices.length ? jsx('div', { className: 'ctl-voice-grid', style: { marginTop: '6px' }, children: fetchedVoices.map((v) => {
+              const active = (vCfg.custom_voice || '') === v.id;
+              return jsxs('div', {
+                key: v.id,
+                className: 'ctl-voice-card' + (active ? ' active' : ''),
+                onClick: () => { saveVoiceConfig({ custom_voice: v.id }); say('已选音色：' + v.name); },
+                children: [
+                  jsx('div', { className: 'ctl-voice-card-name', children: v.name }),
+                  jsx('div', { className: 'ctl-voice-card-tags', children: v.id }),
+                ],
+              });
+            }) }) : null,
           ] }) : null,
 
           jsx('div', { className: 'ctl-sep' }),
@@ -1953,6 +1899,11 @@ window.__ModuleLoader__.load({
           desc: '选择之前导出的 zip 压缩包，还原 dshhome',
           right: jsx(Button, { variant: 'outline', size: 'sm', onClick: () => run('backup.import', ''), children: '选择文件' }),
         }),
+        jsx(Row, {
+          title: '从时光机快照还原',
+          desc: '选择时光机生成的 .dshbackup，还原全站资产（记忆 / 会话 / 配置）',
+          right: jsx(Button, { variant: 'outline', size: 'sm', onClick: () => run('backup.snapshotImport', ''), children: '选择文件' }),
+        }),
 
         jsx('div', { className: 'ctl-group', children: '设置' }),
         jsx(Row, {
@@ -2046,11 +1997,8 @@ window.__ModuleLoader__.load({
         }),
         jsx(Row, {
           title: '时光机全站备份',
-          desc: '一键打包记忆库、历史会话与配置；「还原」可回到某个快照',
-          right: jsxs(Fragment, { children: [
-            jsx(Button, { variant: 'outline', size: 'sm', onClick: (ev) => { ev.stopPropagation(); run('snapshot', '', '正在打包快照…'); }, children: '立即备份' }),
-            jsx(Button, { variant: 'outline', size: 'sm', onClick: (ev) => { ev.stopPropagation(); setPage('snapshot'); }, children: '还原' }),
-          ] }),
+          desc: '一键打包记忆库、历史会话与配置',
+          right: jsx(Button, { variant: 'outline', size: 'sm', onClick: () => run('snapshot', ''), children: '立即备份' }),
         }),
         jsx(Row, {
           title: '界面主题',
@@ -2348,7 +2296,7 @@ window.__ModuleLoader__.load({
     }
 
     // 分享到货提示：分享卡片只挂在聊天输入框里（conversation.composer.dock），用户若停在
-    // 设置/控制台页就**完全看不到**，内容会烂在 cache 里（2026-10-15 用户分享的 pptx 与 PDF
+    // 设置/控制台页就**完全看不到**，内容会烂在 cache 里（比如分享的 pptx 与 PDF
     // 就这样躺了 20 分钟）。这里挂到帧级浮层 shell.overlay —— 任何页面都在，
     // 用 primitives 的 Toast（顶部横幅，自带淡出），文案里说清副本落在哪个目录。
     // 只报"最新一条"（latest）；聊天框里的卡片仍按顺序处理"最旧一条"，两边各取一头。
@@ -2859,7 +2807,7 @@ const PET_SVG = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 322 335
         return () => { clearInterval(timer); };
       }, []);
       const notify = (text, bad) => {
-        // 2026-10-20：底部那行 note 在按钮下面，用户点完看不到（lesson-web-feedback-...）。
+        // 底部那行 note 在按钮下面，点完看不到（lesson-web-feedback-...）。
         // 动作反馈必须立刻出现在眼前：顶部 Toast + 按钮上方的短条，两处都放。
         const item = { id: Date.now() + Math.random(), text, bad: !!bad };
         setFeedback(item);

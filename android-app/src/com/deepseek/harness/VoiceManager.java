@@ -58,6 +58,10 @@ public class VoiceManager {
 
     // TTS 核心
     private TextToSpeech tts;
+    /** 云端 TTS 合成好后传下来的音频文件播放器；与系统播报互斥，同一时刻只出一路声音。 */
+    private android.media.MediaPlayer audioPlayer;
+    /** 长按说话时的录音与转写；同一时刻只允许一路。 */
+    private VoiceCapture voiceCapture;
     private boolean ttsInitialized = false;
 
     // 热词唤醒 (KWS) 状态
@@ -197,18 +201,54 @@ public class VoiceManager {
     /**
      * 主动唤醒对讲交互（用户点击或热词唤醒后进入直接听指令模式）
      */
+    /**
+     * 主动唤醒对讲交互（用户点击或热词唤醒后进入直接听指令模式）。
+     *
+     * 走自建录音 + 云端识别：系统 SpeechRecognizer 在这台机器上没有可用服务，
+     * 调它既不出声也不报错，按下去等于什么都没发生。
+     */
     public void triggerVoiceInteraction() {
         mainHandler.post(new Runnable() {
             @Override
             public void run() {
-                if (isListening && !isStandbyListening) {
-                    stopListening();
+                if (voiceCapture != null && voiceCapture.isRunning()) {
+                    voiceCapture.stop();
                     return;
                 }
+                stopSpeaking();
                 playPromptTone();
-                startListening(false); // 进入交互式聆听模式
+                voiceCapture = new VoiceCapture(context, new VoiceCapture.Callback() {
+                    @Override
+                    public void onReady() {
+                        notifyStateChange("listening", "正在听，松手结束");
+                    }
+
+                    @Override
+                    public void onText(String text) {
+                        String clean = text == null ? "" : text.trim();
+                        if (clean.isEmpty()) {
+                            notifyStateChange("idle", "没听清");
+                            notifyError("没听清，再说一次");
+                            return;
+                        }
+                        notifyStateChange("recognizing", "已识别");
+                        notifyResult(clean, true);
+                    }
+
+                    @Override
+                    public void onError(String message) {
+                        notifyStateChange("idle", message);
+                        notifyError(message);
+                    }
+                });
+                voiceCapture.start();
             }
         });
+    }
+
+    /** 松手收尾：停止录音，剩下的转写由录音线程自己走完并回调。 */
+    public void stopVoiceCapture() {
+        if (voiceCapture != null) voiceCapture.stop();
     }
 
     // ==================== TTS (文字转语音) ====================
@@ -310,7 +350,71 @@ public class VoiceManager {
     }
 
     public boolean isSpeaking() {
+        if (audioPlayer != null) {
+            try {
+                if (audioPlayer.isPlaying()) return true;
+            } catch (Throwable ignored) {
+            }
+        }
         return tts != null && ttsInitialized && tts.isSpeaking();
+    }
+
+    /**
+     * 播放已合成好的音频文件（云端 TTS 返回的 WAV）。
+     *
+     * 为什么需要它：系统播报只认文字，云端 TTS 的产物是一个音频文件，
+     * 必须自己接播放器；而两路声音同时出会互相盖住，所以进场先停掉系统播报。
+     * 播放完成和出错都要回到 idle 并把唤醒词恢复，否则热词待机会一直停着。
+     */
+    public void playAudioFile(final String path) {
+        mainHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    stopAudioPlayback();
+                    if (tts != null && ttsInitialized) tts.stop();
+                    audioPlayer = new android.media.MediaPlayer();
+                    audioPlayer.setDataSource(path);
+                    audioPlayer.setOnCompletionListener(new android.media.MediaPlayer.OnCompletionListener() {
+                        @Override
+                        public void onCompletion(android.media.MediaPlayer mp) {
+                            stopAudioPlayback();
+                            notifyStateChange("idle", "播报完成");
+                            resumeHotwordAfterTts();
+                        }
+                    });
+                    audioPlayer.setOnErrorListener(new android.media.MediaPlayer.OnErrorListener() {
+                        @Override
+                        public boolean onError(android.media.MediaPlayer mp, int what, int extra) {
+                            Log.w(TAG, "audio play error what=" + what + " extra=" + extra);
+                            stopAudioPlayback();
+                            notifyStateChange("idle", "音频播放失败");
+                            resumeHotwordAfterTts();
+                            return true;
+                        }
+                    });
+                    audioPlayer.prepare();
+                    audioPlayer.start();
+                    notifyStateChange("speaking", "播放音频");
+                } catch (Throwable t) {
+                    Log.w(TAG, "playAudioFile failed: " + t);
+                    stopAudioPlayback();
+                }
+            }
+        });
+    }
+
+    /** 释放音频播放器；重复调用安全，播放器已空时什么也不做。 */
+    public void stopAudioPlayback() {
+        try {
+            if (audioPlayer != null) {
+                if (audioPlayer.isPlaying()) audioPlayer.stop();
+                audioPlayer.release();
+            }
+        } catch (Throwable ignored) {
+        } finally {
+            audioPlayer = null;
+        }
     }
 
     // ==================== STT (语音识别转文字 & KWS 唤醒) ====================

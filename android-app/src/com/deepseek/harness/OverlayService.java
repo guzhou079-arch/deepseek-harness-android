@@ -363,8 +363,20 @@ public class OverlayService extends Service {
             handler.post(new Runnable() {
                 @Override
                 public void run() {
-                    if (text != null && !text.isEmpty()) {
-                        showBubble((isFinal ? "🗣️ " : "🎤 ") + text, isFinal ? 5000 : 3000);
+                    if (text == null || text.isEmpty()) return;
+                    showBubble((isFinal ? "🗣️ " : "🎤 ") + text, isFinal ? 5000 : 3000);
+                    if (!isFinal) return;
+                    // 说完就当成一条待发的输入送进去：落在输入栏里等用户确认，
+                    // 不替他直接发出去——语音识别错一个字的代价不该由用户承担。
+                    try {
+                        Intent deliver = new Intent(Intent.ACTION_SEND);
+                        deliver.setType("text/plain");
+                        deliver.putExtra(Intent.EXTRA_TEXT, text);
+                        deliver.setClass(OverlayService.this, MainActivity.class);
+                        deliver.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                        startActivity(deliver);
+                    } catch (Throwable t) {
+                        showBubble("⚠️ 送入对话失败：" + t.getMessage(), 4000);
                     }
                 }
             });
@@ -2855,7 +2867,8 @@ public class OverlayService extends Service {
                         resetPetTilt();
                         boolean onRoot = true;
                         if (longPressFired) {
-                            // 已经触发长按语音唤醒，松手不再处理点击
+                            // 长按已开录，松手就是一句说完：停录，转写交给录音线程继续跑
+                            VoiceManager.get(OverlayService.this).stopVoiceCapture();
                         } else if (dragging && dismissHint && !panelVisible) {
                             hideByDragToBottom();
                         } else if (dragging) {
@@ -2870,6 +2883,8 @@ public class OverlayService extends Service {
                         return true;
                     case MotionEvent.ACTION_CANCEL:
                         handler.removeCallbacks(longPressRunnable);
+                        // 手势被打断也要停录，否则麦克风会一直开着
+                        VoiceManager.get(OverlayService.this).stopVoiceCapture();
                         resetPetTilt();
                         logDrag("cancel", ev, v, false);
                         setDismissHintInternal(false);
