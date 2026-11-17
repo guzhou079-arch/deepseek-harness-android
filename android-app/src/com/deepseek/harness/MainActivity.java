@@ -9401,7 +9401,7 @@ public class MainActivity extends Activity {
         try { kids = prof.listFiles(); } catch (Throwable t) { Log.w(TAG, "profile list failed", t); }
         if (kids == null) {
             Log.w(TAG, "profile tree not listable: " + prof + "（EACCES：引擎大概率起不来）");
-            conToast("profile 目录读不了，引擎可能起不来。多因动过 /data；清应用数据重装可修，记忆不丢");
+            conToast("profile 目录读不了，引擎可能起不来。多因动过 /data；清应用数据重装可修（/sdcard 上的记忆和备份不丢）");
             return;
         }
         int unreadable = 0;
@@ -9414,7 +9414,7 @@ public class MainActivity extends Activity {
         if (unreadable > 0) {
             Log.w(TAG, "profile tree: " + unreadable + "/" + kids.length + " unreadable, first: "
                     + first + "（EACCES：引擎大概率起不来）");
-            conToast("profile 有 " + unreadable + " 个条目读不了，引擎可能起不来；清应用数据重装可修");
+            conToast("profile 有 " + unreadable + " 个条目读不了，引擎可能起不来；清应用数据重装可修（/sdcard 下的记忆不丢）");
         }
     }
 
