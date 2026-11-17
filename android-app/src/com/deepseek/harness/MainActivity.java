@@ -9384,7 +9384,40 @@ public class MainActivity extends Activity {
         conToast("引擎启动失败：" + msg);
     }
 
-    /** 只负责起引擎（文件已就绪）：健康探测 → spawnNode → 等就绪。v1.12 从 startEngine 拆出。 */
+    /**
+     * 启动前自检：profiles/web 下面还有没有读不了的条目，报出来好定位。
+     *
+     * 为什么需要：上游 app-boot 只放过 ENOENT，EACCES 一路抛；一个读不了的链或文件
+     * 就让引擎起不来，而界面上只有一句「启动失败」，看不出是权限问题。这种损坏是
+     * 设备侧造成的（换 root 管理器、备份还原、换机克隆之后属主丢了），应用自己写
+     * 不出来。所以只报不修：重铺 profile 会盖掉用户自己的 patch 层。
+     *
+     * 排在坏链隔离之后跑：解析不了的链已经挪走，剩下的不可读才是真的权限问题。
+     */
+    private void checkProfileTreeReadable(File payload) {
+        File prof = new File(payload, "dshhome/profiles/web");
+        if (!prof.isDirectory()) return;
+        File[] kids = null;
+        try { kids = prof.listFiles(); } catch (Throwable t) { Log.w(TAG, "profile list failed", t); }
+        if (kids == null) {
+            Log.w(TAG, "profile tree not listable: " + prof + "（EACCES：引擎大概率起不来）");
+            conToast("profile 目录读不了，引擎可能起不来。多因动过 /data；清应用数据重装可修，记忆不丢");
+            return;
+        }
+        int unreadable = 0;
+        String first = null;
+        for (File f : kids) {
+            if (f.canRead()) continue;
+            unreadable++;
+            if (first == null) first = f.getName();
+        }
+        if (unreadable > 0) {
+            Log.w(TAG, "profile tree: " + unreadable + "/" + kids.length + " unreadable, first: "
+                    + first + "（EACCES：引擎大概率起不来）");
+            conToast("profile 有 " + unreadable + " 个条目读不了，引擎可能起不来；清应用数据重装可修");
+        }
+    }
+
     /**
      * 把 profile 树里解析不了的软链挪开（改名保留，不删除）。
      *
@@ -9479,8 +9512,10 @@ public class MainActivity extends Activity {
         }
     }
 
+    /** 只负责起引擎（文件已就绪）：健康探测 → spawnNode → 等就绪。v1.12 从 startEngine 拆出。 */
     private void launchEngine(File payload) {
         quarantineBrokenProfileLinks(payload);
+        checkProfileTreeReadable(payload);
         ensureProfileKernelLinks(payload);
         if (healthOk()) {
             // 端口通、但本次进程从没起过引擎、日志里也捞不到令牌 —— 那是上次装包/被杀时留下的
