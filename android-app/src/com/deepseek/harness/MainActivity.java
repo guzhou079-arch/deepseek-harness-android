@@ -9386,6 +9386,57 @@ public class MainActivity extends Activity {
 
     /** 只负责起引擎（文件已就绪）：健康探测 → spawnNode → 等就绪。v1.12 从 startEngine 拆出。 */
     /**
+     * 把 profile 树里解析不了的软链挪开（改名保留，不删除）。
+     *
+     * 为什么需要：上游 app-boot 启动时会遍历 profile/node_modules 下每条软链做 realpath，
+     * 只放过 ENOENT，EACCES 直接抛出 —— 一条权限坏掉的链就能让整个引擎起不来，而它只是
+     * 某个插件的旁支。链本身可重建（内核裸解析兜底，或下次装插件时再生成），所以只挪不删：
+     * 留下现场，也留下退路。
+     *
+     * 在补链之前跑：先清掉坏的，再补缺的。
+     */
+    private void quarantineBrokenProfileLinks(File payload) {
+        File mod = new File(payload, "dshhome/profiles/web/node_modules");
+        if (!mod.isDirectory()) return;
+        int moved = quarantineLinksUnder(mod, 0);
+        if (moved > 0) Log.w(TAG, "profile broken symlinks quarantined: " + moved);
+    }
+
+    private int quarantineLinksUnder(File dir, int depth) {
+        if (depth > 3) return 0;
+        File[] kids = dir.listFiles();
+        if (kids == null) return 0;
+        int moved = 0;
+        for (File f : kids) {
+            boolean link;
+            try { link = isSymlink(f); } catch (Throwable t) { link = false; }
+            if (link) {
+                if (!linkResolves(f)) {
+                    File to = new File(f.getParentFile(), f.getName() + ".broken-" + System.currentTimeMillis());
+                    if (f.renameTo(to)) {
+                        Log.w(TAG, "quarantined broken profile link: " + f + " -> " + to.getName());
+                        moved++;
+                    } else {
+                        Log.w(TAG, "cannot quarantine broken profile link: " + f);
+                    }
+                }
+                continue;   // 链不往下走：跟着它遍历就是重走引擎崩的那条路
+            }
+            if (f.isDirectory()) moved += quarantineLinksUnder(f, depth + 1);
+        }
+        return moved;
+    }
+
+    private static boolean linkResolves(File f) {
+        try {
+            Os.stat(f.getAbsolutePath());   // 跟随软链；坏链在这里抛 ErrnoException
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /**
      * 给 profile 树补上它缺失的内核包软链（清单：payload 内
      * dshhome/profiles/web/PROFILE-KERNEL-LINKS.txt，随包发布）。
      *
@@ -9429,6 +9480,7 @@ public class MainActivity extends Activity {
     }
 
     private void launchEngine(File payload) {
+        quarantineBrokenProfileLinks(payload);
         ensureProfileKernelLinks(payload);
         if (healthOk()) {
             // 端口通、但本次进程从没起过引擎、日志里也捞不到令牌 —— 那是上次装包/被杀时留下的
