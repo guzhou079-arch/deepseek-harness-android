@@ -110,8 +110,8 @@ dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-fs-
 #    且"到货卡片"只挂在会话页 → 用户分享进来的文件收下了却没人看见。
 #    这两条把「带 shell.overlay 到货横幅的那一份」钉死，两份副本都必须一致）
 # 2026-11-04：设置页「控制台」加 QQ 群入口（群号 1050918023），md5 随改动更新。
-dshhome/profiles/web/node_modules/dsh-android-console/lib/client.js|f71ba51771866e44abec4df08b838197|android-share-notice|all||1
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-android-console/lib/client.js|f71ba51771866e44abec4df08b838197|android-share-notice|all||1
+dshhome/profiles/web/node_modules/dsh-android-console/lib/client.js|1cd9c10db35b81a853bad081513dcba2|android-share-notice|all||1
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-android-console/lib/client.js|1cd9c10db35b81a853bad081513dcba2|android-share-notice|all||1
 # ⚠️ 2026-10-15 之前这条清单**没覆盖**这两个文件，于是"源码改了、包里带的还是旧的"
 #    能一路通过 verify。装 1.39 之前，patch-check 对这两条会报漂移（装机副本还是旧的）——那是**正确**的。
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-plugin-auto-summary-policy/lib/index.js|d0beb2db51a199d1d7b4a45b5cc74936|0.1.2-effective-policy|all||1

@@ -191,6 +191,19 @@ runlog "$NODE" "$SB/scripts/assert-dist-privacy.js" "$SB/work/payload-new.zip"
 # （见 scan-names.py 里的 ALLOW 表），不做文件级放行 —— 文件级放行会把夹带一起放过。
 runlog "$PY" "$SB/scripts/scan-names.py" "$SB/work/payload-new.zip"
 runlog "$NODE" "$SB/scripts/slim-dist-payload.js" "$SB/work/payload-new.zip"
+# 懒加载入口必须指得到实现文件。*.lazy.js 是常量大小的壳，`import()` 在真正调用那个 API
+# 之前不执行 —— 所以「实现文件被剔除」在装包、冷启动、切模型、跑别的 provider 时全都不报错，
+# 只有用户点到一个走这个 API 的 provider 才崩在模块解析上，报错还指着一条文件路径，
+# 看着像设备上文件坏了，实际是包里从来没带。剔除规则一改就可能再删掉另一个文件，
+# 所以判据不写死文件名：逐条解析 lazy 入口里的相对 import，目标不在包里的、或 0 字节的，都不许发。
+# 位置在 slim 之后 —— 校验的是最终要发出去的那份字节，中间任何一步带走文件都能被咬住。
+runlog "$NODE" "$SB/scripts/assert-payload-imports.js" "$SB/work/payload-new.zip"
+# 自家前端插件必须在装载期就装得起来。插件是经典脚本，factory 同步执行，顶格表达式
+# 那一刻就求值 —— 「先用了、后声明」的 TDZ 于是表现为整个插件不激活，报错只有一行
+# Cannot access 'X' before initialization，看不出是哪个文件、也看不出是顺序问题。
+# 语法合法、静态检查全绿，只有真跑一次 factory 才看得见，所以这里判的就是跑一次。
+# 只判 overlay 里带的插件：上游插件在无菌沙箱里会缺平台面，那是环境假阳性。
+runlog "$NODE" "$SB/scripts/assert-client-factory-loads.js" "$SB/work/payload-new.zip" "$SB/build-overlay"
 # 2026-11-07：世代卡口（v1.48/code296 事故防复发）。
 # 坏包的两条故障链都能在这里被拦下 —— ①前端：dist/index.html 引用的 bundle 必须真在包里
 # （旧 index.html 引用 index-BXV-oxvX.js 那套 → 白屏）；②内核：任何 @deepseek-ai 包只要
