@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>我是谁</title>
+<style>
+  :root{
+    --bg:#0e0e10; --tx:#ececee; --tx2:#b2b2b9; --dim:#86868e; --faint:#55555c;
+    --line:rgba(255,255,255,.12); --card:rgba(255,255,255,.045);
+    --acc:#f2c46d; --acc2:#8399ff; --glow:rgba(242,196,109,.22);
+  }
+  @media (prefers-color-scheme:light){
+    :root{ --bg:#f8f8f6; --tx:#17171a; --tx2:#46464d; --dim:#75757d; --faint:#a9a9b0;
+      --line:rgba(0,0,0,.1); --card:rgba(0,0,0,.035); --acc:#c98a1c; --acc2:#3a5bdc; --glow:rgba(201,138,28,.16); }
+  }
+  *{box-sizing:border-box}
+  html,body{background:transparent}
+  body{margin:0;background:transparent;color:var(--tx);font:14px/1.75 -apple-system,"PingFang SC","Noto Sans CJK SC",sans-serif;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:620px;margin:0 auto;padding:64px 20px 48px}
+  .hero{display:flex;align-items:center;gap:16px;margin-bottom:22px}
+  .ava{width:62px;height:62px;border-radius:50%;flex:none;display:grid;place-items:center;font-size:26px;font-weight:600;color:#1a1408;
+    background:radial-gradient(circle at 50% 35%,#fff3cf 0,#f2c46d 55%,#d99a3a 100%);box-shadow:0 0 0 6px var(--glow),0 0 34px var(--glow)}
+  .name{font-size:21px;font-weight:600;letter-spacing:.5px}
+  .sub{color:var(--dim);font-size:13px}
+  .stats{display:flex;gap:10px;margin:0 0 26px}
+  .stat{flex:1;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+  .stat b{display:block;font-size:19px;font-weight:600;color:var(--acc)}
+  .stat span{font-size:12px;color:var(--dim)}
+  h2{font-size:13px;font-weight:600;color:var(--dim);letter-spacing:1px;margin:28px 0 10px}
+  .who p{margin:0 0 12px;color:var(--tx2)}
+  .who p:first-child{color:var(--tx)}
+  .tl{position:relative;padding-left:18px}
+  .tl:before{content:"";position:absolute;left:4px;top:6px;bottom:6px;width:1px;background:var(--line)}
+  .ep{position:relative;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:11px 14px;margin-bottom:10px;cursor:pointer}
+  .ep:before{content:"";position:absolute;left:-18px;top:16px;width:9px;height:9px;border-radius:50%;background:var(--acc);box-shadow:0 0 10px var(--glow)}
+  .ep .when{font-size:12px;color:var(--dim)}
+  .ep .t{font-weight:500}
+  .ep .b{display:none;margin-top:8px;color:var(--tx2);white-space:pre-wrap}
+  .ep.open .b{display:block}
+  .tag{display:inline-block;font-size:11px;color:var(--acc2);border:1px solid var(--line);border-radius:999px;padding:0 7px;margin:4px 4px 0 0}
+  .empty{color:var(--dim);font-size:13px;background:var(--card);border:1px dashed var(--line);border-radius:12px;padding:12px 14px}
+  .foot{margin-top:34px;font-size:12px;color:var(--faint)}
+  .err{color:#f08b6f}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"><div class="sub">正在读取…</div></div>
+<script>
+var LANG=(navigator.language||'zh').toLowerCase().indexOf('zh')===0?'zh':'en';
+var I18N={zh:{},en:{"校准": "Calibration", "记得的天数": "Days remembered", "经历": "Episodes", "我是谁": "Who I am", "还没写「我是谁」。在 memory/header.md 里写，这里刷新就变。": "Nothing written under \"Who I am\" yet. Write it in memory/header.md and refresh here.", "最近的经历": "Recent episodes", "还没有记下经历。": "No episodes recorded yet.", "被校准的地方": "Where I was calibrated", "还没有校准记录。": "No calibration records yet.", "只读面板 · 数据现读 memory/header.md 的「我是谁」和 episode 记忆，改那边这里刷新就变。": "Read-only panel · reads \"Who I am\" from memory/header.md and your episode memories live; edit them and refresh here.", "读不到数据：": "Cannot read data: "}};
+function t(k){var d=I18N[LANG]||{};return d[k]!==undefined?d[k]:k;}
+(function(){
+  var app=document.getElementById('app');
+  function el(tag,cls,text){var e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e;}
+  function fmt(ms){if(!ms)return '';var d=new Date(ms);function p(n){return n<10?'0'+n:''+n}
+    return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes());}
+  function plain(s){return s.replace(/`([^`]*)`/g,'$1').replace(/\*\*([^*]*)\*\*/g,'$1');}
+  fetch('api/me',{cache:'no-store'}).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}).then(function(d){
+    var m=d.meta||{};
+    if(m.label)document.title=m.label;
+    app.textContent='';
+
+    var name=d.name||'';
+    if(name){
+      var hero=el('div','hero');var ava=el('div','ava',name.slice(-1));
+      var info=el('div');info.appendChild(el('div','name',name));
+      if(m.subtitle)info.appendChild(el('div','sub',m.subtitle));
+      hero.appendChild(ava);hero.appendChild(info);app.appendChild(hero);
+    }else if(m.subtitle){
+      app.appendChild(el('div','sub',m.subtitle));
+    }
+
+    var eps=d.episodes||[];var cal=eps.filter(function(e){return e.tags.indexOf(t("校准"))>=0;});
+    var first=eps.reduce(function(mn,e){return e.at&&(!mn||e.at<mn)?e.at:mn;},0);
+    var days=first?Math.floor((Date.now()-first)/86400000)+1:1;
+    var stats=el('div','stats');
+    [[days,m.statDays||t("记得的天数")],[eps.length,m.statEpisodes||t("经历")],[cal.length,m.statCalib||t("校准")]].forEach(function(s){
+      var b=el('div','stat');b.appendChild(el('b',null,String(s[0])));b.appendChild(el('span',null,s[1]));stats.appendChild(b);});
+    app.appendChild(stats);
+
+    app.appendChild(el('h2',null,t("我是谁")));
+    var who=el('div','who');
+    (d.identity||'').split(/\n\s*\n/).forEach(function(p){if(p.trim())who.appendChild(el('p',null,plain(p.trim())));});
+    if(!d.identity)who.appendChild(el('div','empty',t("还没写「我是谁」。在 memory/header.md 里写，这里刷新就变。")));
+    app.appendChild(who);
+
+    app.appendChild(el('h2',null,m.secEpisodes||t("最近的经历")));
+    if(!eps.length){app.appendChild(el('div','empty',t("还没有记下经历。")));}
+    else{var tl=el('div','tl');eps.forEach(function(e){
+      var c=el('div','ep');c.appendChild(el('div','when',fmt(e.at)));c.appendChild(el('div','t',e.title));
+      var tg=el('div');e.tags.forEach(function(t){tg.appendChild(el('span','tag',t));});c.appendChild(tg);
+      c.appendChild(el('div','b',plain(e.body)));c.onclick=function(){c.classList.toggle('open');};tl.appendChild(c);});
+      app.appendChild(tl);}
+
+    app.appendChild(el('h2',null,m.secCalib||t("被校准的地方")));
+    if(!cal.length)app.appendChild(el('div','empty',t("还没有校准记录。")));
+
+    app.appendChild(el('div','foot',t("只读面板 · 数据现读 memory/header.md 的「我是谁」和 episode 记忆，改那边这里刷新就变。")));
+  }).catch(function(e){app.textContent='';app.appendChild(el('div','err',t("读不到数据：")+e.message));});
+})();
+</script>
+</body>
+</html>

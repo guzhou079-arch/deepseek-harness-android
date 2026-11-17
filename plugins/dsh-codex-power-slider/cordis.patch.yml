@@ -1,0 +1,16 @@
+# ============================================================================
+# dsh-codex-power-slider —— DSH bundle patch（挂载声明）
+# ============================================================================
+# DSH 启动时按 bundle 层栈叠加各插件 patch，本文件把插件插入 profile 的
+# 配置树。`name` 必须与 package.json 的 `name` 完全一致：宿主侧的
+# client-modules 扫描器只在「Loader 条目名 === 包名」时才会把它编进浏览器
+# 启动图并提供 lib/client.js。
+#
+# 安装（本地开发，路径必须是绝对路径）：
+#   dsh plugin --profile desktop add link:C:\path\to\dsh-codex-power-slider
+# 或手工把包名写进 profile 的 dsh.profile.bundles 并 pnpm install。
+# ============================================================================
+
+- insert:
+    - id: dsh-codex-power-slider
+      name: dsh-codex-power-slider

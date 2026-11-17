@@ -1,0 +1,16 @@
+{
+  "name": "另一个我",
+  "default": "",
+  "models": [],
+  "maxTokens": 1400,
+  "temperature": 0.65,
+  "limits": {
+    "identityChars": 6000,
+    "stanceChars": 5000,
+    "caseCount": 6,
+    "caseChars": 700,
+    "streamDays": 10,
+    "streamCount": 40,
+    "historyCount": 120
+  }
+}

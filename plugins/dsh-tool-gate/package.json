@@ -1,0 +1,11 @@
+{
+  "name": "dsh-tool-gate",
+  "version": "0.1.0",
+  "private": true,
+  "description": "工具声明闸门：开局只暴露 tool_load，按需启用其余工具（默认关闭，见 $DSH_HOME/tool-gate.json）",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": { ".": "./lib/index.js", "./package.json": "./package.json" },
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
+  "peerDependencies": { "@deepseek-ai/dsh": ">=0.1.7-rc.1", "@deepseek-ai/cordis": "^4.0.1" }
+}

@@ -1,0 +1,33 @@
+{
+  "name": "dsh-plugin-roundtable",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Inline sequential multi-model answers in the main DeepSeek Harness chat",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./core": "./lib/core.js",
+    "./cordis.patch.yml": "./cordis.patch.yml"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "PATCH-NOTES.md"
+  ],
+  "scripts": {
+    "test": "node --experimental-loader ./test/loader.mjs --test test/*.test.mjs"
+  },
+  "license": "MIT",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [],
+      "immediately": true
+    }
+  }
+}

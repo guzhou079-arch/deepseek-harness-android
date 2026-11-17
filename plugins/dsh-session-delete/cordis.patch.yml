@@ -1,0 +1,5 @@
+# dsh-session-delete —— bundle patch（挂载声明）
+# name 必须与 package.json 的 name 完全一致，client-modules 才认。
+- insert:
+    - id: dsh-session-delete
+      name: dsh-session-delete

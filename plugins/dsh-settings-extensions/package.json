@@ -1,0 +1,22 @@
+{
+  "name": "dsh-settings-extensions",
+  "version": "0.1.0",
+  "private": true,
+  "description": "设置页「插件与技能」：技能列表 + 真开关（写 SKILL.md frontmatter，状态另存一份开机重放），自建插件清单 + 一键打开面板。",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": { "inject": [], "platform": "web" }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh": ">=0.1.7-rc.1 <0.3.0-0",
+    "@deepseek-ai/cordis": "^4.0.1"
+  },
+  "files": ["lib/index.js", "lib/client.js", "cordis.patch.yml"]
+}

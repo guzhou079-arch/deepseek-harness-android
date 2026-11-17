@@ -1,0 +1,17 @@
+{
+  "name": "dsh-plugin-another-me",
+  "version": "0.1.0",
+  "private": true,
+  "description": "另一个我：侧边栏入口 + 对话面板。数据全在 $DSH_HOME/another-me，与记忆系统隔离",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": { "inject": [], "platform": "web" }
+  },
+  "files": ["lib/index.js", "lib/client.js", "README.md", "seed"]
+}

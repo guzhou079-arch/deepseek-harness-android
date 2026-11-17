@@ -1,0 +1,27 @@
+{
+  "name": "dsh-doc-media",
+  "version": "0.1.1",
+  "private": true,
+  "description": "让 DSH 的文件预览直接播放视频（mp4/webm/mov/m4v/mkv），并给文档预览加「位置」动作",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": { "default": "./lib/index.js" },
+    "./client": { "default": "./lib/client.js" },
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "inject": [],
+      "platform": "web"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/client.js",
+    "README.md"
+  ]
+}

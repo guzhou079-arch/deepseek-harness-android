@@ -1,0 +1,9 @@
+# dsh-settings-extensions —— 设置页「插件与技能」
+#
+# 技能页：列 $DSH_HOME/skills，开关写 SKILL.md 的 disable-model-invocation / user-invocable，
+#        状态另存 $DSH_HOME/settings-extensions/skills-state.json，引擎启动时重放（防解包覆盖）。
+# 插件页：列 profiles/web/node_modules 下自建 dsh-* 插件，动态发现，不写死任何插件名。
+# 接口挂引擎自己的 webServer（/settings-ext），过 connection.admit 门禁。
+- insert:
+    - id: settings-extensions
+      name: 'dsh-settings-extensions'

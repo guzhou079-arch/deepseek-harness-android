@@ -1,0 +1,25 @@
+{
+  "name": "dsh-plugin-food-card",
+  "version": "0.1.0",
+  "private": true,
+  "description": "把外卖/到店推荐渲染成聊天里的卡片：toolview 半边 + food_card 工具",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "inject": [],
+      "platform": "web",
+      "immediately": true
+    }
+  },
+  "files": [
+    "lib/index.js",
+    "lib/client.js",
+    "README.md"
+  ]
+}

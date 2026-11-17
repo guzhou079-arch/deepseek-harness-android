@@ -1,0 +1,8 @@
+# dsh-user-profile —— 用户资料面板
+#
+# 往侧边栏插一个「我」图标，点开是用户资料表单：昵称 / AI 该怎么认识你 / 说话语气。
+# 数据落 $DSH_HOME/user-profile.json（纯文本，手工可改，删掉即回默认）。
+# 版面读写走引擎自己的 webServer（/user-profile），不另起进程 —— 跟 dsh-memory-ui 同一套范式。
+- insert:
+    - id: user-profile-ui
+      name: 'dsh-user-profile'

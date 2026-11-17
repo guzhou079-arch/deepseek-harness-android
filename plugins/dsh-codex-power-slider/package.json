@@ -1,0 +1,45 @@
+{
+  "name": "dsh-codex-power-slider",
+  "version": "0.1.0",
+  "description": "DSH Web 客户端的 Codex 风格「思考强度」电源滑块：composer 里的等级滑杆卡片 + 分组模型下拉，直接读写会话真实推理强度。",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "reasoning",
+    "thinking",
+    "effort",
+    "codex",
+    "power-slider"
+  ],
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "manifestVersion": 1,
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "files": [
+    "lib",
+    "docs",
+    "cordis.patch.yml",
+    "README.md",
+    "PROVENANCE.md",
+    "PITFALLS.md",
+    "LICENSE"
+  ],
+  "license": "MIT"
+}

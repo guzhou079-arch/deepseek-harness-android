@@ -242,5 +242,201 @@
   {
     "repo": "plugins/dsh-android-console/lib/client.js",
     "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-android-console/lib/client.js"
+  },
+  {
+    "repo": "plugins/dsh-session-delete/package.json",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-session-delete/package.json"
+  },
+  {
+    "repo": "plugins/dsh-session-delete/cordis.patch.yml",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-session-delete/cordis.patch.yml"
+  },
+  {
+    "repo": "plugins/dsh-session-delete/lib/index.js",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-session-delete/lib/index.js"
+  },
+  {
+    "repo": "plugins/dsh-session-delete/lib/client.js",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-session-delete/lib/client.js"
+  },
+  {
+    "repo": "plugins/dsh-doc-media/package.json",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-doc-media/package.json"
+  },
+  {
+    "repo": "plugins/dsh-doc-media/lib/client.js",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-doc-media/lib/client.js"
+  },
+  {
+    "repo": "plugins/dsh-doc-media/lib/index.js",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-doc-media/lib/index.js"
+  },
+  {
+    "repo": "plugins/dsh-doc-actions/package.json",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-doc-actions/package.json"
+  },
+  {
+    "repo": "plugins/dsh-doc-actions/lib/client.js",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-doc-actions/lib/client.js"
+  },
+  {
+    "repo": "plugins/dsh-doc-actions/lib/index.js",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-doc-actions/lib/index.js"
+  },
+  {
+    "repo": "plugins/dsh-self-card/cordis.patch.yml",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-self-card/cordis.patch.yml"
+  },
+  {
+    "repo": "plugins/dsh-self-card/package.json",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-self-card/package.json"
+  },
+  {
+    "repo": "plugins/dsh-self-card/lib/index.js",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-self-card/lib/index.js"
+  },
+  {
+    "repo": "plugins/dsh-self-card/lib/client.js",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-self-card/lib/client.js"
+  },
+  {
+    "repo": "plugins/dsh-self-card/lib/page.html",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-self-card/lib/page.html"
+  },
+  {
+    "repo": "plugins/dsh-plugin-food-card/package.json",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-plugin-food-card/package.json"
+  },
+  {
+    "repo": "plugins/dsh-plugin-food-card/lib/index.js",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-plugin-food-card/lib/index.js"
+  },
+  {
+    "repo": "plugins/dsh-plugin-food-card/lib/client.js",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-plugin-food-card/lib/client.js"
+  },
+  {
+    "repo": "plugins/dsh-settings-extensions/package.json",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-settings-extensions/package.json"
+  },
+  {
+    "repo": "plugins/dsh-settings-extensions/cordis.patch.yml",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-settings-extensions/cordis.patch.yml"
+  },
+  {
+    "repo": "plugins/dsh-settings-extensions/lib/index.js",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-settings-extensions/lib/index.js"
+  },
+  {
+    "repo": "plugins/dsh-settings-extensions/lib/client.js",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-settings-extensions/lib/client.js"
+  },
+  {
+    "repo": "plugins/dsh-user-profile/cordis.patch.yml",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-user-profile/cordis.patch.yml"
+  },
+  {
+    "repo": "plugins/dsh-user-profile/package.json",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-user-profile/package.json"
+  },
+  {
+    "repo": "plugins/dsh-user-profile/lib/index.js",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-user-profile/lib/index.js"
+  },
+  {
+    "repo": "plugins/dsh-user-profile/lib/client.js",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-user-profile/lib/client.js"
+  },
+  {
+    "repo": "plugins/dsh-user-profile/lib/page.js",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-user-profile/lib/page.js"
+  },
+  {
+    "repo": "plugins/dsh-plugin-another-me/package.json",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-plugin-another-me/package.json"
+  },
+  {
+    "repo": "plugins/dsh-plugin-another-me/lib/index.js",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-plugin-another-me/lib/index.js"
+  },
+  {
+    "repo": "plugins/dsh-plugin-another-me/lib/client.js",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-plugin-another-me/lib/client.js"
+  },
+  {
+    "repo": "plugins/dsh-plugin-another-me/seed/me-web.mjs",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-plugin-another-me/seed/me-web.mjs"
+  },
+  {
+    "repo": "plugins/dsh-plugin-another-me/seed/ui.html",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-plugin-another-me/seed/ui.html"
+  },
+  {
+    "repo": "plugins/dsh-plugin-another-me/seed/config.json",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-plugin-another-me/seed/config.json"
+  },
+  {
+    "repo": "plugins/dsh-plugin-another-me/seed/identity.md",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-plugin-another-me/seed/identity.md"
+  },
+  {
+    "repo": "plugins/dsh-plugin-another-me/seed/stance.md",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-plugin-another-me/seed/stance.md"
+  },
+  {
+    "repo": "plugins/dsh-plugin-another-me/seed/me.mjs",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-plugin-another-me/seed/me.mjs"
+  },
+  {
+    "repo": "plugins/dsh-plugin-roundtable/cordis.patch.yml",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-plugin-roundtable/cordis.patch.yml"
+  },
+  {
+    "repo": "plugins/dsh-plugin-roundtable/package.json",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-plugin-roundtable/package.json"
+  },
+  {
+    "repo": "plugins/dsh-plugin-roundtable/lib/core.js",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-plugin-roundtable/lib/core.js"
+  },
+  {
+    "repo": "plugins/dsh-plugin-roundtable/lib/index.js",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-plugin-roundtable/lib/index.js"
+  },
+  {
+    "repo": "plugins/dsh-plugin-roundtable/lib/client.js",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-plugin-roundtable/lib/client.js"
+  },
+  {
+    "repo": "plugins/dsh-plugin-roundtable/lib/multi.js",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-plugin-roundtable/lib/multi.js"
+  },
+  {
+    "repo": "plugins/dsh-codex-power-slider/package.json",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-codex-power-slider/package.json"
+  },
+  {
+    "repo": "plugins/dsh-codex-power-slider/cordis.patch.yml",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-codex-power-slider/cordis.patch.yml"
+  },
+  {
+    "repo": "plugins/dsh-codex-power-slider/lib/index.js",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-codex-power-slider/lib/index.js"
+  },
+  {
+    "repo": "plugins/dsh-codex-power-slider/lib/client.js",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-codex-power-slider/lib/client.js"
+  },
+  {
+    "repo": "plugins/dsh-tool-gate/package.json",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-tool-gate/package.json"
+  },
+  {
+    "repo": "plugins/dsh-tool-gate/cordis.patch.yml",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-tool-gate/cordis.patch.yml"
+  },
+  {
+    "repo": "plugins/dsh-tool-gate/lib/index.js",
+    "local": "selfbuild/build-overlay/dshhome/profiles/web/node_modules/dsh-tool-gate/lib/index.js"
   }
 ]

@@ -1,0 +1,4 @@
+# dsh-self-card —— 侧边栏「我是谁」：看自述和近期经历（只读）
+- insert:
+    - id: self-card
+      name: 'dsh-self-card'

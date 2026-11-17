@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title data-i18n="另一个我">另一个我</title>
+<style>
+  :root{
+    --bg:#0f1115; --surf:#161a21; --surf2:#1d222a; --line:#242a33;
+    --text:#e6e8ec; --dim:#8b93a1; --blue:#4f8cff; --teal:#5ee0c8;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
+  html,body{min-height:100%}
+  body{margin:0; background:var(--bg); color:var(--text);
+       padding:48px 0 40px;
+       font:15px/1.6 -apple-system,"PingFang SC","Noto Sans CJK SC",system-ui,sans-serif}
+
+  header{font-size:17px; font-weight:600; letter-spacing:.2px; padding:4px 20px 14px}
+
+  .switch{display:flex; align-items:center; justify-content:space-between; gap:14px;
+    margin:0 16px 12px; padding:14px 16px;
+    background:var(--surf); border:1px solid var(--line); border-radius:14px}
+  .sw-t{font-size:15px; font-weight:600}
+  .sw-d{font-size:12.5px; color:var(--dim); margin-top:2px}
+  .knob{width:48px; height:28px; border-radius:14px; background:#2a3039; position:relative; flex:none; transition:background .18s}
+  .knob::after{content:''; position:absolute; top:3px; left:3px; width:22px; height:22px; border-radius:11px;
+    background:#fff; box-shadow:0 1px 3px rgba(0,0,0,.3); transition:transform .18s}
+  .knob.on{background:var(--blue)}
+  .knob.on::after{transform:translateX(20px)}
+
+  .sec{margin:0 16px 12px; padding:14px 16px;
+    background:var(--surf); border:1px solid var(--line); border-radius:14px}
+  .sec-t{display:flex; align-items:center; justify-content:space-between;
+    font-size:12.5px; color:var(--dim); margin-bottom:9px; letter-spacing:.4px}
+  .edit{color:var(--blue); font-size:13px; padding:2px 2px 2px 12px; letter-spacing:0}
+  .sec-b{font-size:14.5px; white-space:pre-wrap; line-height:1.74; word-break:break-word}
+  .sec-b.empty{color:#5b6270}
+
+  .cs{padding:10px 0; border-bottom:1px solid var(--line)}
+  .cs:first-child{padding-top:0}
+  .cs:last-child{border-bottom:0; padding-bottom:0}
+  .cs-t{font-size:14px; font-weight:500}
+  .cs-m{color:var(--dim); font-size:12.5px; margin-top:2px}
+  .cs-w{display:none; color:var(--dim); font-size:13px; margin-top:7px; white-space:pre-wrap; line-height:1.68}
+  .cs.open .cs-w{display:block}
+
+  .fld{display:block; width:100%; margin:0 0 8px; padding:9px 11px; min-height:46px;
+    border:1px solid var(--line); border-radius:9px; background:var(--surf2); color:var(--text);
+    font-family:inherit; font-size:14px; line-height:1.6; resize:vertical}
+
+  textarea{display:block; width:100%; min-height:230px; margin:2px 0 0; padding:11px 12px;
+    border:1px solid var(--line); border-radius:10px; background:var(--surf2); color:var(--text);
+    font:14.5px/1.7 -apple-system,"PingFang SC","Noto Sans CJK SC",system-ui,sans-serif; resize:vertical}
+  .btns{display:flex; gap:8px; margin-top:9px}
+  .btn{padding:9px 16px; border-radius:9px; border:1px solid var(--line);
+    background:var(--surf2); color:var(--text); font-size:14px; font-family:inherit}
+  .btn.p{background:var(--blue); color:#fff; border-color:var(--blue)}
+
+  .status{font-size:12.5px; color:var(--dim); padding:6px 22px 16px}
+  .ask{display:flex; flex-direction:column; gap:8px}
+  .asklog{display:flex; flex-direction:column; gap:7px; max-height:46vh; overflow:auto}
+  .say{padding:9px 11px; border-radius:10px; font:14.5px/1.72 -apple-system,"PingFang SC","Noto Sans CJK SC",system-ui,sans-serif;
+    white-space:pre-wrap; word-break:break-word; border:1px solid var(--line); background:var(--surf2)}
+  .say.you{border-color:var(--blue); align-self:flex-end; max-width:88%; opacity:.92}
+  .say.it{max-width:94%}
+  .say.hint{color:var(--dim); font-size:13px; border-style:dashed; background:transparent}
+  .askbox textarea{min-height:62px}
+  .mrow{display:flex; justify-content:space-between; gap:10px; padding:7px 0; border-bottom:1px solid var(--line);
+    font-size:13.5px; color:var(--text)}
+  .mrow:last-child{border-bottom:none}
+  .mrow .m-rel{color:var(--dim); font-size:12.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:58%}
+</style>
+</head>
+<body>
+
+<header data-i18n="另一个我">另一个我</header>
+
+<div class="switch" id="sw">
+  <div>
+    <div class="sw-t" data-i18n="接管主界面">接管主界面</div>
+    <div class="sw-d" id="swDesc">关着 · 主界面是普通对话</div>
+  </div>
+  <div class="knob" id="knob"></div>
+</div>
+
+<div class="sec">
+  <div class="sec-t"><span data-i18n="问一句">问一句</span><span class="edit" id="askState">—</span></div>
+  <div class="sec-b">
+    <div class="ask" id="askWrap">
+      <div class="asklog" id="askLog"></div>
+      <div class="askbox"><textarea id="askBox" class="fld" rows="2" placeholder="问它一句…" data-i18n-ph="问它一句…" disabled></textarea></div>
+      <div class="btns"><button class="btn p" id="askSend" disabled>发送</button></div>
+    </div>
+  </div>
+</div>
+
+<div class="sec">
+  <div class="sec-t"><span data-i18n="我是谁">我是谁</span><span class="edit" id="edId" data-i18n="编辑">编辑</span></div>
+  <div class="sec-b" id="idBody"></div>
+</div>
+
+<div class="sec">
+  <div class="sec-t"><span data-i18n="我的过去">我的过去</span><span class="edit" id="edCase" data-i18n="记一条">记一条</span></div>
+  <div class="sec-b" id="caseList"></div>
+</div>
+
+<div class="sec">
+  <div class="sec-t"><span data-i18n="模型">模型</span><span class="edit" id="edModel" data-i18n="加一个">加一个</span></div>
+  <div class="sec-b" id="modelList"></div>
+</div>
+
+<div class="status" id="status"></div>
+
+<script>
+var LANG=(navigator.language||'zh').toLowerCase().indexOf('zh')===0?'zh':'en';
+var I18N={zh:{},en:{"还没写。点右上角编辑，写清你是谁、现在在干什么、有什么硬约束。": "Nothing yet. Tap Edit in the top right and write who you are, what you are doing, and any hard constraints.", "保存": "Save", "取消": "Cancel", "保存中…": "Saving…", "开着 · 主界面的对话已经是另一个我在回": "On · the main chat is already answered by the other me", "关着 · 主界面是普通对话": "Off · the main chat is a normal conversation", "记着 ": "Remembering ", " 条判断、": " decisions, ", " 条念头": " thoughts", "还没记。记一条你做过的决定，包括后悔的。": "Nothing recorded. Record a decision you made, including one you regret.", "(无标题)": "(untitled)", "选：": "Chose: ", "果：": "Outcome: ", "为什么：": "Why: ", "后来：": "Later: ", "什么事 / 当时什么问题": "What happened / what was the problem", "最后选了啥": "What you finally chose", "纠结什么，为什么这么选": "What you weighed, and why you chose this", "后来怎样，现在回头看对不对": "How it turned out, and whether it looks right in hindsight", "存下": "Save", "存着…": "Saving…", "发送": "Send", "已配好": "Configured", "还没配模型": "No model configured yet", "分身还没接上模型，开不了口。点右上角「加一个」，填 baseURL 和模型名（有 key 一起贴上），就能问了。": "The twin has no model yet and cannot speak. Tap \"Add\" in the top right, fill in baseURL and model name (paste the key too if you have one), then you can ask.", "一个模型都没有。点右上角「加一个」：baseURL 填渠道地址，模型名填模型 id，key 可以直接贴（只存在本机）。": "No models at all. Tap \"Add\" in the top right: baseURL is the channel address, model name is the model id, and the key can be pasted directly (stored only on this device).", " ·主": " ·main", "名字，随便起（比如 主力）": "Name, anything (e.g. main)", "baseURL，例如 https://api.xxx.com/v1": "baseURL, e.g. https://api.xxx.com/v1", "模型名，例如 xxx-chat": "Model name, e.g. xxx-chat", "key（直接贴，只存本机；也可以填 key 名）": "key (paste directly, stored locally; a key name also works)", "存不下": "Cannot save", "它没出声，再试一次。": "It stayed silent; try again.", "这个模型缺 key。点「模型」右上角重新填一次，把 key 一起贴上。": "This model has no key. Open \"Models\" and fill it in again, pasting the key too.", "分身还没装好，重启一下 App 再试。": "The twin is not set up yet; restart the App and try again.", "连不上那个渠道，检查一下 baseURL 和网络。": "Cannot reach that channel; check baseURL and the network.", "渠道说没有这个模型名，核对一下模型 id。": "The channel says that model name does not exist; double-check the model id.", "这个渠道的 temperature 只吃它认可的值（不少是 1）。把 config.json 里的 temperature 改成 1 再问。": "This channel only accepts certain temperature values (often 1). Set temperature to 1 in config.json and ask again.", "没成：": "Failed: ", "还没配模型，分身开不了口。": "No model configured; the twin cannot speak.", "它在想…": "Thinking…", "网络断了，再试一次": "Network dropped; try again"},"接管主界面":"Take over the main chat","问一句":"Ask something","问它一句…":"Ask it something…","我是谁":"Who I am","编辑":"Edit","我的过去":"My past","记一条":"Record one","模型":"Models","加一个":"Add one"};
+function t(k){var d=I18N[LANG]||{};return d[k]!==undefined?d[k]:k;}
+
+document.addEventListener('DOMContentLoaded',function(){
+  document.querySelectorAll('[data-i18n]').forEach(function(el){el.textContent=t(el.getAttribute('data-i18n'));});
+  document.querySelectorAll('[data-i18n-ph]').forEach(function(el){el.setAttribute('placeholder',t(el.getAttribute('data-i18n-ph')));});
+  document.title=t('另一个我');
+});
+const $ = s => document.getElementById(s);
+const api = async (p, o) => (await fetch(p, { cache: 'no-store', ...(o || {}) })).json();
+
+let P = { identity: '', stance: '' };
+
+function render() {
+  const set = (el, txt, ph) => {
+    el.textContent = txt || ph;
+    el.classList.toggle('empty', !txt);
+  };
+  set($('idBody'), (P.identity || '').trim(),
+    t("还没写。点右上角编辑，写清你是谁、现在在干什么、有什么硬约束。"));
+}
+
+async function loadProfile() {
+  try { P = await api('api/profile'); } catch { /* 保持空 */ }
+  render();
+}
+
+function bindEdit(btn, key, el) {
+  btn.onclick = () => {
+    el.innerHTML = '';
+    el.classList.remove('empty');
+    const ta = document.createElement('textarea');
+    ta.value = P[key] || '';
+    const btns = document.createElement('div');
+    btns.className = 'btns';
+    const ok = document.createElement('button');
+    ok.className = 'btn p'; ok.textContent = t("保存");
+    const no = document.createElement('button');
+    no.className = 'btn'; no.textContent = t("取消");
+    btns.append(ok, no);
+    el.append(ta, btns);
+    ta.focus();
+    no.onclick = () => render();
+    ok.onclick = async () => {
+      ok.textContent = t("保存中…");
+      const body = {}; body[key] = ta.value;
+      try {
+        await api('api/profile', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        P[key] = ta.value;
+      } catch { /* 保存失败保留原文 */ }
+      render();
+    };
+  };
+}
+
+// ── 开关 ──
+let ON = false;
+function paintToggle() {
+  $('knob').classList.toggle('on', ON);
+  $('swDesc').textContent = ON ? t("开着 · 主界面的对话已经是另一个我在回") : t("关着 · 主界面是普通对话");
+}
+async function loadToggle() {
+  try { ON = !!(await api('api/toggle')).on; } catch { ON = false; }
+  paintToggle();
+}
+$('sw').onclick = async () => {
+  const j = await api('api/toggle', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ on: !ON }),
+  });
+  ON = !!j.on;
+  paintToggle();
+};
+
+// ── 状态 ──
+async function loadStatus() {
+  try {
+    const s = await api('api/status');
+    $('status').textContent = t("记着 ") + (s.cases || 0) + t(" 条判断、") + (s.stream || 0) + t(" 条念头");
+  } catch { $('status').textContent = ''; }
+}
+
+// ── 过去 ──
+async function loadCases() {
+  let items = [];
+  try { items = (await api('api/cases')).items || []; } catch { /* 空 */ }
+  renderCases(items);
+}
+function renderCases(items) {
+  const el = $('caseList');
+  el.innerHTML = '';
+  if (!items.length) {
+    el.textContent = t("还没记。记一条你做过的决定，包括后悔的。");
+    el.classList.add('empty');
+    return;
+  }
+  el.classList.remove('empty');
+  for (const c of items) {
+    const d = document.createElement('div');
+    d.className = 'cs';
+    const t = document.createElement('div');
+    t.className = 'cs-t';
+    t.textContent = c.title || t("(无标题)");
+    const m = document.createElement('div');
+    m.className = 'cs-m';
+    m.textContent = [c.decision && t("选：") + c.decision, c.result && t("果：") + c.result].filter(Boolean).join('　');
+    const w = document.createElement('div');
+    w.className = 'cs-w';
+    w.textContent = [c.why && t("为什么：") + c.why, c.result && t("后来：") + c.result].filter(Boolean).join('\n');
+    d.append(t, m, w);
+    d.onclick = () => d.classList.toggle('open');
+    el.appendChild(d);
+  }
+}
+
+$('edCase').onclick = () => {
+  const el = $('caseList');
+  el.innerHTML = '';
+  el.classList.remove('empty');
+  const mk = (ph) => {
+    const t = document.createElement('textarea');
+    t.className = 'fld';
+    t.placeholder = ph;
+    t.rows = 2;
+    return t;
+  };
+  const fT = mk(t("什么事 / 当时什么问题"));
+  const fD = mk(t("最后选了啥"));
+  const fW = mk(t("纠结什么，为什么这么选"));
+  const fR = mk(t("后来怎样，现在回头看对不对"));
+  const btns = document.createElement('div');
+  btns.className = 'btns';
+  const ok = document.createElement('button');
+  ok.className = 'btn p'; ok.textContent = t("存下");
+  const no = document.createElement('button');
+  no.className = 'btn'; no.textContent = t("取消");
+  btns.append(ok, no);
+  el.append(fT, fD, fW, fR, btns);
+  fT.focus();
+  no.onclick = () => loadCases();
+  ok.onclick = async () => {
+    if (!fT.value.trim()) { fT.focus(); return; }
+    ok.textContent = t("存着…");
+    try {
+      await api('api/cases', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: fT.value, decision: fD.value, why: fW.value, result: fR.value }),
+      });
+    } catch { /* 存失败就留着表单 */ }
+    await loadCases();
+  };
+};
+
+bindEdit($('edId'), 'identity', $('idBody'));
+
+// ── 模型 & 问话 ──
+let MS = { default: '', models: [] };
+
+async function loadModels() {
+  try { MS = await api('api/models'); } catch { MS = { default: '', models: [] }; }
+  const has = (MS.models || []).length > 0;
+  const send = $('askSend'), box = $('askBox');
+  if (send) { send.disabled = !has; send.textContent = t("发送"); }
+  if (box) box.disabled = !has;
+  const cur = has ? (MS.models.find(m => m.id === MS.default) || MS.models[0]) : null;
+  $('askState').textContent = cur ? (cur.label || cur.model || t("已配好")) : t("还没配模型");
+  renderModels();
+  if (!has && !$('askLog').childElementCount) say('hint', t("分身还没接上模型，开不了口。点右上角「加一个」，填 baseURL 和模型名（有 key 一起贴上），就能问了。"));
+}
+
+function renderModels() {
+  const el = $('modelList');
+  el.innerHTML = '';
+  const list = MS.models || [];
+  if (!list.length) {
+    const d = document.createElement('div');
+    d.className = 'say hint';
+    d.textContent = t("一个模型都没有。点右上角「加一个」：baseURL 填渠道地址，模型名填模型 id，key 可以直接贴（只存在本机）。");
+    el.appendChild(d);
+    return;
+  }
+  for (const m of list) {
+    const r = document.createElement('div');
+    r.className = 'mrow';
+    const l = document.createElement('div');
+    l.textContent = (m.label || m.model || m.id) + (m.id === MS.default ? t(" ·主") : '');
+    const rr = document.createElement('div');
+    rr.className = 'm-rel';
+    rr.textContent = (m.model || '') + (m.baseURL ? '  ' + String(m.baseURL).replace(/^https?:\/\//, '') : '');
+    r.append(l, rr);
+    el.appendChild(r);
+  }
+}
+
+$('edModel').onclick = () => {
+  const el = $('modelList');
+  el.innerHTML = '';
+  const mk = (ph) => {
+    const i = document.createElement('input');
+    i.type = 'text'; i.className = 'fld'; i.placeholder = ph;
+    i.style.cssText = 'display:block;width:100%;margin:6px 0;padding:9px 11px;border:1px solid var(--line);border-radius:9px;background:var(--surf2);color:var(--text);font:14px/1.5 inherit';
+    return i;
+  };
+  const fT = mk(t("名字，随便起（比如 主力）"));
+  const fB = mk(t("baseURL，例如 https://api.xxx.com/v1"));
+  const fM = mk(t("模型名，例如 xxx-chat"));
+  const fK = mk(t("key（直接贴，只存本机；也可以填 key 名）"));
+  const btns = document.createElement('div');
+  btns.className = 'btns';
+  const ok = document.createElement('button');
+  ok.className = 'btn p'; ok.textContent = t("存下");
+  const no = document.createElement('button');
+  no.className = 'btn'; no.textContent = t("取消");
+  btns.append(ok, no);
+  el.append(fT, fB, fM, fK, btns);
+  fB.focus();
+  no.onclick = () => renderModels();
+  ok.onclick = async () => {
+    if (!fB.value.trim() || !fM.value.trim()) { (fB.value.trim() ? fM : fB).focus(); return; }
+    ok.textContent = t("存着…");
+    const key = fK.value.trim();
+    const body = {
+      label: fT.value.trim() || fM.value.trim(), baseURL: fB.value.trim(), model: fM.value.trim(),
+    };
+    if (key) { if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) && key.length < 40) body.keyName = key; else body.apiKey = key; }
+    try {
+      const r = await api('api/models', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      if (r && r.error) { ok.textContent = t("存不下"); ok.disabled = false; return; }
+    } catch { ok.textContent = t("存不下"); ok.disabled = false; return; }
+    await loadModels();
+  };
+};
+
+function say(who, text) {
+  const box = $('askLog');
+  const d = document.createElement('div');
+  d.className = 'say ' + who;
+  d.textContent = text;
+  box.appendChild(d);
+  box.scrollTop = box.scrollHeight;
+}
+
+// 把内部错误翻译成人话，绝不把堆栈甩给用户
+function friendly(msg) {
+  const m = String(msg || '');
+  if (!m) return t("它没出声，再试一次。");
+  if (/找不到 key|no key|apiKey|unauthor|401/i.test(m)) return t("这个模型缺 key。点「模型」右上角重新填一次，把 key 一起贴上。");
+  if (/ENOENT|spawn|not found|Cannot find module/i.test(m)) return t("分身还没装好，重启一下 App 再试。");
+  if (/ENOTFOUND|ECONNREFUSED|fetch failed|network|timeout|ETIMEDOUT/i.test(m)) return t("连不上那个渠道，检查一下 baseURL 和网络。");
+  if (/404|model_not_found|不存在|no such model/i.test(m)) return t("渠道说没有这个模型名，核对一下模型 id。");
+  if (/invalid temperature|only 1 is allowed|temperature/i.test(m)) return t("这个渠道的 temperature 只吃它认可的值（不少是 1）。把 config.json 里的 temperature 改成 1 再问。");
+  return t("没成：") + m.replace(/\s+/g, ' ').slice(0, 120);
+}
+
+async function askOnce() {
+  const box = $('askBox');
+  const q = box.value.trim();
+  if (!q) { box.focus(); return; }
+  if (!(MS.models || []).length) { say('hint', t("还没配模型，分身开不了口。")); return; }
+  say('you', q);
+  box.value = '';
+  const btn = $('askSend');
+  btn.disabled = true; btn.textContent = t("它在想…");
+  let r = null;
+  try {
+    r = await api('api/ask', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ q }) });
+  } catch (e) { r = { error: t("网络断了，再试一次") }; }
+  btn.disabled = false; btn.textContent = t("发送");
+  if (r && r.answer) say('it', r.answer);
+  else say('hint', friendly(r && r.error));
+}
+
+$('askSend').onclick = askOnce;
+$('askBox').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); askOnce(); }
+});
+
+(async () => { await loadProfile(); await loadToggle(); await loadStatus(); await loadCases(); await loadModels(); })();
+</script>
+</body>
+</html>

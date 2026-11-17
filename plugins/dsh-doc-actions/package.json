@@ -1,0 +1,27 @@
+{
+  "name": "dsh-doc-actions",
+  "version": "0.1.1",
+  "private": true,
+  "type": "module",
+  "description": "文件预览的安卓文件动作：用系统应用打开 / 打开所在文件夹 / 分享（走 App 的 :3081 /open 桥）",
+  "main": "lib/index.js",
+  "exports": {
+    ".": { "default": "./lib/index.js" },
+    "./client": { "default": "./lib/client.js" },
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "inject": [],
+      "platform": "web"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/client.js",
+    "README.md"
+  ]
+}
