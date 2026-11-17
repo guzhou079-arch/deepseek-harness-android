@@ -4,8 +4,19 @@
 # 约 30~60 秒（proot 启动 + 5 秒 720×1280 编码）。
 set -eu
 
-TEST_ROOT=/sdcard/DeepSeekHarness/tmp/dsh-video-selftest
-RUN=${DSH_LINUX_RUN:-/data/user/0/com.deepseek.harness/files/work/linux/run.sh}
+# 临时目录：老布局在 /sdcard/DeepSeekHarness/tmp，新装应用没「所有文件访问权限」时不可写，
+# 退到 App 私有目录。
+pick_tmp() {
+  for d in "/sdcard/DeepSeekHarness/tmp" "${DSH_HOME%/payload/dshhome}/tmp" "${HOME:-/tmp}"; do
+    [ -n "$d" ] || continue
+    if mkdir -p "$d" 2>/dev/null && : > "$d/.wprobe-$$" 2>/dev/null; then
+      rm -f "$d/.wprobe-$$" 2>/dev/null; echo "$d"; return 0
+    fi
+  done
+  echo "${TMPDIR:-/tmp}"
+}
+TEST_ROOT=$(pick_tmp)/dsh-video-selftest
+RUN=${DSH_LINUX_RUN:-${HOME:-/data/user/0/com.deepseek.harness/files}/work/linux/run.sh}
 SKILL=$(cd "$(dirname "$0")/.." && pwd)
 fail() { echo "✗ $*" >&2; exit 1; }
 

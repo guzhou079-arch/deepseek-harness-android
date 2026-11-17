@@ -137,7 +137,7 @@ window.__ModuleLoader__.load({
 
     function callAction(id, arg) {
       const s = shell();
-      if (!s) return { ok: false, msg: '需要在本应用内使用' };
+      if (!s) return { ok: false, msg: T("需要在本应用内使用") };
       try {
         const raw = s.ctlAct(String(id), arg === undefined || arg === null ? '' : String(arg));
         return raw ? JSON.parse(raw) : { ok: true };
@@ -229,9 +229,9 @@ window.__ModuleLoader__.load({
           custom_model_name: 'tts-1',
         },
         presets: [
-          { id: 'stella', name: '星蓝 · 官方女声', engine: 'deepseek', gender: 'female', tags: '官方/自然/沉稳' },
-          { id: 'tide', name: '潮汐 · 官方男声', engine: 'deepseek', gender: 'male', tags: '官方/低沉/叙事' },
-          { id: 'custom', name: '自定义模型', engine: 'custom', gender: 'auto', tags: '填自己的 URL / Key / 模型名' },
+          { id: 'stella', name: T("星蓝 · 官方女声"), engine: 'deepseek', gender: 'female', tags: T("官方/自然/沉稳") },
+          { id: 'tide', name: T("潮汐 · 官方男声"), engine: 'deepseek', gender: 'male', tags: T("官方/低沉/叙事") },
+          { id: 'custom', name: T("自定义模型"), engine: 'custom', gender: 'auto', tags: T("填自己的 URL / Key / 模型名") },
         ],
       });
 
@@ -513,12 +513,12 @@ window.__ModuleLoader__.load({
       return jsx(Modal, {
         open: true,
         onClose: props.onCancel,
-        title: pending.title || '确认',
-        closeLabel: '关闭',
+        title: pending.title || T("确认"),
+        closeLabel: T("关闭"),
         description: pending.text,
         footer: jsxs(Fragment, { children: [
-          jsx(Button, { variant: 'outline', onClick: props.onCancel, children: '取消' }),
-          jsx(Button, { variant: 'primary', onClick: props.onOk, children: pending.okLabel || '确定' }),
+          jsx(Button, { variant: 'outline', onClick: props.onCancel, children: T("取消") }),
+          jsx(Button, { variant: 'primary', onClick: props.onOk, children: pending.okLabel || T("确定") }),
         ] }),
       });
     }
@@ -554,9 +554,9 @@ window.__ModuleLoader__.load({
           if (this.state.error) {
             const msg = this.state.error && this.state.error.message ? this.state.error.message : String(this.state.error);
             return jsxs('div', { className: 'ctl-empty', children: [
-              jsx('div', { className: 'ctl-title', children: '控制台页面出错了' }),
+              jsx('div', { className: 'ctl-title', children: T("控制台页面出错了") }),
               jsx('div', { className: 'ctl-desc', children: msg }),
-              jsx('div', { className: 'ctl-desc', children: '原生控制台没有删：文件没解压、或引擎启动失败时会自动出现。' }),
+              jsx('div', { className: 'ctl-desc', children: T("原生控制台没有删：文件没解压、或引擎启动失败时会自动出现。") }),
             ] });
           }
           return this.props.children;
@@ -566,13 +566,13 @@ window.__ModuleLoader__.load({
 
     // Model routing uses the same live directory as the composer model selector.
     const MODEL_ROLES = [
-      { id: 'frontend', label: '前端 UI 与审美', provider: 'opencode-go', model: 'kimi-k3.1-pro', effort: 'high', use: '界面设计、交互细节、视觉打磨和前端实现', cost: 'Go · Kimi high' },
-      { id: 'backend', label: '后端与复杂编码', provider: 'opencode-go', model: 'deepseek-v4.1-flash', effort: 'max', use: '服务端、数据链路、疑难排错和复杂仓库修改', cost: 'Go · DeepSeek max' },
-      { id: 'plan', label: '需求分析与拆解', provider: 'opencode-go', model: 'kimi-k3.1-pro', effort: 'max', use: '临时把本会话切到 Kimi max 拆需求，拆完切回；日常需求分析用子代理跑', cost: 'Go · Kimi max' },
-      { id: 'docs', label: '中文长文与翻译', provider: 'opencode-go', model: 'qwen3.8-max', use: '中文长文、翻译和文档改写；不做需求或生活常识终审', cost: 'Go · Qwen 默认档' },
-      { id: 'test', label: '测试与第二遍查错', provider: 'opencode-go', model: 'glm-5.3', effort: 'high', use: '测试用例、静态查错和代码复检；不派读图任务', cost: 'Go · GLM high' },
-      { id: 'ds', label: '日常工作', provider: 'opencode-go', model: 'deepseek-v4.1-flash', effort: 'high', use: '日常问答、常规脚本、文档和一般工具任务', cost: 'Go · DeepSeek high' },
-      { id: 'cheap', label: '轻量与重复任务', provider: 'opencode-go', model: 'deepseek-v4.1-flash', effort: 'low', use: '取数、转格式、摘要、分类和批量重复任务', cost: 'Go · DeepSeek low' },
+      { id: 'frontend', label: T("前端 UI 与审美"), provider: 'opencode-go', model: 'kimi-k3.1-pro', effort: 'high', use: T("界面设计、交互细节、视觉打磨和前端实现"), cost: 'Go · Kimi high' },
+      { id: 'backend', label: T("后端与复杂编码"), provider: 'opencode-go', model: 'deepseek-v4.1-flash', effort: 'max', use: T("服务端、数据链路、疑难排错和复杂仓库修改"), cost: 'Go · DeepSeek max' },
+      { id: 'plan', label: T("需求分析与拆解"), provider: 'opencode-go', model: 'kimi-k3.1-pro', effort: 'max', use: T("临时把本会话切到 Kimi max 拆需求，拆完切回；日常需求分析用子代理跑"), cost: 'Go · Kimi max' },
+      { id: 'docs', label: T("中文长文与翻译"), provider: 'opencode-go', model: 'qwen3.8-max', use: T("中文长文、翻译和文档改写；不做需求或生活常识终审"), cost: T("Go · Qwen 默认档") },
+      { id: 'test', label: T("测试与第二遍查错"), provider: 'opencode-go', model: 'glm-5.3', effort: 'high', use: T("测试用例、静态查错和代码复检；不派读图任务"), cost: 'Go · GLM high' },
+      { id: 'ds', label: T("日常工作"), provider: 'opencode-go', model: 'deepseek-v4.1-flash', effort: 'high', use: T("日常问答、常规脚本、文档和一般工具任务"), cost: 'Go · DeepSeek high' },
+      { id: 'cheap', label: T("轻量与重复任务"), provider: 'opencode-go', model: 'deepseek-v4.1-flash', effort: 'low', use: T("取数、转格式、摘要、分类和批量重复任务"), cost: 'Go · DeepSeek low' },
     ];
     // 角色表改成可编辑。默认值仍是 MODEL_ROLES，改动存 localStorage，刷新仍在。
     // 2026-10-25：模型清单走官方 RPC remote.session.modelCatalog()（设置页的模型项也是读它）。
@@ -630,7 +630,7 @@ window.__ModuleLoader__.load({
       });
     };
 
-    const routeName = value => value ? value.provider + '/' + value.model : '尚未读取';
+    const routeName = value => value ? value.provider + '/' + value.model : T("尚未读取");
     const routeMatch = (a, b) => !!a && !!b && a.provider === b.provider && a.model === b.model;
     const routeModel = (groups, value) => groups.find(g => g.id === value?.provider)?.models.find(m => m.id === value?.model);
 
@@ -655,16 +655,16 @@ window.__ModuleLoader__.load({
               try { _s = this.services && this.services.sessions; } catch (_e1) {}
               try { _d = this.services && this.services.modelDirectories; } catch (_e2) {}
               var _win = typeof window !== 'undefined' ? window : null;
-              this.emit({ error: '模型服务还在启动，稍后点“刷新状态”重试' });
+              this.emit({ error: T("模型服务还在启动，稍后点“刷新状态”重试") });
             } catch (_e3) {
-              this.emit({ error: '诊断失败 ' + String(_e3 && _e3.message || _e3) });
+              this.emit({ error: T("诊断失败 ") + String(_e3 && _e3.message || _e3) });
             }
             clearTimeout(this.retryTimer);
             this.retryTimer = setTimeout(() => this.start(), 400);
             return;
           }
           this.retry = 0;
-          this.emit({ error: '读不到模型服务：sessions=' + (!!(this.services && this.services.sessions)) + '，模型目录=' + (!!(this.services && this.services.modelDirectories)) });
+          this.emit({ error: T("读不到模型服务：sessions=") + (!!(this.services && this.services.sessions)) + T("，模型目录=") + (!!(this.services && this.services.modelDirectories)) });
           return;
         }
         this.retry = 0;
@@ -677,12 +677,12 @@ window.__ModuleLoader__.load({
         const rows = Object.values(this.services.sessions.list.getSnapshot().byId);
         const main = rows.filter(r => (r.retainedBy?.mainView ?? this.services.sessions.retainInfo(r.id).getSnapshot().retainedBy.mainView ?? 0) > 0 && this.services.sessions.subagentAddress(r.id) === undefined);
         const row = main.length === 1 ? main[0] : null;
-        if (row && row.id === this.state.sessionId) { if (row) this.emit({ title: row.title || '当前会话' }); return; }
+        if (row && row.id === this.state.sessionId) { if (row) this.emit({ title: row.title || T("当前会话") }); return; }
         ++this.generation;
         this.stopDirectory();
         this.directory = null;
         if (!row) {
-          this.emit({ sessionId: null, directory: null, previous: null, busy: false, title: '', error: main.length > 1 ? '有多个会话在主视图，请先打开一个会话。' : '' });
+          this.emit({ sessionId: null, directory: null, previous: null, busy: false, title: '', error: main.length > 1 ? T("有多个会话在主视图，请先打开一个会话。") : '' });
           return;
         }
         try {
@@ -692,7 +692,7 @@ window.__ModuleLoader__.load({
           this.stopDirectory = this.directory.store.subscribe(sync);
           let previous = this.previous.get(row.id) || null;
           try { previous = previous || JSON.parse(window.localStorage.getItem('dsh.model-route.previous.' + row.id) || 'null'); } catch (_) {}
-          this.emit({ sessionId: row.id, title: row.title || '当前会话', directory: this.directory.store.getSnapshot(), previous, busy: false, error: '', message: '' });
+          this.emit({ sessionId: row.id, title: row.title || T("当前会话"), directory: this.directory.store.getSnapshot(), previous, busy: false, error: '', message: '' });
           this.refresh();
         } catch (e) { this.emit({ sessionId: row.id, directory: null, previous: null, busy: false, error: String(e.message || e) }); }
       }
@@ -706,29 +706,29 @@ window.__ModuleLoader__.load({
         if (this.state.busy || !this.directory) return;
         const row = this.services.sessions.list.getSnapshot().byId[this.state.sessionId];
         if (!row || (this.services.sessions.retainInfo(row.id).getSnapshot().retainedBy.mainView ?? 0) === 0) {
-          this.emit({ error: '目标会话已离开主视图，请重新打开后再切换。' }); return;
+          this.emit({ error: T("目标会话已离开主视图，请重新打开后再切换。") }); return;
         }
         const directory = this.directory, before = directory.store.getSnapshot().current;
         const model = routeModel(directory.store.getSnapshot().groups, target);
-        if (target.provider === 'deepseek-official') { this.emit({ error: 'DeepSeek 官方已暂停使用。' }); return; }
-        if (!model) { this.emit({ error: '目标模型不在当前目录中，请刷新后再试。' }); return; }
+        if (target.provider === 'deepseek-official') { this.emit({ error: T("DeepSeek 官方已暂停使用。") }); return; }
+        if (!model) { this.emit({ error: T("目标模型不在当前目录中，请刷新后再试。") }); return; }
         if (target.reasoningEffort !== undefined && !model.reasoning?.efforts.some(e => e.id === target.reasoningEffort)) {
-          this.emit({ error: '该模型未提供此思考档位，请重新选择。' }); return;
+          this.emit({ error: T("该模型未提供此思考档位，请重新选择。") }); return;
         }
         if (routeMatch(before, target) && before.reasoningEffort === target.reasoningEffort) {
-          this.emit({ error: '', message: '当前已使用此配置。' }); return;
+          this.emit({ error: '', message: T("当前已使用此配置。") }); return;
         }
         const generation = this.generation, sessionId = this.state.sessionId;
         this.emit({ busy: true, error: '', message: '' });
         try {
           const result = await directory.select(target);
-          if (!result?.ok) throw new Error(result?.error?.message || '模型切换未成功');
+          if (!result?.ok) throw new Error(result?.error?.message || T("模型切换未成功"));
           if (before) {
             this.previous.set(sessionId, before);
             try { window.localStorage.setItem('dsh.model-route.previous.' + sessionId, JSON.stringify(before)); } catch (_) {}
           }
           if (generation !== this.generation) return;
-          this.emit({ directory: directory.store.getSnapshot(), previous: before, message: '已切换为 ' + routeName(target) + '，后续请求使用新配置。' });
+          this.emit({ directory: directory.store.getSnapshot(), previous: before, message: T("已切换为 ") + routeName(target) + T("，后续请求使用新配置。") });
         } catch (e) { if (generation === this.generation) this.emit({ error: String(e.message || e) }); }
         finally { if (generation === this.generation) this.emit({ busy: false }); }
       }
@@ -779,59 +779,59 @@ window.__ModuleLoader__.load({
       const pick = value => { setChosen(value); setEffort(''); setPending(null); };
       const confirm = value => setPending({ sessionId: state.sessionId, target: value });
       return jsxs('div', { className: 'ctl-root', children: [
-        jsx(Back, { title: '模型分工', onBack }),
-        jsx(Note, { children: '按任务手动选模型。当前页面只操作正在打开的会话，切换时也会更新引擎默认模型。' }),
+        jsx(Back, { title: T("模型分工"), onBack }),
+        jsx(Note, { children: T("按任务手动选模型。当前页面只操作正在打开的会话，切换时也会更新引擎默认模型。") }),
         jsxs('div', { className: 'ctl-life-card', style: { margin: '12px 0' }, children: [
-          jsx('div', { className: 'ctl-brand', children: '当前使用' }),
+          jsx('div', { className: 'ctl-brand', children: T("当前使用") }),
           jsx('div', { className: 'ctl-title', children: routeName(current) }),
-          jsx('div', { className: 'ctl-desc', children: (currentRole?.label || '自定义模型') + ' · 思考深度 ' + (current?.reasoningEffort || routeModel(groups, current)?.reasoning?.defaultEffort || '模型默认') }),
-          jsx('div', { className: 'ctl-desc', children: state.sessionId ? state.title + ' · ' + state.sessionId.slice(0, 12) : '先打开一个会话，再进入模型分工' }),
-          jsx(Button, { variant: 'outline', size: 'sm', disabled: state.busy, onClick: () => controller.refresh(), children: '刷新状态' }),
+          jsx('div', { className: 'ctl-desc', children: (currentRole?.label || T("自定义模型")) + T(" · 思考深度 ") + (current?.reasoningEffort || routeModel(groups, current)?.reasoning?.defaultEffort || T("模型默认")) }),
+          jsx('div', { className: 'ctl-desc', children: state.sessionId ? state.title + ' · ' + state.sessionId.slice(0, 12) : T("先打开一个会话，再进入模型分工") }),
+          jsx(Button, { variant: 'outline', size: 'sm', disabled: state.busy, onClick: () => controller.refresh(), children: T("刷新状态") }),
         ] }),
         (state.error || directory.error) ? jsx('div', { role: 'alert', className: 'ctl-desc ctl-warn', children: state.error || String(directory.error?.message || directory.error) }) : null,
         state.message ? jsx('div', { role: 'status', className: 'ctl-note', children: state.message }) : null,
         editing ? jsxs('div', { className: 'ctl-life-card', style: { margin: '0 0 12px' }, children: [
-          jsx('div', { className: 'ctl-brand', children: '修改角色：' + ((roles.find(r => r.id === editing.id) || {}).label || editing.id) }),
-          jsxs('label', { className: 'ctl-note', children: ['厂商 (provider)', jsx('select', { className: 'ctl-voice-input', value: editing.provider, onChange: e => { const nextList = (typeof MODEL_CATALOG_SNAPSHOT !== 'undefined' && MODEL_CATALOG_SNAPSHOT[e.target.value]) || []; const nextLive = liveGroups.find(g => g.id === e.target.value); const firstModel = nextLive && nextLive.models && nextLive.models[0] ? nextLive.models[0].id : (nextList[0] ? nextList[0].id : ''); setEditing(Object.assign({}, editing, { provider: e.target.value, model: firstModel, effort: '' })); }, children: providerOptions.map(p => jsx('option', { value: p, children: p }, p)) })] }),
-          modelOptions.length ? jsxs('label', { className: 'ctl-note', children: ['模型 id', jsx('select', { className: 'ctl-voice-input', value: editing.model, onChange: e => setEditing(Object.assign({}, editing, { model: e.target.value, effort: '' })), children: modelOptions.map(m => jsx('option', { value: m.id, children: m.id === editing.model && m.efforts && m.efforts.length ? m.id + ' · 档位 ' + m.efforts.join('/') : m.id }, m.id)) })] }) : jsxs('label', { className: 'ctl-note', children: ['模型 id', jsx('input', { className: 'ctl-voice-input', value: editing.model, placeholder: 'kimi-k3.1-pro', onChange: e => setEditing(Object.assign({}, editing, { model: e.target.value })) })] }),
-          jsxs('label', { className: 'ctl-note', children: ['思考深度', jsx('select', { className: 'ctl-voice-input', value: editing.effort, onChange: e => setEditing(Object.assign({}, editing, { effort: e.target.value })), children: [jsx('option', { value: '', children: '模型默认' }), ...effortChoices.map(x => jsx('option', { value: x.id, children: x.name }, x.id))] })] }),
+          jsx('div', { className: 'ctl-brand', children: T("修改角色：") + ((roles.find(r => r.id === editing.id) || {}).label || editing.id) }),
+          jsxs('label', { className: 'ctl-note', children: [T("厂商 (provider)"), jsx('select', { className: 'ctl-voice-input', value: editing.provider, onChange: e => { const nextList = (typeof MODEL_CATALOG_SNAPSHOT !== 'undefined' && MODEL_CATALOG_SNAPSHOT[e.target.value]) || []; const nextLive = liveGroups.find(g => g.id === e.target.value); const firstModel = nextLive && nextLive.models && nextLive.models[0] ? nextLive.models[0].id : (nextList[0] ? nextList[0].id : ''); setEditing(Object.assign({}, editing, { provider: e.target.value, model: firstModel, effort: '' })); }, children: providerOptions.map(p => jsx('option', { value: p, children: p }, p)) })] }),
+          modelOptions.length ? jsxs('label', { className: 'ctl-note', children: [T("模型 id"), jsx('select', { className: 'ctl-voice-input', value: editing.model, onChange: e => setEditing(Object.assign({}, editing, { model: e.target.value, effort: '' })), children: modelOptions.map(m => jsx('option', { value: m.id, children: m.id === editing.model && m.efforts && m.efforts.length ? m.id + T(" · 档位 ") + m.efforts.join('/') : m.id }, m.id)) })] }) : jsxs('label', { className: 'ctl-note', children: [T("模型 id"), jsx('input', { className: 'ctl-voice-input', value: editing.model, placeholder: 'kimi-k3.1-pro', onChange: e => setEditing(Object.assign({}, editing, { model: e.target.value })) })] }),
+          jsxs('label', { className: 'ctl-note', children: [T("思考深度"), jsx('select', { className: 'ctl-voice-input', value: editing.effort, onChange: e => setEditing(Object.assign({}, editing, { effort: e.target.value })), children: [jsx('option', { value: '', children: T("模型默认") }), ...effortChoices.map(x => jsx('option', { value: x.id, children: x.name }, x.id))] })] }),
           jsxs('div', { className: 'ctl-bar', children: [
-            jsx(Button, { variant: 'primary', size: 'sm', onClick: () => { const overrides = readRoleOverrides(); overrides[editing.id] = { provider: String(editing.provider || '').trim(), model: String(editing.model || '').trim(), effort: editing.effort || undefined }; writeRoleOverrides(overrides); setRoles(effectiveRoles()); setEditing(null); writeRemoteRoles(effectiveRoles()); try { controller.refresh(); } catch (_e6) {} }, children: '保存' }),
-            jsx(Button, { variant: 'outline', size: 'sm', onClick: () => { const overrides = readRoleOverrides(); delete overrides[editing.id]; writeRoleOverrides(overrides); setRoles(effectiveRoles()); setEditing(null); writeRemoteRoles(effectiveRoles()); try { controller.refresh(); } catch (_e7) {} }, children: '恢复默认' }),
-            jsx(Button, { variant: 'ghost', size: 'sm', onClick: () => setEditing(null), children: '取消' }),
+            jsx(Button, { variant: 'primary', size: 'sm', onClick: () => { const overrides = readRoleOverrides(); overrides[editing.id] = { provider: String(editing.provider || '').trim(), model: String(editing.model || '').trim(), effort: editing.effort || undefined }; writeRoleOverrides(overrides); setRoles(effectiveRoles()); setEditing(null); writeRemoteRoles(effectiveRoles()); try { controller.refresh(); } catch (_e6) {} }, children: T("保存") }),
+            jsx(Button, { variant: 'outline', size: 'sm', onClick: () => { const overrides = readRoleOverrides(); delete overrides[editing.id]; writeRoleOverrides(overrides); setRoles(effectiveRoles()); setEditing(null); writeRemoteRoles(effectiveRoles()); try { controller.refresh(); } catch (_e7) {} }, children: T("恢复默认") }),
+            jsx(Button, { variant: 'ghost', size: 'sm', onClick: () => setEditing(null), children: T("取消") }),
           ] }),
         ] }) : null,
-        jsx('div', { className: 'ctl-group', children: '按任务选择' }),
+        jsx('div', { className: 'ctl-group', children: T("按任务选择") }),
         jsx('div', { className: 'ctl-life-grid', children: roles.map(role => {
           const available = !!routeModel(groups, role), selected = routeMatch(role, target);
           return jsxs('div', { className: 'ctl-life-card', style: selected ? { borderColor: 'var(--dsw-alias-state-business-primary)' } : {}, children: [
-            jsxs('div', { className: 'ctl-life-card-head', children: [jsx('div', { className: 'ctl-life-card-title', children: role.label }), jsx('span', { className: 'ctl-tag', children: role.paused ? '已暂停' : routeMatch(role, current) ? '使用中' : role.cost })] }),
+            jsxs('div', { className: 'ctl-life-card-head', children: [jsx('div', { className: 'ctl-life-card-title', children: role.label }), jsx('span', { className: 'ctl-tag', children: role.paused ? T("已暂停") : routeMatch(role, current) ? T("使用中") : role.cost })] }),
             jsx('div', { className: 'ctl-desc', children: routeName(role) }),
             jsx('div', { className: 'ctl-desc', children: role.use }),
             jsxs('div', { className: 'ctl-bar', children: [
-              jsx(Button, { variant: 'outline', size: 'sm', disabled: unavailable || role.paused || !available, onClick: () => pick({ provider: role.provider, model: role.model }), children: role.paused ? '暂不使用' : !available ? '目录中不可用' : selected ? '已选定' : '选择此角色' }),
-              jsx(Button, { variant: 'ghost', size: 'sm', onClick: () => setEditing({ id: role.id, provider: role.provider, model: role.model, effort: role.effort || '' }), children: '更换模型' }),
+              jsx(Button, { variant: 'outline', size: 'sm', disabled: unavailable || role.paused || !available, onClick: () => pick({ provider: role.provider, model: role.model }), children: role.paused ? T("暂不使用") : !available ? T("目录中不可用") : selected ? T("已选定") : T("选择此角色") }),
+              jsx(Button, { variant: 'ghost', size: 'sm', onClick: () => setEditing({ id: role.id, provider: role.provider, model: role.model, effort: role.effort || '' }), children: T("更换模型") }),
             ] }),
           ] }, role.id);
         }) }),
-        jsx('div', { className: 'ctl-group', children: '本次配置' }),
-        jsx(Row, { title: '目标模型', desc: routeName(target) }),
-        levels.length ? jsxs('label', { className: 'ctl-note', children: ['思考深度', jsx('select', { className: 'ctl-voice-input', value: effort, disabled: unavailable, onChange: e => setEffort(e.target.value), children: [jsx('option', { value: '', children: routeMatch(target, current) ? '保持当前档位 / 模型默认' : '模型默认' }), ...levels.map(level => jsx('option', { value: level.id, children: level.name + ' (' + level.id + ')' }, level.id))] })] }) : jsx(Note, { children: '此模型未声明思考档位，使用模型默认值。' }),
+        jsx('div', { className: 'ctl-group', children: T("本次配置") }),
+        jsx(Row, { title: T("目标模型"), desc: routeName(target) }),
+        levels.length ? jsxs('label', { className: 'ctl-note', children: [T("思考深度"), jsx('select', { className: 'ctl-voice-input', value: effort, disabled: unavailable, onChange: e => setEffort(e.target.value), children: [jsx('option', { value: '', children: routeMatch(target, current) ? T("保持当前档位 / 模型默认") : T("模型默认") }), ...levels.map(level => jsx('option', { value: level.id, children: level.name + ' (' + level.id + ')' }, level.id))] })] }) : jsx(Note, { children: T("此模型未声明思考档位，使用模型默认值。") }),
         jsxs('div', { className: 'ctl-bar', children: [
-          jsx(Button, { variant: 'primary', size: 'sm', disabled: unavailable || !model || target?.provider === 'deepseek-official', onClick: () => confirm(request), children: state.busy ? '正在切换…' : '应用配置' }),
-          jsx(Button, { variant: 'outline', size: 'sm', disabled: unavailable || !state.previous || state.previous.provider === 'deepseek-official' || !routeModel(groups, state.previous), onClick: () => confirm(state.previous), children: '回到上一次配置' }),
-          chosen ? jsx(Button, { variant: 'ghost', size: 'sm', onClick: () => pick(null), children: '保持当前模型' }) : null,
+          jsx(Button, { variant: 'primary', size: 'sm', disabled: unavailable || !model || target?.provider === 'deepseek-official', onClick: () => confirm(request), children: state.busy ? T("正在切换…") : T("应用配置") }),
+          jsx(Button, { variant: 'outline', size: 'sm', disabled: unavailable || !state.previous || state.previous.provider === 'deepseek-official' || !routeModel(groups, state.previous), onClick: () => confirm(state.previous), children: T("回到上一次配置") }),
+          chosen ? jsx(Button, { variant: 'ghost', size: 'sm', onClick: () => pick(null), children: T("保持当前模型") }) : null,
         ] }),
-        jsx(Note, { children: '参考倍率来自既有角色配置，可能变化，也不是每条消息的实际价格。模型目录可用不代表账户有余额；此页不发起付费试聊。' }),
-        jsx(Note, { children: '日常与重复任务中的 DeepSeek 走 dp 中继，不使用 DeepSeek 官方余额。切换模型会把当前对话上下文交给对应服务。' }),
-        pending ? jsx(Confirm, { pending: { title: '应用模型配置', text: state.title + '：' + routeName(current) + ' → ' + routeName(pending.target) + '，思考深度 ' + (pending.target.reasoningEffort || '模型默认') }, onCancel: () => setPending(null), onOk: () => {
+        jsx(Note, { children: T("参考倍率来自既有角色配置，可能变化，也不是每条消息的实际价格。模型目录可用不代表账户有余额；此页不发起付费试聊。") }),
+        jsx(Note, { children: T("日常与重复任务中的 DeepSeek 走 dp 中继，不使用 DeepSeek 官方余额。切换模型会把当前对话上下文交给对应服务。") }),
+        pending ? jsx(Confirm, { pending: { title: T("应用模型配置"), text: state.title + '：' + routeName(current) + ' → ' + routeName(pending.target) + T("，思考深度 ") + (pending.target.reasoningEffort || T("模型默认")) }, onCancel: () => setPending(null), onOk: () => {
           const operation = pending; setPending(null);
           if (operation.sessionId === controller.state.sessionId) controller.select(operation.target);
         } }) : null,
       ] });
     }
 
-    const WEEK_CN = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+    const WEEK_CN = [T("周日"), T("周一"), T("周二"), T("周三"), T("周四"), T("周五"), T("周六")];
 
     /** 10月15日 周四（今天）—— 全部账目页的日期分组标题。 */
     function fmtDay(ts) {
@@ -841,7 +841,7 @@ window.__ModuleLoader__.load({
       const that = new Date(d.getTime());
       that.setHours(0, 0, 0, 0);
       const diff = Math.round((today.getTime() - that.getTime()) / 86400000);
-      return (d.getFullYear() !== today.getFullYear() ? d.getFullYear() + '年' : '') + (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + WEEK_CN[d.getDay()] + (diff === 0 ? '（今天）' : diff === 1 ? '（昨天）' : '');
+      return (d.getFullYear() !== today.getFullYear() ? d.getFullYear() + T("年") : '') + (d.getMonth() + 1) + T("月") + d.getDate() + T("日 ") + WEEK_CN[d.getDay()] + (diff === 0 ? T("（今天）") : diff === 1 ? T("（昨天）") : '');
     }
 
     /**
@@ -869,7 +869,7 @@ window.__ModuleLoader__.load({
           const res = await fetch('/life/api/tx?limit=' + PAGE + '&offset=' + offset, { signal: controller.signal });
           const data = await res.json();
           if (!res.ok || !data || !data.ok || !Array.isArray(data.txs)) {
-            throw new Error((data && data.error) || '读取失败（HTTP ' + res.status + '）');
+            throw new Error((data && data.error) || T("读取失败（HTTP ") + res.status + '）');
           }
           if (controller.signal.aborted || !active.current) return;
           setRows((prev) => (offset > 0 ? prev.concat(data.txs) : data.txs));
@@ -911,26 +911,26 @@ window.__ModuleLoader__.load({
       const rowOf = (tx) => jsxs('div', { key: tx.id, className: 'ctl-item-row', children: [
         jsxs('div', { className: 'ctl-main', children: [
           jsxs('div', { style: { display: 'flex', alignItems: 'center', gap: '6px' }, children: [
-            jsx('span', { style: { fontSize: '13.5px', fontWeight: 500, color: 'var(--dsw-alias-label-primary)' }, children: tx.merchant || '消费' }),
+            jsx('span', { style: { fontSize: '13.5px', fontWeight: 500, color: 'var(--dsw-alias-label-primary)' }, children: tx.merchant || T("消费") }),
             tx.category ? jsx('span', { className: 'ctl-tag', children: tx.category }) : null,
           ] }),
-          jsx('div', { className: 'ctl-desc', children: (tx.account || '自动记账') + ' · ' + new Date(tx.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }) }),
+          jsx('div', { className: 'ctl-desc', children: (tx.account || T("自动记账")) + ' · ' + new Date(tx.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }) }),
         ] }),
         jsx('span', { className: tx.type === 'income' ? 'ctl-amt-pos' : 'ctl-amt-neg', children: (tx.type === 'income' ? '+ ¥' : '- ¥') + Number(tx.amount || 0).toFixed(2) }),
       ] });
 
       return jsxs('div', { className: 'ctl-root', children: [
-        jsx(Back, { title: '全部账目', onBack }),
-        jsx(Note, { children: loading && rows.length === 0 ? '正在读取全部账目…' : err && rows.length === 0 ? '暂时无法读取账目，请重试。' : '自动记账 + 手工补录的全部流水，按天倒序。共 ' + meta.total + ' 笔：支出 ¥' + Number(meta.expense).toFixed(2) + '，收入 ¥' + Number(meta.income).toFixed(2) + '。' }),
+        jsx(Back, { title: T("全部账目"), onBack }),
+        jsx(Note, { children: loading && rows.length === 0 ? T("正在读取全部账目…") : err && rows.length === 0 ? T("暂时无法读取账目，请重试。") : T("自动记账 + 手工补录的全部流水，按天倒序。共 ") + meta.total + T(" 笔：支出 ¥") + Number(meta.expense).toFixed(2) + T("，收入 ¥") + Number(meta.income).toFixed(2) + '。' }),
         jsx('div', { className: 'ctl-sep' }),
-        err ? jsx('div', { className: 'ctl-warn', children: '读取失败：' + err }) : null,
-        (!loading && !err && rows.length === 0) ? jsx('div', { className: 'ctl-note', children: '这里还没有账目。' }) : null,
+        err ? jsx('div', { className: 'ctl-warn', children: T("读取失败：") + err }) : null,
+        (!loading && !err && rows.length === 0) ? jsx('div', { className: 'ctl-note', children: T("这里还没有账目。") }) : null,
         groups.map((g) => jsxs('div', { key: g.key, className: 'ctl-life-card', children: [
           jsxs('div', { className: 'ctl-life-card-head', children: [
             jsx('span', { className: 'ctl-life-card-title', children: fmtDay(g.at) }),
             jsxs('div', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' }, children: [
-              '已加载合计 · 支出 ', jsx('span', { className: 'ctl-amt-neg', children: '¥' + g.expense.toFixed(2) }),
-              ' 收入 ', jsx('span', { className: 'ctl-amt-pos', children: '¥' + g.income.toFixed(2) }),
+              T("已加载合计 · 支出 "), jsx('span', { className: 'ctl-amt-neg', children: '¥' + g.expense.toFixed(2) }),
+              T(" 收入 "), jsx('span', { className: 'ctl-amt-pos', children: '¥' + g.income.toFixed(2) }),
             ] }),
           ] }),
           g.txs.map(rowOf),
@@ -941,7 +941,7 @@ window.__ModuleLoader__.load({
               size: 'sm',
               disabled: loading,
               onClick: () => load(rows.length),
-              children: loading ? '加载中…' : err ? '重试读取' : '加载更多（还有 ' + (meta.total - rows.length) + ' 笔）',
+              children: loading ? T("加载中…") : err ? T("重试读取") : T("加载更多（还有 ") + (meta.total - rows.length) + T(" 笔）"),
             }) })
           : null,
       ] });
@@ -965,7 +965,7 @@ window.__ModuleLoader__.load({
       const [clipTitle, setClipTitle] = react.useState('');
       const [clipText, setClipText] = react.useState('');
       const [lanInput, setLanInput] = react.useState('');
-      const [testText, setTestText] = react.useState('你好！我是 DeepSeek 智能语音分身，随时为您服务。');
+      const [testText, setTestText] = react.useState(T("你好！我是 DeepSeek 智能语音分身，随时为您服务。"));
       const [isAuditioning, setIsAuditioning] = react.useState(false);
       const [fetchedVoices, setFetchedVoices] = react.useState([]);
       const state = rawState ? Object.assign({}, rawState, { life: lifeData }) : null;
@@ -996,9 +996,9 @@ window.__ModuleLoader__.load({
 
       if (!state) {
         return jsx('div', { className: 'ctl-empty', children: [
-          jsx('div', { className: 'ctl-title', children: '控制台只在安卓应用内可用' }),
-          jsx('div', { className: 'ctl-desc', children: '这一页通过手机壳的桥（dshshell）执行解压 / 起引擎 / 授权等动作；桌面浏览器里没有这条通道。' }),
-          jsx(Button, { variant: 'outline', size: 'sm', onClick: () => setPage('models'), children: '进入模型分工' }),
+          jsx('div', { className: 'ctl-title', children: T("控制台只在安卓应用内可用") }),
+          jsx('div', { className: 'ctl-desc', children: T("这一页通过手机壳的桥（dshshell）执行解压 / 起引擎 / 授权等动作；桌面浏览器里没有这条通道。") }),
+          jsx(Button, { variant: 'outline', size: 'sm', onClick: () => setPage('models'), children: T("进入模型分工") }),
         ] });
       }
 
@@ -1015,8 +1015,8 @@ window.__ModuleLoader__.load({
       if (page === 'perm') {
         const rows = (state.perm && state.perm.rows) || [];
         return jsxs('div', { className: 'ctl-root', children: [
-          jsx(Back, { title: '授予权限', onBack: () => setPage('main') }),
-          jsx(Note, { children: 'root / Shizuku 二选一即可（root 优先）。root 只能由你在 root 管理器（Magisk / KernelSU）里授予本应用；设备没 root 时这一项显示「本机无 root」。' }),
+          jsx(Back, { title: T("授予权限"), onBack: () => setPage('main') }),
+          jsx(Note, { children: T("root / Shizuku 二选一即可（root 优先）。root 只能由你在 root 管理器（Magisk / KernelSU）里授予本应用；设备没 root 时这一项显示「本机无 root」。") }),
           jsx('div', { className: 'ctl-sep' }),
           rows.map((r) => jsx(Row, {
             key: r.id,
@@ -1029,19 +1029,19 @@ window.__ModuleLoader__.load({
                 size: 'sm',
                 disabled: !!r.disabled,
                 onClick: () => run('perm.action', r.id),
-                children: r.ok ? '管理' : '去授权',
+                children: r.ok ? T("管理") : T("去授权"),
               }),
             ] }),
           }, r.id)),
           state.workspace ? jsx(Row, {
             key: 'workspace',
-            title: 'AI 工作区（可选）',
-            desc: state.workspace.unset ? '未设置（AI 文件操作在内部目录）' : state.workspace.path,
+            title: T("AI 工作区（可选）"),
+            desc: state.workspace.unset ? T("未设置（AI 文件操作在内部目录）") : state.workspace.path,
             right: jsx(Button, {
               variant: 'outline',
               size: 'sm',
               onClick: () => run('workspace.change', ''),
-              children: state.workspace.unset ? '选择' : '更改',
+              children: state.workspace.unset ? T("选择") : T("更改"),
             }),
           }, 'workspace') : null,
           confirmBar,
@@ -1053,8 +1053,8 @@ window.__ModuleLoader__.load({
       if (page === 'plug') {
         const rows = (state.plugins && state.plugins.rows) || [];
         return jsxs('div', { className: 'ctl-root', children: [
-          jsx(Back, { title: '插件', onBack: () => setPage('main') }),
-          jsx(Note, { children: '关掉的插件不加载：工具不进 AI 的工具表，也少占上下文。改动在重启引擎后生效。' }),
+          jsx(Back, { title: T("插件"), onBack: () => setPage('main') }),
+          jsx(Note, { children: T("关掉的插件不加载：工具不进 AI 的工具表，也少占上下文。改动在重启引擎后生效。") }),
           jsx('div', { className: 'ctl-sep' }),
           rows.map((r) => jsx(Row, {
             title: r.title,
@@ -1068,8 +1068,8 @@ window.__ModuleLoader__.load({
           jsx('div', { className: 'ctl-bar', children: jsx(Button, {
             variant: 'outline',
             size: 'sm',
-            onClick: () => ask('重启引擎', '插件的加载与关闭要重启引擎才生效。', 'engine.restart', '', '正在重启引擎…'),
-            children: '重启引擎生效',
+            onClick: () => ask(T("重启引擎"), T("插件的加载与关闭要重启引擎才生效。"), 'engine.restart', '', T("正在重启引擎…")),
+            children: T("重启引擎生效"),
           }) }),
           confirmBar,
           flashBar,
@@ -1081,30 +1081,30 @@ window.__ModuleLoader__.load({
         const be = state.buildEnv || {};
         const sources = be.sources || [];
         return jsxs('div', { className: 'ctl-root', children: [
-          jsx(Back, { title: '自建环境', onBack: () => setPage('main') }),
-          jsx(Note, { children: '装上它之后，你可以在这台手机上自己编译、打包、签名、安装这个 App —— 也就是这个项目本来的核心能力。主包不含这部分（约 193MB），所以按需下载。GitHub 与 Gitee 都放了同样的分卷，任选其一。' }),
+          jsx(Back, { title: T("自建环境"), onBack: () => setPage('main') }),
+          jsx(Note, { children: T("装上它之后，你可以在这台手机上自己编译、打包、签名、安装这个 App —— 也就是这个项目本来的核心能力。主包不含这部分（约 193MB），所以按需下载。GitHub 与 Gitee 都放了同样的分卷，任选其一。") }),
           jsx('div', { className: 'ctl-sep' }),
           jsx(Row, { title: be.summary || '', desc: be.statusText || '', descWarn: false }),
-          be.installing && be.stage ? jsx(Row, { title: be.stage, desc: '正在安装，请保持网络与前台。' }) : null,
+          be.installing && be.stage ? jsx(Row, { title: be.stage, desc: T("正在安装，请保持网络与前台。") }) : null,
           jsx('div', { className: 'ctl-bar', children: be.installing
-            ? jsx(Button, { variant: 'outline', size: 'sm', onClick: () => run('buildenv.cancel', ''), children: '取消安装' })
+            ? jsx(Button, { variant: 'outline', size: 'sm', onClick: () => run('buildenv.cancel', ''), children: T("取消安装") })
             : jsxs(Fragment, { children: [
                 sources.map((s, i) => jsx(Button, {
                   variant: 'outline',
                   size: 'sm',
-                  onClick: () => ask(be.installed ? '重新安装自建环境' : '下载并安装自建环境', String(s.label) + '：' + (be.installed ? '重新安装 / 修复自建环境？' : '开始下载并安装自建环境？') + '（约 193MB，保持前台与网络）', 'buildenv.install', String(i), '已开始下载安装…'),
-                  children: (be.installed ? '用 ' + s.label + ' 重新安装 / 修复' : '从 ' + s.label + ' 下载安装'),
+                  onClick: () => ask(be.installed ? T("重新安装自建环境") : T("下载并安装自建环境"), String(s.label) + '：' + (be.installed ? T("重新安装 / 修复自建环境？") : T("开始下载并安装自建环境？")) + T("（约 193MB，保持前台与网络）"), 'buildenv.install', String(i), T("已开始下载安装…")),
+                  children: (be.installed ? T("用 ") + s.label + T(" 重新安装 / 修复") : T("从 ") + s.label + T(" 下载安装")),
                 }, 'src' + i)),
                 jsx(Button, {
                   variant: 'ghost',
                   size: 'sm',
                   onClick: () => run('buildenv.resolve', ''),
                   disabled: !!be.resolving,
-                  children: be.resolving ? '正在查询…' : (sources.length ? '重新查询两个仓库' : '查询两个仓库'),
+                  children: be.resolving ? T("正在查询…") : (sources.length ? T("重新查询两个仓库") : T("查询两个仓库")),
                 }),
               ] }) }),
           be.err ? jsx(Note, { children: be.err }) : null,
-          jsx(Note, { children: '⚠️ 解压必须落在内部存储 —— /sdcard 是 FUSE，存不了 rootfs 里的符号链接（918 个）。分卷会留在 /sdcard/DeepSeekHarness/buildenv，重装 App 后不用重新下载，重新解压即可。' }),
+          jsx(Note, { children: T("⚠️ 解压必须落在内部存储 —— /sdcard 是 FUSE，存不了 rootfs 里的符号链接（918 个）。分卷会留在 /sdcard/DeepSeekHarness/buildenv，重装 App 后不用重新下载，重新解压即可。") }),
           confirmBar,
           flashBar,
         ] });
@@ -1116,7 +1116,7 @@ window.__ModuleLoader__.load({
         const inst = kn.installed || [];
         const store = kn.store || [];
         const active = kn.active || '';
-        const storeDir = kn.storeDir || '/sdcard/DeepSeekHarness/kernels';
+        const storeDir = kn.storeDir || T("（由 App 指定）");
         const sizeText = (n) => {
           if (!n) return '';
           const mb = n / 1048576;
@@ -1124,33 +1124,33 @@ window.__ModuleLoader__.load({
         };
         const fresh = store.filter((b) => !b.installed);
         return jsxs('div', { className: 'ctl-root', children: [
-          jsx(Back, { title: '引擎内核', onBack: () => setPage('main') }),
-          jsx(Note, { children: '内核就是引擎跑的那棵 node 包（bin.js + node_modules）。内核包是 tar.gz + manifest.json，从 /sdcard 装进应用私有目录（内部 ext4），不占主屏可见空间。内置内核永远随 APK 一起：切换失败、内核坏掉、启动超时，都会自动回落，不会有起不来的风险。' }),
+          jsx(Back, { title: T("引擎内核"), onBack: () => setPage('main') }),
+          jsx(Note, { children: T("内核就是引擎跑的那棵 node 包（bin.js + node_modules）。内核包是 tar.gz + manifest.json，从 /sdcard 装进应用私有目录（内部 ext4），不占主屏可见空间。内置内核永远随 APK 一起：切换失败、内核坏掉、启动超时，都会自动回落，不会有起不来的风险。") }),
           jsx('div', { className: 'ctl-sep' }),
           jsx(Row, {
-            title: '当前：' + (kn.activeText || '内置内核'),
-            desc: active ? '从应用私有目录加载 · 切换会重启一次引擎' : '从 APK 的 payload/dshroot 加载 · 永远兜底',
+            title: T("当前：") + (kn.activeText || T("内置内核")),
+            desc: active ? T("从应用私有目录加载 · 切换会重启一次引擎") : T("从 APK 的 payload/dshroot 加载 · 永远兜底"),
           }),
           jsx('div', { className: 'ctl-sep' }),
           inst.length ? inst.map((b, i) => jsx(Row, {
-            title: b.version + (b.label ? ' · ' + b.label : '') + (b.active ? '（使用中）' : ''),
+            title: b.version + (b.label ? ' · ' + b.label : '') + (b.active ? T("（使用中）") : ''),
             desc: sizeText(b.sizeBytes),
             right: jsxs(Fragment, { children: [
               b.active ? null : jsx(Button, {
                 variant: 'outline',
                 size: 'sm',
-                onClick: () => ask('切换到 ' + b.version, '会重启一次引擎（几秒）。记忆和会话都在 dshhome，不受影响。如果这个内核起不来，90 秒内会自动回退到内置内核。', 'kernel.switch', b.version, '切换中，引擎会重启…'),
-                children: '切换',
+                onClick: () => ask(T("切换到 ") + b.version, T("会重启一次引擎（几秒）。记忆和会话都在 dshhome，不受影响。如果这个内核起不来，90 秒内会自动回退到内置内核。"), 'kernel.switch', b.version, T("切换中，引擎会重启…")),
+                children: T("切换"),
               }),
               jsx(Button, {
                 variant: 'ghost',
                 size: 'sm',
                 disabled: b.active,
-                onClick: () => ask('删除内核 ' + b.version, '删掉这份已解压的内核，不影响内置内核。', 'kernel.remove', b.version, '已删除'),
-                children: '删除',
+                onClick: () => ask(T("删除内核 ") + b.version, T("删掉这份已解压的内核，不影响内置内核。"), 'kernel.remove', b.version, T("已删除")),
+                children: T("删除"),
               }),
             ] }),
-          }, 'kinst' + i)) : jsx(Row, { title: '已安装', desc: '还没装过内核包。「可安装」里的包点一下就装进来。' }),
+          }, 'kinst' + i)) : jsx(Row, { title: T("已安装"), desc: T("还没装过内核包。「可安装」里的包点一下就装进来。") }),
           jsx('div', { className: 'ctl-sep' }),
           fresh.length ? fresh.map((b, i) => jsx(Row, {
             title: b.version + (b.label ? ' · ' + b.label : ''),
@@ -1158,17 +1158,17 @@ window.__ModuleLoader__.load({
             right: jsx(Button, {
               variant: 'outline',
               size: 'sm',
-              onClick: () => ask('安装内核 ' + b.version, '先校验 sha256，再解压到应用私有目录（约十几秒到一分钟），不会重启引擎。', 'kernel.install', b.version, '安装中…'),
-              children: '安装',
+              onClick: () => ask(T("安装内核 ") + b.version, T("先校验 sha256，再解压到应用私有目录（约十几秒到一分钟），不会重启引擎。"), 'kernel.install', b.version, T("安装中…")),
+              children: T("安装"),
             }),
-          }, 'kstore' + i)) : jsx(Row, { title: '可安装', desc: '目录：' + storeDir + '（放 kernel-*.tar.gz 和 manifest.json）· 现在没有新包' }),
+          }, 'kstore' + i)) : jsx(Row, { title: T("可安装"), desc: T("目录：") + storeDir + T("（放 kernel-*.tar.gz 和 manifest.json）· 现在没有新包") }),
           jsx('div', { className: 'ctl-sep' }),
           jsx('div', { className: 'ctl-bar', children: jsx(Button, {
             variant: 'ghost',
             size: 'sm',
             disabled: !active,
-            onClick: () => ask('回退到内置内核', '删掉激活记录，下次启动引擎用 APK 内置的那份。受管内核出问题时用。', 'kernel.deactivate', '', '已回退，下次启动引擎生效'),
-            children: '回退到内置内核',
+            onClick: () => ask(T("回退到内置内核"), T("删掉激活记录，下次启动引擎用 APK 内置的那份。受管内核出问题时用。"), 'kernel.deactivate', '', T("已回退，下次启动引擎生效")),
+            children: T("回退到内置内核"),
           }) }),
           confirmBar,
           flashBar,
@@ -1181,24 +1181,24 @@ window.__ModuleLoader__.load({
         const vCfg = voiceHub.config || {};
         const presets = voiceHub.presets || [];
         const isHotword = vCfg.hotword_enabled === '1' || vo.hotwordEnabled;
-        const currentWords = vCfg.wake_words || vo.wakeWords || '小鲸鱼,DeepSeek';
+        const currentWords = vCfg.wake_words || vo.wakeWords || "小鲸鱼,DeepSeek";
         const currentVoice = vCfg.tts_voice || 'stella';
         const currentSpeed = vCfg.tts_speed || '1.0';
         const currentEngine = vCfg.tts_engine || 'deepseek';
 
         return jsxs('div', { className: 'ctl-root', children: [
-          jsx(Back, { title: '语音交互与 TTS 调音台', onBack: () => setPage('main') }),
-          jsx(Note, { children: '全能语音中枢：支持端侧低功耗语音唤醒、多模型超自然 TTS 音色调优、一句话连贯问答与小鲸鱼悬浮球对讲。' }),
+          jsx(Back, { title: T("语音交互与 TTS 调音台"), onBack: () => setPage('main') }),
+          jsx(Note, { children: T("全能语音中枢：支持端侧低功耗语音唤醒、多模型超自然 TTS 音色调优、一句话连贯问答与小鲸鱼悬浮球对讲。") }),
           jsx('div', { className: 'ctl-sep' }),
 
           // ========== 第一板块：⚡ 语音唤醒与识别 ==========
-          jsx('div', { className: 'ctl-group', children: '⚡ 语音唤醒与识别 (Wake-up & STT)' }),
+          jsx('div', { className: 'ctl-group', children: T("⚡ 语音唤醒与识别 (Wake-up & STT)") }),
           jsx(Row, {
-            title: '语音热词唤醒',
-            desc: isHotword ? '🟢 待命监听中 · 喊出唤醒词自动开麦（支持一句话直达）' : '已关闭（更省电，仍可通过长按悬浮球或耳机按键随时唤醒）',
+            title: T("语音热词唤醒"),
+            desc: isHotword ? T("🟢 待命监听中 · 喊出唤醒词自动开麦（支持一句话直达）") : T("已关闭（更省电，仍可通过长按悬浮球或耳机按键随时唤醒）"),
             right: jsx(Switch, {
               checked: !!isHotword,
-              label: '语音热词唤醒',
+              label: T("语音热词唤醒"),
               onChange: (next) => {
                 saveVoiceConfig({ hotword_enabled: next ? '1' : '0' });
                 run('voice.hotword.toggle', next ? '1' : '0');
@@ -1206,29 +1206,29 @@ window.__ModuleLoader__.load({
             }),
           }),
           jsx(Row, {
-            title: '自定义唤醒词',
-            desc: '当前唤醒词：' + currentWords + '（支持同音字与拼音智能容错）',
+            title: T("自定义唤醒词"),
+            desc: T("当前唤醒词：") + currentWords + T("（支持同音字与拼音智能容错）"),
             right: jsx(Button, {
               variant: 'outline',
               size: 'sm',
               onClick: () => {
-                const input = window.prompt('请输入自定义唤醒词（支持多个，逗号隔开）：', currentWords);
+                const input = window.prompt(T("请输入自定义唤醒词（支持多个，逗号隔开）："), currentWords);
                 if (input !== null && input.trim() !== '') {
                   saveVoiceConfig({ wake_words: input.trim() });
                   run('voice.wakewords.set', input.trim());
                 }
               },
-              children: '修改',
+              children: T("修改"),
             }),
           }),
           jsx(Row, {
-            title: '唤醒交互模式',
-            desc: vCfg.wake_mode === 'two_step' ? '双步交互：喊唤醒词 ➔ 叮~ 冒泡提示 ➔ 等待您说指令' : '一句话直达：一口气说「小鲸鱼 帮我查天气」连贯执行（推荐）',
+            title: T("唤醒交互模式"),
+            desc: vCfg.wake_mode === 'two_step' ? T("双步交互：喊唤醒词 ➔ 叮~ 冒泡提示 ➔ 等待您说指令") : T("一句话直达：一口气说「小鲸鱼 帮我查天气」连贯执行（推荐）"),
             right: jsx(SegmentedControl, {
               value: vCfg.wake_mode || 'single_breath',
               options: [
-                { value: 'single_breath', label: '一句话直达' },
-                { value: 'two_step', label: '双步等待' },
+                { value: 'single_breath', label: T("一句话直达") },
+                { value: 'two_step', label: T("双步等待") },
               ],
               onChange: (mode) => saveVoiceConfig({ wake_mode: mode }),
             }),
@@ -1237,31 +1237,31 @@ window.__ModuleLoader__.load({
           jsx('div', { className: 'ctl-sep' }),
 
           // ========== 第二板块：🔊 TTS 语音模型与音色调音台 ==========
-          jsx('div', { className: 'ctl-group', children: '🔊 TTS 语音模型与音色调音台' }),
+          jsx('div', { className: 'ctl-group', children: T("🔊 TTS 语音模型与音色调音台") }),
 
           // 自动朗读：开了之后助手正文一边出就一边念，不需要任何按钮占位。
           jsxs('div', { style: { padding: '8px 0 6px' }, children: [
-            jsx('div', { className: 'ctl-title', children: '自动朗读' }),
-            jsx('div', { className: 'ctl-desc', style: { marginBottom: '8px' }, children: '开启后助手每条回复自动朗读；关掉就完全安静' }),
+            jsx('div', { className: 'ctl-title', children: T("自动朗读") }),
+            jsx('div', { className: 'ctl-desc', style: { marginBottom: '8px' }, children: T("开启后助手每条回复自动朗读；关掉就完全安静") }),
             jsx(SegmentGrid, {
               columns: 2,
               value: vCfg.auto_read === '1' ? '1' : '0',
               options: [
-                { value: '1', label: '开启' },
-                { value: '0', label: '关闭' },
+                { value: '1', label: T("开启") },
+                { value: '0', label: T("关闭") },
               ],
               onChange: (v) => saveVoiceConfig({ auto_read: v }),
             }),
           ] }),
           jsxs('div', { style: { padding: '8px 0 6px' }, children: [
-            jsx('div', { className: 'ctl-title', children: 'TTS 播报引擎' }),
-            jsx('div', { className: 'ctl-desc', style: { marginBottom: '8px' }, children: '官方接口或你自己的模型，两条都真能出声' }),
+            jsx('div', { className: 'ctl-title', children: T("TTS 播报引擎") }),
+            jsx('div', { className: 'ctl-desc', style: { marginBottom: '8px' }, children: T("官方接口或你自己的模型，两条都真能出声") }),
             jsx(SegmentGrid, {
               columns: 2,
               value: currentEngine,
               options: [
-                { value: 'deepseek', label: 'DeepSeek 官方' },
-                { value: 'custom', label: '自定义模型' },
+                { value: 'deepseek', label: T("DeepSeek 官方") },
+                { value: 'custom', label: T("自定义模型") },
               ],
               onChange: (eng) => saveVoiceConfig({ tts_engine: eng }),
             }),
@@ -1270,7 +1270,7 @@ window.__ModuleLoader__.load({
           // 音色属于模型本身：官方只有两个 voice_id 值得列，
           // 自定义模型的音色由那个模型自己定义，不替它规定。
           currentEngine === 'deepseek' ? jsx('div', { style: { padding: '8px 0 2px' }, children: [
-            jsx('div', { className: 'ctl-title', style: { fontSize: '13px', marginBottom: '6px' }, children: '官方音色（点击切换）' }),
+            jsx('div', { className: 'ctl-title', style: { fontSize: '13px', marginBottom: '6px' }, children: T("官方音色（点击切换）") }),
             jsx('div', { className: 'ctl-voice-grid', children: presets.filter((p) => p.engine === 'deepseek').map((p) => {
               const active = currentVoice === p.id;
               return jsxs('div', {
@@ -1278,7 +1278,7 @@ window.__ModuleLoader__.load({
                 className: 'ctl-voice-card' + (active ? ' active' : ''),
                 onClick: () => {
                   saveVoiceConfig({ tts_voice: p.id, tts_engine: p.engine });
-                  say('已切换音色：' + p.name);
+                  say(T("已切换音色：") + p.name);
                 },
                 children: [
                   jsx('div', { className: 'ctl-voice-card-name', children: p.name }),
@@ -1290,16 +1290,16 @@ window.__ModuleLoader__.load({
 
           // 语速微调
           jsxs('div', { style: { padding: '8px 0 6px' }, children: [
-            jsx('div', { className: 'ctl-title', children: '播报语速' }),
-            jsx('div', { className: 'ctl-desc', style: { marginBottom: '8px' }, children: '当前倍速：' + currentSpeed + 'x（标准为 1.0x）' }),
+            jsx('div', { className: 'ctl-title', children: T("播报语速") }),
+            jsx('div', { className: 'ctl-desc', style: { marginBottom: '8px' }, children: T("当前倍速：") + currentSpeed + T("x（标准为 1.0x）") }),
             jsx(SegmentGrid, {
               columns: 4,
               value: currentSpeed,
               options: [
-                { value: '0.8', label: '0.8x 舒缓' },
-                { value: '1.0', label: '1.0x 标准' },
-                { value: '1.25', label: '1.25x 快速' },
-                { value: '1.5', label: '1.5x 极速' },
+                { value: '0.8', label: T("0.8x 舒缓") },
+                { value: '1.0', label: T("1.0x 标准") },
+                { value: '1.25', label: T("1.25x 快速") },
+                { value: '1.5', label: T("1.5x 极速") },
               ],
               onChange: (spd) => saveVoiceConfig({ tts_speed: spd }),
             }),
@@ -1307,12 +1307,12 @@ window.__ModuleLoader__.load({
 
           // 自定义 API 折叠配置
           (currentEngine === 'custom') ? jsxs('div', { className: 'ctl-life-card', style: { marginTop: '8px' }, children: [
-            jsx('div', { className: 'ctl-life-card-title', children: '⚙️ 云端 TTS / 中转站 API 配置' }),
-            jsx('div', { className: 'ctl-desc', children: '支持 OpenAI、CosyVoice、豆包TTS、FishSpeech 等兼容接口' }),
+            jsx('div', { className: 'ctl-life-card-title', children: T("⚙️ 云端 TTS / 中转站 API 配置") }),
+            jsx('div', { className: 'ctl-desc', children: T("支持 OpenAI、CosyVoice、豆包TTS、FishSpeech 等兼容接口") }),
             jsx('input', {
               className: 'ctl-voice-input',
               style: { marginTop: '6px' },
-              placeholder: 'API 地址，如 https://api.openai.com/v1/audio/speech',
+              placeholder: T("API 地址，如 https://api.openai.com/v1/audio/speech"),
               value: vCfg.custom_api_url || '',
               onChange: (e) => saveVoiceConfig({ custom_api_url: e.target.value }),
             }),
@@ -1320,21 +1320,21 @@ window.__ModuleLoader__.load({
               className: 'ctl-voice-input',
               type: 'password',
               style: { marginTop: '6px' },
-              placeholder: 'API Key (sk-...)，留空默认使用系统环境变量',
+              placeholder: T("API Key (sk-...)，留空默认使用系统环境变量"),
               value: vCfg.custom_api_key || '',
               onChange: (e) => saveVoiceConfig({ custom_api_key: e.target.value }),
             }),
             jsx('input', {
               className: 'ctl-voice-input',
               style: { marginTop: '6px' },
-              placeholder: '模型名称，如 tts-1 / cosyvoice-v1 / doubao-tts',
+              placeholder: T("模型名称，如 tts-1 / cosyvoice-v1 / doubao-tts"),
               value: vCfg.custom_model_name || 'tts-1',
               onChange: (e) => saveVoiceConfig({ custom_model_name: e.target.value }),
             }),
             jsx('input', {
               className: 'ctl-voice-input',
               style: { marginTop: '6px' },
-              placeholder: '音色名（可选，照你的模型文档填，如 alloy / zh_female_1）',
+              placeholder: T("音色名（可选，照你的模型文档填，如 alloy / zh_female_1）"),
               value: vCfg.custom_voice || '',
               onChange: (e) => saveVoiceConfig({ custom_voice: e.target.value }),
             }),
@@ -1346,20 +1346,20 @@ window.__ModuleLoader__.load({
                 const r = await fetch('/voice-hub/api/voices').then((x) => x.json()).catch(() => ({ ok: false }));
                 if (r && r.ok && Array.isArray(r.voices)) {
                   setFetchedVoices(r.voices);
-                  say('拉到 ' + r.voices.length + ' 个音色');
+                  say(T("拉到 ") + r.voices.length + T(" 个音色"));
                 } else {
                   setFetchedVoices([]);
-                  say((r && r.error) || '没拉到音色，手填就行');
+                  say((r && r.error) || T("没拉到音色，手填就行"));
                 }
               },
-              children: '🔄 拉取音色列表',
+              children: T("🔄 拉取音色列表"),
             }),
             fetchedVoices.length ? jsx('div', { className: 'ctl-voice-grid', style: { marginTop: '6px' }, children: fetchedVoices.map((v) => {
               const active = (vCfg.custom_voice || '') === v.id;
               return jsxs('div', {
                 key: v.id,
                 className: 'ctl-voice-card' + (active ? ' active' : ''),
-                onClick: () => { saveVoiceConfig({ custom_voice: v.id }); say('已选音色：' + v.name); },
+                onClick: () => { saveVoiceConfig({ custom_voice: v.id }); say(T("已选音色：") + v.name); },
                 children: [
                   jsx('div', { className: 'ctl-voice-card-name', children: v.name }),
                   jsx('div', { className: 'ctl-voice-card-tags', children: v.id }),
@@ -1371,10 +1371,10 @@ window.__ModuleLoader__.load({
           jsx('div', { className: 'ctl-sep' }),
 
           // ========== 第三板块：🎧 实时试听与对讲调音 ==========
-          jsx('div', { className: 'ctl-group', children: '🎧 实时试听与对讲调音 (Live Audition)' }),
+          jsx('div', { className: 'ctl-group', children: T("🎧 实时试听与对讲调音 (Live Audition)") }),
           jsxs('div', { className: 'ctl-life-card', children: [
             jsx('div', { className: 'ctl-life-card-head', children: [
-              jsx('div', { className: 'ctl-life-card-title', children: '🎵 试听文案与声音测试' }),
+              jsx('div', { className: 'ctl-life-card-title', children: T("🎵 试听文案与声音测试") }),
               isAuditioning ? jsxs('div', { className: 'ctl-voice-wave', children: [
                 jsx('div', { className: 'ctl-voice-bar' }),
                 jsx('div', { className: 'ctl-voice-bar' }),
@@ -1384,7 +1384,7 @@ window.__ModuleLoader__.load({
             ] }),
             jsx('input', {
               className: 'ctl-voice-input',
-              placeholder: '输入试听文案...',
+              placeholder: T("输入试听文案..."),
               value: testText,
               onChange: (e) => setTestText(e.target.value),
             }),
@@ -1395,22 +1395,22 @@ window.__ModuleLoader__.load({
                 disabled: isAuditioning,
                 onClick: async () => {
                   setIsAuditioning(true);
-                  say('正在生成并播报语音…');
-                  await testSpeak(testText || '你好！我是 DeepSeek 智能语音分身，随时为您服务。', {
+                  say(T("正在生成并播报语音…"));
+                  await testSpeak(testText || T("你好！我是 DeepSeek 智能语音分身，随时为您服务。"), {
                     voice: currentVoice,
                     engine: currentEngine,
                     speed: currentSpeed,
                   });
                   setTimeout(() => setIsAuditioning(false), 2500);
                 },
-                children: isAuditioning ? '正在播报…' : '🎵 试听当前音色',
+                children: isAuditioning ? T("正在播报…") : T("🎵 试听当前音色"),
               }),
-              jsx(Button, { variant: 'outline', size: 'sm', onClick: () => run('voice.test.tone', '', '已播放提示音'), children: '🔔 提示音' }),
-              jsx(Button, { variant: 'outline', size: 'sm', onClick: () => run('voice.test.listen', '', '已开麦收音'), children: '🎤 实时开麦' }),
+              jsx(Button, { variant: 'outline', size: 'sm', onClick: () => run('voice.test.tone', '', T("已播放提示音")), children: T("🔔 提示音") }),
+              jsx(Button, { variant: 'outline', size: 'sm', onClick: () => run('voice.test.listen', '', T("已开麦收音")), children: T("🎤 实时开麦") }),
             ] }),
           ] }),
 
-          jsx(Note, { children: '💡 提示：按蓝牙耳机播放/暂停键，或长按桌宠小鲸鱼悬浮球，也可一键唤醒语音对讲。' }),
+          jsx(Note, { children: T("💡 提示：按蓝牙耳机播放/暂停键，或长按桌宠小鲸鱼悬浮球，也可一键唤醒语音对讲。") }),
           confirmBar,
           flashBar,
         ] });
@@ -1428,21 +1428,21 @@ window.__ModuleLoader__.load({
         const isRunning = !!lf.daemonRunning;
 
         return jsxs('div', { className: 'ctl-root', children: [
-          jsx(Back, { title: '智能生活助理', onBack: () => setPage('main') }),
-          jsx(Note, { children: '全自动无感感知：短信/通知验证码自动提取写入剪贴板、微信/支付宝/银行动账自动记账、快递取件码聚合与定时任务调度。' }),
+          jsx(Back, { title: T("智能生活助理"), onBack: () => setPage('main') }),
+          jsx(Note, { children: T("全自动无感感知：短信/通知验证码自动提取写入剪贴板、微信/支付宝/银行动账自动记账、快递取件码聚合与定时任务调度。") }),
           jsx('div', { className: 'ctl-sep' }),
 
           // 守护状态卡片
           jsx(Row, {
-            title: isRunning ? '生活助理守护进程：运行中' : '生活助理守护进程：未运行',
-            desc: isRunning ? '正在实时监听系统通知流，自动提取验证码、记账与包裹' : '启动后可在后台自动感知通知并写入剪贴板与记账数据库',
+            title: isRunning ? T("生活助理守护进程：运行中") : T("生活助理守护进程：未运行"),
+            desc: isRunning ? T("正在实时监听系统通知流，自动提取验证码、记账与包裹") : T("启动后可在后台自动感知通知并写入剪贴板与记账数据库"),
             right: jsxs('div', { className: 'ctl-btn-group', children: isRunning
               ? [
-                  jsx(Button, { key: 'res', variant: 'outline', size: 'sm', onClick: () => run('life.daemon.restart', '', '正在重启守护进程…'), children: '重启' }),
-                  jsx(Button, { key: 'stp', variant: 'ghost', size: 'sm', onClick: () => run('life.daemon.stop', '', '已停止守护进程'), children: '停止' }),
+                  jsx(Button, { key: 'res', variant: 'outline', size: 'sm', onClick: () => run('life.daemon.restart', '', T("正在重启守护进程…")), children: T("重启") }),
+                  jsx(Button, { key: 'stp', variant: 'ghost', size: 'sm', onClick: () => run('life.daemon.stop', '', T("已停止守护进程")), children: T("停止") }),
                 ]
               : [
-                  jsx(Button, { key: 'sta', variant: 'primary', size: 'sm', onClick: () => run('life.daemon.start', '', '正在启动守护进程…'), children: '启动守护' }),
+                  jsx(Button, { key: 'sta', variant: 'primary', size: 'sm', onClick: () => run('life.daemon.start', '', T("正在启动守护进程…")), children: T("启动守护") }),
                 ] }),
           }),
 
@@ -1450,52 +1450,52 @@ window.__ModuleLoader__.load({
             // 0. 智能生活情境与每日简报
             jsxs('div', { className: 'ctl-life-card', children: [
               jsxs('div', { className: 'ctl-life-card-head', children: [
-                jsx('span', { className: 'ctl-life-card-title', children: '🌟 情境模式与每日简报' }),
+                jsx('span', { className: 'ctl-life-card-title', children: T("🌟 情境模式与每日简报") }),
                 jsxs('div', { className: 'ctl-btn-group', children: [
                   jsx(Button, {
                     variant: 'outline',
                     size: 'sm',
                     onClick: async () => {
-                      const res = await run('life.scene.morning', '', '正在生成晨间生活早报…');
-                      if (res && res.result && res.result.content) say('早报已生成并推送系统通知');
+                      const res = await run('life.scene.morning', '', T("正在生成晨间生活早报…"));
+                      if (res && res.result && res.result.content) say(T("早报已生成并推送系统通知"));
                     },
-                    children: '☀️ 晨间早报',
+                    children: T("☀️ 晨间早报"),
                   }),
                   jsx(Button, {
                     variant: 'outline',
                     size: 'sm',
                     onClick: async () => {
-                      const res = await run('life.scene.night', '', '正在生成晚间收支复盘…');
-                      if (res && res.result && res.result.content) say('复盘已生成并推送系统通知');
+                      const res = await run('life.scene.night', '', T("正在生成晚间收支复盘…"));
+                      if (res && res.result && res.result.content) say(T("复盘已生成并推送系统通知"));
                     },
-                    children: '🌙 晚间复盘',
+                    children: T("🌙 晚间复盘"),
                   }),
                 ] }),
               ] }),
-              jsx('div', { className: 'ctl-desc', style: { lineHeight: '18px' }, children: (lf.morningBrief && lf.morningBrief.summary) || '早晨汇总包裹与记账预算，夜间复盘今日开销流水与未取提醒' }),
+              jsx('div', { className: 'ctl-desc', style: { lineHeight: '18px' }, children: (lf.morningBrief && lf.morningBrief.summary) || T("早晨汇总包裹与记账预算，夜间复盘今日开销流水与未取提醒") }),
             ] }),
 
             // 1. 待取快递
             jsxs('div', { className: 'ctl-life-card', children: [
               jsxs('div', { className: 'ctl-life-card-head', children: [
-                jsx('span', { className: 'ctl-life-card-title', children: '📦 待取快递包裹 (' + pkgs.length + '件)' }),
-                jsx(Button, { variant: 'ghost', size: 'sm', onClick: () => run('life.scan', '', '正在扫描历史通知…'), children: '扫描通知' }),
+                jsx('span', { className: 'ctl-life-card-title', children: T("📦 待取快递包裹 (") + pkgs.length + T("件)") }),
+                jsx(Button, { variant: 'ghost', size: 'sm', onClick: () => run('life.scan', '', T("正在扫描历史通知…")), children: T("扫描通知") }),
               ] }),
               pkgs.length === 0
-                ? jsx('div', { className: 'ctl-note', children: '🎉 暂无待取包裹，所有快递都已取完！' })
+                ? jsx('div', { className: 'ctl-note', children: T("🎉 暂无待取包裹，所有快递都已取完！") })
                 : pkgs.map((p) => jsxs('div', { key: p.id, className: 'ctl-item-row', children: [
                     jsxs('div', { className: 'ctl-main', children: [
                       jsxs('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' }, children: [
                         jsx('span', { className: 'ctl-code-pill', children: p.pickup_code }),
-                        jsx('span', { className: 'ctl-tag', children: p.carrier || '快递' }),
+                        jsx('span', { className: 'ctl-tag', children: p.carrier || T("快递") }),
                       ] }),
-                      jsx('div', { className: 'ctl-desc', style: { marginTop: '4px' }, children: (p.station || '快递驿站/柜') + ' · ' + (p.created_at ? new Date(p.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }) : '') }),
+                      jsx('div', { className: 'ctl-desc', style: { marginTop: '4px' }, children: (p.station || T("快递驿站/柜")) + ' · ' + (p.created_at ? new Date(p.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }) : '') }),
                     ] }),
                     jsx(Button, {
                       variant: 'outline',
                       size: 'sm',
-                      onClick: () => run('life.pkg.pick', String(p.id), '已标记取件完成'),
-                      children: '已取',
+                      onClick: () => run('life.pkg.pick', String(p.id), T("已标记取件完成")),
+                      children: T("已取"),
                     }),
                   ] })),
             ] }),
@@ -1503,106 +1503,106 @@ window.__ModuleLoader__.load({
             // 2. 今日记账
             jsxs('div', { className: 'ctl-life-card', children: [
               jsxs('div', { className: 'ctl-life-card-head', children: [
-                jsx('span', { className: 'ctl-life-card-title', children: '💰 今日记账与消费流水' }),
+                jsx('span', { className: 'ctl-life-card-title', children: T("💰 今日记账与消费流水") }),
                 jsxs('div', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' }, children: [
-                  '支出: ',
+                  T("支出: "),
                   jsx('span', { className: 'ctl-amt-neg', children: '¥' + (lf.todayExpense || 0).toFixed(2) }),
-                  '  收入: ',
+                  T("  收入: "),
                   jsx('span', { className: 'ctl-amt-pos', children: '¥' + (lf.todayIncome || 0).toFixed(2) }),
                 ] }),
               ] }),
               (lf.balances && lf.balances.length)
-                ? jsx('div', { className: 'ctl-desc', style: { padding: '2px 12px 6px' }, children: '账户余额：' + lf.balances.map((b) => (b.account || '账户') + ' ¥' + Number(b.amount || 0).toFixed(2)).join('｜') + (lf.balances[0] && lf.balances[0].at ? '（' + new Date(lf.balances[0].at).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) + '）' : '') })
+                ? jsx('div', { className: 'ctl-desc', style: { padding: '2px 12px 6px' }, children: T("账户余额：") + lf.balances.map((b) => (b.account || T("账户")) + ' ¥' + Number(b.amount || 0).toFixed(2)).join('｜') + (lf.balances[0] && lf.balances[0].at ? '（' + new Date(lf.balances[0].at).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) + '）' : '') })
                 : null,
               (typeof lf.monthIncome === 'number' && typeof lf.monthExpense === 'number')
                 ? jsxs('div', { className: 'ctl-desc', style: { padding: '0 12px 6px' }, children: [
-                    jsx('span', { children: (lf.monthIncome - lf.monthExpense) > 0 ? '本月净收入 ' : '本月净支出 ' }),
+                    jsx('span', { children: (lf.monthIncome - lf.monthExpense) > 0 ? T("本月净收入 ") : T("本月净支出 ") }),
                     jsx('span', {
                       className: (lf.monthIncome - lf.monthExpense) >= 0 ? 'ctl-amt-pos' : 'ctl-amt-neg',
                       children: '¥' + Math.abs(lf.monthIncome - lf.monthExpense).toFixed(2),
                     }),
                     jsx('span', {
-                      children: ' · 支出 ¥' + lf.monthExpense.toFixed(2) + ' / 收入 ¥' + lf.monthIncome.toFixed(2)
-                        + (lf.monthTxCount ? '（' + lf.monthTxCount + ' 笔）' : ''),
+                      children: T(" · 支出 ¥") + lf.monthExpense.toFixed(2) + T(" / 收入 ¥") + lf.monthIncome.toFixed(2)
+                        + (lf.monthTxCount ? '（' + lf.monthTxCount + T(" 笔）") : ''),
                     }),
                   ] })
                 : null,
               txs.length === 0
-                ? jsx('div', { className: 'ctl-note', children: '今日暂无新记账记录。收到微信/支付宝/银行支付通知时将自动记账。' })
+                ? jsx('div', { className: 'ctl-note', children: T("今日暂无新记账记录。收到微信/支付宝/银行支付通知时将自动记账。") })
                 : txs.map((tx) => jsxs('div', { key: tx.id, className: 'ctl-item-row', children: [
                     jsxs('div', { className: 'ctl-main', children: [
                       jsxs('div', { style: { display: 'flex', alignItems: 'center', gap: '6px' }, children: [
-                        jsx('span', { style: { fontSize: '13.5px', fontWeight: 500, color: 'var(--dsw-alias-label-primary)' }, children: tx.merchant || '消费' }),
+                        jsx('span', { style: { fontSize: '13.5px', fontWeight: 500, color: 'var(--dsw-alias-label-primary)' }, children: tx.merchant || T("消费") }),
                         tx.category ? jsx('span', { className: 'ctl-tag', children: tx.category }) : null,
                       ] }),
-                      jsx('div', { className: 'ctl-desc', children: (tx.account || '自动记账') + ' · ' + (tx.created_at ? new Date(tx.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }) : '') }),
+                      jsx('div', { className: 'ctl-desc', children: (tx.account || T("自动记账")) + ' · ' + (tx.created_at ? new Date(tx.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }) : '') }),
                     ] }),
                     jsx('span', { className: tx.type === 'income' ? 'ctl-amt-pos' : 'ctl-amt-neg', children: (tx.type === 'income' ? '+ ¥' : '- ¥') + Number(tx.amount || 0).toFixed(2) }),
                   ] })),
               (lf.txToday > txs.length)
-                ? jsx('div', { className: 'ctl-desc', style: { padding: '0 12px' }, children: '今日还有 ' + (lf.txToday - txs.length) + ' 笔未显示（进「全部账目」看）' })
+                ? jsx('div', { className: 'ctl-desc', style: { padding: '0 12px' }, children: T("今日还有 ") + (lf.txToday - txs.length) + T(" 笔未显示（进「全部账目」看）") })
                 : null,
               jsx('div', { style: { display: 'flex', justifyContent: 'flex-end', padding: '2px 12px 0' }, children: jsx(Button, {
                 variant: 'ghost',
                 size: 'sm',
                 onClick: () => setPage('ledger'),
-                children: '全部账目（共 ' + (lf.txTotal || 0) + ' 笔）›',
+                children: T("全部账目（共 ") + (lf.txTotal || 0) + T(" 笔）›"),
               }) }),
             ] }),
 
             // 3. 验证码
             jsxs('div', { className: 'ctl-life-card', children: [
               jsx('div', { className: 'ctl-life-card-head', children: [
-                jsx('span', { className: 'ctl-life-card-title', children: '📱 最近验证码' }),
-                jsx('span', { style: { fontSize: '11px', color: 'var(--dsw-alias-label-tertiary)' }, children: '收到自动复制进剪贴板' }),
+                jsx('span', { className: 'ctl-life-card-title', children: T("📱 最近验证码") }),
+                jsx('span', { style: { fontSize: '11px', color: 'var(--dsw-alias-label-tertiary)' }, children: T("收到自动复制进剪贴板") }),
               ] }),
               codes.length === 0
-                ? jsx('div', { className: 'ctl-note', children: '暂无最近验证码记录。' })
+                ? jsx('div', { className: 'ctl-note', children: T("暂无最近验证码记录。") })
                 : codes.map((c) => jsxs('div', { key: c.id, className: 'ctl-item-row', children: [
                     jsxs('div', { className: 'ctl-main', children: [
                       jsx('span', { className: 'ctl-code-pill', children: c.code }),
-                      jsx('div', { className: 'ctl-desc', style: { marginTop: '4px' }, children: (c.source || '短信验证码') + ' · ' + (c.created_at ? new Date(c.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }) : '') }),
+                      jsx('div', { className: 'ctl-desc', style: { marginTop: '4px' }, children: (c.source || T("短信验证码")) + ' · ' + (c.created_at ? new Date(c.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }) : '') }),
                     ] }),
                     jsx(Button, {
                       variant: 'outline',
                       size: 'sm',
-                      onClick: () => run('life.code.copy', c.code, '验证码已复制'),
-                      children: '复制',
+                      onClick: () => run('life.code.copy', c.code, T("验证码已复制")),
+                      children: T("复制"),
                     }),
                   ] })),
             ] }),
 
             // 4. 两套调度器的任务及原生执行历史
             jsxs('div', { className: 'ctl-life-card', children: [
-              jsx('div', { className: 'ctl-life-card-title', children: '⏰ 定时任务 (' + tasks.length + '项)' }),
-              schedules.lifeError ? jsx(Note, { children: '生活助理任务读取失败: ' + schedules.lifeError }) : null,
-              tasks.length === 0 ? jsx(Note, { children: '暂无等待触发的任务。' }) : tasks.map(t => jsxs('div', {
+              jsx('div', { className: 'ctl-life-card-title', children: T("⏰ 定时任务 (") + tasks.length + T("项)") }),
+              schedules.lifeError ? jsx(Note, { children: T("生活助理任务读取失败: ") + schedules.lifeError }) : null,
+              tasks.length === 0 ? jsx(Note, { children: T("暂无等待触发的任务。") }) : tasks.map(t => jsxs('div', {
                 key: t.source + ':' + t.id, className: 'ctl-item-row', children: [
                   jsxs('div', { className: 'ctl-main', children: [
                     jsx('span', { style: { fontSize: '13.5px', fontWeight: 500 }, children: t.name }),
-                    jsx('div', { className: 'ctl-desc', children: (t.source === 'app' ? 'App 闹钟' : '生活助理') + ' · ' +
-                      (t.cron_expr || (t.repeat === 'daily' ? '每天' : t.repeat === 'interval' ? '每 ' + t.intervalMin + ' 分钟' : '一次性')) +
-                      ' · ' + (t.enabled ? (t.last_status || '等待触发') : '已暂停') +
-                      (t.next_run_at ? ' · 下次: ' + new Date(t.next_run_at).toLocaleString('zh-CN') : '') }),
+                    jsx('div', { className: 'ctl-desc', children: (t.source === 'app' ? T("App 闹钟") : T("生活助理")) + ' · ' +
+                      (t.cron_expr || (t.repeat === 'daily' ? T("每天") : t.repeat === 'interval' ? T("每 ") + t.intervalMin + T(" 分钟") : T("一次性"))) +
+                      ' · ' + (t.enabled ? (t.last_status || T("等待触发")) : T("已暂停")) +
+                      (t.next_run_at ? T(" · 下次: ") + new Date(t.next_run_at).toLocaleString('zh-CN') : '') }),
                     jsx('div', { className: 'ctl-desc', children: t.id }),
                   ] }),
                   t.source === 'life' ? jsx(Button, { variant: 'outline', size: 'sm',
-                    onClick: () => run('life.task.run', String(t.id), '正在执行生活助理任务…'), children: '立即执行' }) : null,
+                    onClick: () => run('life.task.run', String(t.id), T("正在执行生活助理任务…")), children: T("立即执行") }) : null,
                   jsx(Button, { variant: 'ghost', size: 'sm', disabled: !t.enabled,
-                    onClick: () => run('schedule.cancel', JSON.stringify({source: t.source, id: t.id}), '取消请求已提交'), children: '取消' }),
+                    onClick: () => run('schedule.cancel', JSON.stringify({source: t.source, id: t.id}), T("取消请求已提交")), children: T("取消") }),
                   jsx(Button, { variant: 'ghost', size: 'sm',
-                    onClick: () => ask('删除定时任务', t.source === 'app'
-                      ? '确定删除 App 闹钟任务「' + t.name + '」？会从任务列表里移除。注意：已经注册进系统的闹钟在老版本 App 上撤不掉，可能仍触发最后一次。'
-                      : '确定永久删除生活助理任务「' + t.name + '」？删除后不会再触发，也无法从界面恢复。',
-                      'life.task.delete', JSON.stringify({ source: t.source, id: String(t.id) }), '已删除任务: ' + t.name), children: '删除' }),
+                    onClick: () => ask(T("删除定时任务"), t.source === 'app'
+                      ? T("确定删除 App 闹钟任务「") + t.name + T("」？会从任务列表里移除。注意：已经注册进系统的闹钟在老版本 App 上撤不掉，可能仍触发最后一次。")
+                      : T("确定永久删除生活助理任务「") + t.name + T("」？删除后不会再触发，也无法从界面恢复。"),
+                      'life.task.delete', JSON.stringify({ source: t.source, id: String(t.id) }), T("已删除任务: ") + t.name), children: T("删除") }),
                 ]
               })),
               jsxs('details', { children: [
-                jsx('summary', { children: '最近执行记录 (' + history.length + ')' }),
+                jsx('summary', { children: T("最近执行记录 (") + history.length + ')' }),
                 jsx('pre', { style: { whiteSpace: 'pre-wrap', fontSize: '11px', maxHeight: '200px', overflow: 'auto' },
-                  children: history.length ? history.join('\n') : '暂无 App 闹钟执行记录。' }),
+                  children: history.length ? history.join('\n') : T("暂无 App 闹钟执行记录。") }),
               ] }),
-              jsx(Note, { children: '取消 = 暂停（阻止后续触发，已开始的会继续）；删除 = 从列表永久移除。App 闹钟任务的登记行会被清掉，但老版本 App 里已注册进系统的闹钟撤不掉，可能仍触发最后一次。' }),
+              jsx(Note, { children: T("取消 = 暂停（阻止后续触发，已开始的会继续）；删除 = 从列表永久移除。App 闹钟任务的登记行会被清掉，但老版本 App 里已注册进系统的闹钟撤不掉，可能仍触发最后一次。") }),
             ] }),
           ] }),
 
@@ -1618,17 +1618,17 @@ window.__ModuleLoader__.load({
         const isSearching = !!ragHook.rag.isSearching;
 
         return jsxs('div', { className: 'ctl-root', children: [
-          jsx(Back, { title: '本地知识库与全域检索', onBack: () => setPage('main') }),
-          jsx(Note, { children: '零 Token 开销端侧语义检索：全域扫描手机 Download / Documents 目录文档，支持随时快速剪藏笔记并实时构建倒排索引。' }),
+          jsx(Back, { title: T("本地知识库与全域检索"), onBack: () => setPage('main') }),
+          jsx(Note, { children: T("零 Token 开销端侧语义检索：全域扫描手机 Download / Documents 目录文档，支持随时快速剪藏笔记并实时构建倒排索引。") }),
           jsx('div', { className: 'ctl-sep' }),
 
           // 1. 全局搜索卡片
           jsxs('div', { className: 'ctl-life-card', children: [
-            jsx('div', { className: 'ctl-life-card-title', children: '🔍 本地全域秒级检索' }),
+            jsx('div', { className: 'ctl-life-card-title', children: T("🔍 本地全域秒级检索") }),
             jsxs('div', { style: { display: 'flex', gap: '8px', marginTop: '4px' }, children: [
               jsx('input', {
                 className: 'ctl-voice-input',
-                placeholder: '输入问题、代码关键词或文档标题...',
+                placeholder: T("输入问题、代码关键词或文档标题..."),
                 value: ragQuery,
                 onChange: (e) => setRagQuery(e.target.value),
                 onKeyDown: (e) => { if (e.key === 'Enter' && ragQuery) ragHook.search(ragQuery); },
@@ -1638,7 +1638,7 @@ window.__ModuleLoader__.load({
                 size: 'sm',
                 disabled: isSearching || !ragQuery,
                 onClick: () => ragHook.search(ragQuery),
-                children: isSearching ? '检索中…' : '搜索',
+                children: isSearching ? T("检索中…") : T("搜索"),
               }),
             ] }),
             searchRes.length > 0
@@ -1653,22 +1653,22 @@ window.__ModuleLoader__.load({
                     ] }),
                   ] })),
                 ] })
-              : (ragHook.rag.lastQuery ? jsx('div', { className: 'ctl-note', children: '未找到相关匹配段落。' }) : null),
+              : (ragHook.rag.lastQuery ? jsx('div', { className: 'ctl-note', children: T("未找到相关匹配段落。") }) : null),
           ] }),
 
           // 2. 随手剪藏卡片
           jsxs('div', { className: 'ctl-life-card', children: [
-            jsx('div', { className: 'ctl-life-card-title', children: '📝 随手剪藏 (Quick Clip)' }),
+            jsx('div', { className: 'ctl-life-card-title', children: T("📝 随手剪藏 (Quick Clip)") }),
             jsx('input', {
               className: 'ctl-voice-input',
-              placeholder: '笔记/剪藏标题 (如: 关键配置备份)',
+              placeholder: T("笔记/剪藏标题 (如: 关键配置备份)"),
               value: clipTitle,
               onChange: (e) => setClipTitle(e.target.value),
             }),
             jsx('textarea', {
               className: 'ctl-voice-input',
               rows: 3,
-              placeholder: '粘贴网页摘录、代码片段或备忘事项...',
+              placeholder: T("粘贴网页摘录、代码片段或备忘事项..."),
               value: clipText,
               onChange: (e) => setClipText(e.target.value),
               style: { marginTop: '6px', resize: 'vertical' },
@@ -1681,27 +1681,27 @@ window.__ModuleLoader__.load({
                 onClick: async () => {
                   const res = await ragHook.clip({ title: clipTitle, text: clipText });
                   if (res && res.ok) {
-                    say('剪藏成功并已自动建立索引！');
+                    say(T("剪藏成功并已自动建立索引！"));
                     setClipTitle('');
                     setClipText('');
                   } else {
-                    say('剪藏失败: ' + (res && res.error));
+                    say(T("剪藏失败: ") + (res && res.error));
                   }
                 },
-                children: '保存并索引',
+                children: T("保存并索引"),
               }),
             ] }),
           ] }),
 
           // 3. 知识库列表卡片
           jsxs('div', { className: 'ctl-life-card', children: [
-            jsx('div', { className: 'ctl-life-card-title', children: '📚 已建索引库 (' + kbs.length + ' 个)' }),
+            jsx('div', { className: 'ctl-life-card-title', children: T("📚 已建索引库 (") + kbs.length + T(" 个)") }),
             kbs.length === 0
-              ? jsx('div', { className: 'ctl-note', children: '暂无已构建知识库。' })
+              ? jsx('div', { className: 'ctl-note', children: T("暂无已构建知识库。") })
               : kbs.map((k) => jsxs('div', { key: k.name, className: 'ctl-item-row', children: [
                   jsxs('div', { className: 'ctl-main', children: [
                     jsx('span', { style: { fontSize: '13.5px', fontWeight: 500, color: 'var(--dsw-alias-label-primary)' }, children: k.name }),
-                    jsx('div', { className: 'ctl-desc', children: '文件: ' + k.filesCount + ' 个 · 切片: ' + k.chunksCount + ' · ' + (k.rootPath || '') }),
+                    jsx('div', { className: 'ctl-desc', children: T("文件: ") + k.filesCount + T(" 个 · 切片: ") + k.chunksCount + ' · ' + (k.rootPath || '') }),
                   ] }),
                 ] })),
           ] }),
@@ -1719,24 +1719,24 @@ window.__ModuleLoader__.load({
         const files = lan.files || [];
 
         return jsxs('div', { className: 'ctl-root', children: [
-          jsx(Back, { title: '局域网协同与隔空投送', onBack: () => setPage('main') }),
-          jsx(Note, { children: '跨设备互联：电脑浏览器直连手机 DSH 控制台，支持跨设备剪贴板双向同步与大文件拖拽隔空投送。' }),
+          jsx(Back, { title: T("局域网协同与隔空投送"), onBack: () => setPage('main') }),
+          jsx(Note, { children: T("跨设备互联：电脑浏览器直连手机 DSH 控制台，支持跨设备剪贴板双向同步与大文件拖拽隔空投送。") }),
           jsx('div', { className: 'ctl-sep' }),
 
           // 0. 局域网访问总开关
           jsxs('div', { className: 'ctl-life-card', children: [
             jsx(Row, {
-              title: '局域网访问',
+              title: T("局域网访问"),
               desc: access.enabled
-                ? '已开启 · 引擎绑 ' + (access.host || '0.0.0.0') + ' · 同网段浏览器可直连'
-                : '已关闭 · 只有手机自己能打开。开启会重启引擎（几秒）',
+                ? T("已开启 · 引擎绑 ") + (access.host || '0.0.0.0') + T(" · 同网段浏览器可直连")
+                : T("已关闭 · 只有手机自己能打开。开启会重启引擎（几秒）"),
               right: jsx(Switch, {
                 checked: !!access.enabled,
-                label: '局域网访问',
+                label: T("局域网访问"),
                 onChange: (next) => {
                   lanHook.setAccess(next).then((r) => {
-                    if (r && r.ok) say(next ? '已开启，引擎重启中…' : '已关闭局域网访问');
-                    else say((r && r.error) || '操作失败');
+                    if (r && r.ok) say(next ? T("已开启，引擎重启中…") : T("已关闭局域网访问"));
+                    else say((r && r.error) || T("操作失败"));
                   });
                 },
               }),
@@ -1745,56 +1745,56 @@ window.__ModuleLoader__.load({
               ? jsx('div', { style: { padding: '0 12px 10px' }, children: access.urls.map((u) => jsxs('div', { key: u.address, className: 'ctl-item-row', children: [
                   jsxs('div', { className: 'ctl-main', children: [
                     jsx('a', { href: u.url, target: '_blank', rel: 'noreferrer', className: 'ctl-code-pill', children: 'http://' + u.address + ':3080/' }),
-                    jsx('div', { className: 'ctl-desc', children: u.name + (u.hasToken ? ' · 带登录令牌，点开即用' : ' · 无令牌，需手动带 token') }),
+                    jsx('div', { className: 'ctl-desc', children: u.name + (u.hasToken ? T(" · 带登录令牌，点开即用") : T(" · 无令牌，需手动带 token")) }),
                   ] }),
                 ] }))
               })
-              : jsx('div', { className: 'ctl-desc', style: { padding: '0 12px 10px' }, children: '令牌走明文 HTTP（同网段可嗅探），只在可信 Wi-Fi 下开启；不用时记得关掉。' }),
+              : jsx('div', { className: 'ctl-desc', style: { padding: '0 12px 10px' }, children: T("令牌走明文 HTTP（同网段可嗅探），只在可信 Wi-Fi 下开启；不用时记得关掉。") }),
           ] }),
 
           // 1. 局域网 IP
           jsxs('div', { className: 'ctl-life-card', children: [
-            jsx('div', { className: 'ctl-life-card-title', children: '🌐 局域网访问地址' }),
+            jsx('div', { className: 'ctl-life-card-title', children: T("🌐 局域网访问地址") }),
             ips.length === 0
-              ? jsx('div', { className: 'ctl-note', children: '未连接局域网 Wi-Fi。请连接同一 Wi-Fi 后刷新。' })
+              ? jsx('div', { className: 'ctl-note', children: T("未连接局域网 Wi-Fi。请连接同一 Wi-Fi 后刷新。") })
               : ips.map((ip) => jsxs('div', { key: ip.address, className: 'ctl-item-row', children: [
                   jsxs('div', { className: 'ctl-main', children: [
                     jsx('span', { className: 'ctl-code-pill', children: 'http://' + ip.address + ':3080/' }),
-                    jsx('div', { className: 'ctl-desc', children: ip.name + ' · 电脑浏览器直接打开' }),
+                    jsx('div', { className: 'ctl-desc', children: ip.name + T(" · 电脑浏览器直接打开") }),
                   ] }),
                 ] })),
           ] }),
 
           // 2. 双向剪贴板
           jsxs('div', { className: 'ctl-life-card', children: [
-            jsx('div', { className: 'ctl-life-card-title', children: '📋 跨设备双向剪贴板' }),
+            jsx('div', { className: 'ctl-life-card-title', children: T("📋 跨设备双向剪贴板") }),
             jsx('input', {
               className: 'ctl-voice-input',
-              placeholder: '输入文本推送至手机剪贴板...',
+              placeholder: T("输入文本推送至手机剪贴板..."),
               value: lanInput,
               onChange: (e) => setLanInput(e.target.value),
             }),
             jsxs('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px' }, children: [
-              jsx('span', { className: 'ctl-desc', children: '当前手机剪贴板: ' + (lan.clipboard ? lan.clipboard.slice(0, 30) + '…' : '空') }),
+              jsx('span', { className: 'ctl-desc', children: T("当前手机剪贴板: ") + (lan.clipboard ? lan.clipboard.slice(0, 30) + '…' : T("空")) }),
               jsx(Button, {
                 variant: 'primary',
                 size: 'sm',
                 disabled: !lanInput,
                 onClick: async () => {
                   await lanHook.setClipboard(lanInput);
-                  say('已同步推送到手机剪贴板');
+                  say(T("已同步推送到手机剪贴板"));
                   setLanInput('');
                 },
-                children: '推送到手机',
+                children: T("推送到手机"),
               }),
             ] }),
           ] }),
 
           // 3. 投送文件箱
           jsxs('div', { className: 'ctl-life-card', children: [
-            jsx('div', { className: 'ctl-life-card-title', children: '📦 隔空投送文件箱 (' + files.length + ' 个)' }),
+            jsx('div', { className: 'ctl-life-card-title', children: T("📦 隔空投送文件箱 (") + files.length + T(" 个)") }),
             files.length === 0
-              ? jsx('div', { className: 'ctl-note', children: '暂无投送文件。电脑端可通过 /lan-mesh 接口快速投送文件至手机。' })
+              ? jsx('div', { className: 'ctl-note', children: T("暂无投送文件。电脑端可通过 /lan-mesh 接口快速投送文件至手机。") })
               : files.map((f) => jsxs('div', { key: f.name, className: 'ctl-item-row', children: [
                   jsxs('div', { className: 'ctl-main', children: [
                     jsx('span', { style: { fontSize: '13px', fontWeight: 500, color: 'var(--dsw-alias-label-primary)' }, children: f.name }),
@@ -1812,17 +1812,17 @@ window.__ModuleLoader__.load({
       if (page === 'log') {
         const log = state.log || {};
         return jsxs('div', { className: 'ctl-root', children: [
-          jsx(Back, { title: '日志', onBack: () => setPage('main') }),
+          jsx(Back, { title: T("日志"), onBack: () => setPage('main') }),
           jsx(Row, { title: log.summary || '', desc: log.path || '' }),
-          jsx(Note, { children: '「查看」直接看末尾 200 行；「分享」调用系统分享（QQ / 微信 / 邮件…都能选），正文里带完整日志路径与末尾 400 行。日志会随使用不断追加，太长不好读时可「清空日志」。' }),
+          jsx(Note, { children: T("「查看」直接看末尾 200 行；「分享」调用系统分享（QQ / 微信 / 邮件…都能选），正文里带完整日志路径与末尾 400 行。日志会随使用不断追加，太长不好读时可「清空日志」。") }),
           jsx('div', { className: 'ctl-bar', children: [
-            jsx(Button, { variant: 'outline', size: 'sm', onClick: () => run('log.view', ''), children: '查看日志' }),
-            jsx(Button, { variant: 'outline', size: 'sm', onClick: () => run('log.share', ''), children: '分享' }),
+            jsx(Button, { variant: 'outline', size: 'sm', onClick: () => run('log.view', ''), children: T("查看日志") }),
+            jsx(Button, { variant: 'outline', size: 'sm', onClick: () => run('log.share', ''), children: T("分享") }),
             jsx(Button, {
               variant: 'ghost',
               size: 'sm',
-              onClick: () => ask('清空日志', (log.summary || '') + '\n\n清空不影响正在运行的引擎，之后的新日志会继续正常写入。', 'log.clear', '', '日志已清空'),
-              children: '清空日志',
+              onClick: () => ask(T("清空日志"), (log.summary || '') + T("\\n\\n清空不影响正在运行的引擎，之后的新日志会继续正常写入。"), 'log.clear', '', T("日志已清空")),
+              children: T("清空日志"),
             }),
           ] }),
           confirmBar,
@@ -1844,7 +1844,7 @@ window.__ModuleLoader__.load({
           jsx('span', { className: 'ctl-ver', children: state.version || '' }),
         ] }),
 
-        jsx('div', { className: 'ctl-group', children: '运行环境' }),
+        jsx('div', { className: 'ctl-group', children: T("运行环境") }),
         jsx(Row, {
           title: ex.state || '',
           desc: ex.meta || '',
@@ -1853,10 +1853,10 @@ window.__ModuleLoader__.load({
             size: 'sm',
             disabled: !!(ex.busy || en.starting),
             onClick: () => {
-              if (ex.ready) ask('重新解压', '会覆盖内部运行环境与内核树（会话 / 凭证 / 设置都在 dshhome，不受影响）。继续？', 'extract', '', '正在重新解压…');
+              if (ex.ready) ask(T("重新解压"), T("会覆盖内部运行环境与内核树（会话 / 凭证 / 设置都在 dshhome，不受影响）。继续？"), 'extract', '', T("正在重新解压…"));
               else run('extract', '');
             },
-            children: ex.busy ? '解压中…' : (ex.ready ? '重新解压' : '解压文件'),
+            children: ex.busy ? T("解压中…") : (ex.ready ? T("重新解压") : T("解压文件")),
           }),
         }),
         jsx(Row, {
@@ -1864,93 +1864,93 @@ window.__ModuleLoader__.load({
           desc: en.meta || '',
           right: jsxs('div', { className: 'ctl-btn-group', children: en.running
             ? [
-                jsx(Button, { key: 'restart', variant: 'outline', size: 'sm', onClick: () => ask('重启引擎', '当前会话会被中断一会儿，界面会自己连回来。', 'engine.restart', '', '正在重启引擎…'), children: '重启' }),
-                jsx(Button, { key: 'stop', variant: 'outline', size: 'sm', onClick: () => ask('停止引擎', '停止后这个设置页也会跟着断开，需要重新启动引擎。', 'engine.stop', '', '正在停止引擎…'), children: '停止' }),
+                jsx(Button, { key: 'restart', variant: 'outline', size: 'sm', onClick: () => ask(T("重启引擎"), T("当前会话会被中断一会儿，界面会自己连回来。"), 'engine.restart', '', T("正在重启引擎…")), children: T("重启") }),
+                jsx(Button, { key: 'stop', variant: 'outline', size: 'sm', onClick: () => ask(T("停止引擎"), T("停止后这个设置页也会跟着断开，需要重新启动引擎。"), 'engine.stop', '', T("正在停止引擎…")), children: T("停止") }),
               ]
             : [
-                jsx(Button, { key: 'start', variant: 'primary', size: 'sm', disabled: !!(en.busy || !ex.ready), onClick: () => run('engine.start', ''), children: en.busy ? '启动中…' : '启动引擎' }),
+                jsx(Button, { key: 'start', variant: 'primary', size: 'sm', disabled: !!(en.busy || !ex.ready), onClick: () => run('engine.start', ''), children: en.busy ? T("启动中…") : T("启动引擎") }),
               ] }),
         }),
 
         jsx(Row, {
-          title: '通知历史',
-          desc: '查看最近 100 条 AI 通知的完整内容',
-          right: jsx(Button, { variant: 'outline', size: 'sm', onClick: () => run('notification.history', ''), children: '查看' }),
+          title: T("通知历史"),
+          desc: T("查看最近 100 条 AI 通知的完整内容"),
+          right: jsx(Button, { variant: 'outline', size: 'sm', onClick: () => run('notification.history', ''), children: T("查看") }),
         }),
-        jsx('div', { className: 'ctl-group', children: '救援' }),
+        jsx('div', { className: 'ctl-group', children: T("救援") }),
         jsx(Row, {
-          title: rescue.safeMode ? '安全模式：已开启' : '安全模式',
+          title: rescue.safeMode ? T("安全模式：已开启") : T("安全模式"),
           desc: rescue.desc || '',
           descWarn: !!rescue.warn,
           right: jsx(Button, {
             variant: rescue.safeMode ? 'primary' : 'outline',
             size: 'sm',
-            onClick: () => ask(rescue.safeMode ? '退出安全模式' : '安全模式启动', rescue.safeMode ? '会把旁置的用户层还回去，并重启引擎。' : '会旁置 profile 的用户层，用出厂配置启动引擎（会话 / 凭证 / 设置都还在）。', 'rescue.toggle', '', rescue.safeMode ? '正在退出安全模式…' : '正在进入安全模式…'),
-            children: rescue.safeMode ? '退出安全模式' : '安全模式启动',
+            onClick: () => ask(rescue.safeMode ? T("退出安全模式") : T("安全模式启动"), rescue.safeMode ? T("会把旁置的用户层还回去，并重启引擎。") : T("会旁置 profile 的用户层，用出厂配置启动引擎（会话 / 凭证 / 设置都还在）。"), 'rescue.toggle', '', rescue.safeMode ? T("正在退出安全模式…") : T("正在进入安全模式…")),
+            children: rescue.safeMode ? T("退出安全模式") : T("安全模式启动"),
           }),
         }),
         jsx(Row, {
-          title: '导出全部数据',
-          desc: '把 dshhome（会话/凭证/设置）打包至 DSH_Backups',
-          right: jsx(Button, { variant: 'outline', size: 'sm', onClick: () => run('backup.export', ''), children: '导出' }),
+          title: T("导出全部数据"),
+          desc: T("把 dshhome（会话/凭证/设置）打包至 DSH_Backups"),
+          right: jsx(Button, { variant: 'outline', size: 'sm', onClick: () => run('backup.export', ''), children: T("导出") }),
         }),
         jsx(Row, {
-          title: '从备份导入还原',
-          desc: '选择之前导出的 zip 压缩包，还原 dshhome',
-          right: jsx(Button, { variant: 'outline', size: 'sm', onClick: () => run('backup.import', ''), children: '选择文件' }),
+          title: T("从备份导入还原"),
+          desc: T("选择之前导出的 zip 压缩包，还原 dshhome"),
+          right: jsx(Button, { variant: 'outline', size: 'sm', onClick: () => run('backup.import', ''), children: T("选择文件") }),
         }),
         jsx(Row, {
-          title: '从时光机快照还原',
-          desc: '选择时光机生成的 .dshbackup，还原全站资产（记忆 / 会话 / 配置）',
-          right: jsx(Button, { variant: 'outline', size: 'sm', onClick: () => run('backup.snapshotImport', ''), children: '选择文件' }),
+          title: T("从时光机快照还原"),
+          desc: T("选择时光机生成的 .dshbackup，还原全站资产（记忆 / 会话 / 配置）"),
+          right: jsx(Button, { variant: 'outline', size: 'sm', onClick: () => run('backup.snapshotImport', ''), children: T("选择文件") }),
         }),
 
-        jsx('div', { className: 'ctl-group', children: '设置' }),
+        jsx('div', { className: 'ctl-group', children: T("设置") }),
         jsx(Row, {
-          title: '模型分工',
-          desc: '查看当前模型 · 按任务切换 · 调整思考深度',
-          right: jsx(Button, { variant: 'outline', size: 'sm', onClick: () => setPage('models'), children: '进入' }),
+          title: T("模型分工"),
+          desc: T("查看当前模型 · 按任务切换 · 调整思考深度"),
+          right: jsx(Button, { variant: 'outline', size: 'sm', onClick: () => setPage('models'), children: T("进入") }),
           onClick: () => setPage('models'),
         }),
         jsx(Row, {
-          title: '智能生活助理',
-          desc: (state.life && state.life.summary) || '验证码 · 待取快递 · 自动记账 · 定时任务',
+          title: T("智能生活助理"),
+          desc: (state.life && state.life.summary) || T("验证码 · 待取快递 · 自动记账 · 定时任务"),
           right: jsxs(Fragment, { children: [
-            jsx('span', { className: 'ctl-state' + (state.life && state.life.daemonRunning ? ' ctl-ok' : ''), children: state.life && state.life.daemonRunning ? '守护中' : '未启动' }),
+            jsx('span', { className: 'ctl-state' + (state.life && state.life.daemonRunning ? ' ctl-ok' : ''), children: state.life && state.life.daemonRunning ? T("守护中") : T("未启动") }),
             jsx(primitives.IconChevronRightOutlineRegular, { size: 14 }),
           ] }),
           onClick: () => setPage('life'),
         }),
         jsx(Row, {
-          title: '本地知识库与全域检索',
-          desc: '秒级全文搜索 · 随手剪藏 · 0 Token 端侧 RAG',
+          title: T("本地知识库与全域检索"),
+          desc: T("秒级全文搜索 · 随手剪藏 · 0 Token 端侧 RAG"),
           right: jsxs(Fragment, { children: [
-            jsx('span', { className: 'ctl-state', children: (ragHook.rag.kbs && ragHook.rag.kbs.length ? ragHook.rag.kbs.length + ' 个库' : '已就绪') }),
+            jsx('span', { className: 'ctl-state', children: (ragHook.rag.kbs && ragHook.rag.kbs.length ? ragHook.rag.kbs.length + T(" 个库") : T("已就绪")) }),
             jsx(primitives.IconChevronRightOutlineRegular, { size: 14 }),
           ] }),
           onClick: () => setPage('rag'),
         }),
         jsx(Row, {
-          title: '局域网协同与隔空投送',
-          desc: '跨设备剪贴板双向同步 · 电脑文件秒传投送',
+          title: T("局域网协同与隔空投送"),
+          desc: T("跨设备剪贴板双向同步 · 电脑文件秒传投送"),
           right: jsxs(Fragment, { children: [
-            jsx('span', { className: 'ctl-state', children: (lanHook.lan.ips && lanHook.lan.ips.length ? lanHook.lan.ips.length + ' 个IP' : '已就绪') }),
+            jsx('span', { className: 'ctl-state', children: (lanHook.lan.ips && lanHook.lan.ips.length ? lanHook.lan.ips.length + T(" 个IP") : T("已就绪")) }),
             jsx(primitives.IconChevronRightOutlineRegular, { size: 14 }),
           ] }),
           onClick: () => setPage('lan'),
         }),
         jsx(Row, {
-          title: '语音交互与 TTS 调音台',
-          desc: (state.voice && state.voice.summary) || '语音唤醒 · 多模型 TTS 音色 · 实时对讲调音',
+          title: T("语音交互与 TTS 调音台"),
+          desc: (state.voice && state.voice.summary) || T("语音唤醒 · 多模型 TTS 音色 · 实时对讲调音"),
           right: jsxs(Fragment, { children: [
-            jsx('span', { className: 'ctl-state', children: state.voice && state.voice.hotwordEnabled ? '已开启' : '已配置' }),
+            jsx('span', { className: 'ctl-state', children: state.voice && state.voice.hotwordEnabled ? T("已开启") : T("已配置") }),
             jsx(primitives.IconChevronRightOutlineRegular, { size: 14 }),
           ] }),
           onClick: () => setPage('voice'),
         }),
         jsx(Row, {
-          title: '授予权限',
-          desc: '存储 · 通知 · 悬浮窗 · 电池 · root · Shizuku · 无障碍',
+          title: T("授予权限"),
+          desc: T("存储 · 通知 · 悬浮窗 · 电池 · root · Shizuku · 无障碍"),
           right: jsxs(Fragment, { children: [
             jsx('span', { className: 'ctl-state', children: (state.perm && state.perm.summary) || '' }),
             jsx(primitives.IconChevronRightOutlineRegular, { size: 14 }),
@@ -1958,8 +1958,8 @@ window.__ModuleLoader__.load({
           onClick: () => setPage('perm'),
         }),
         jsx(Row, {
-          title: '插件',
-          desc: '关掉用不到的，省上下文',
+          title: T("插件"),
+          desc: T("关掉用不到的，省上下文"),
           right: jsxs(Fragment, { children: [
             jsx('span', { className: 'ctl-state', children: (state.plugins && state.plugins.summary) || '' }),
             jsx(primitives.IconChevronRightOutlineRegular, { size: 14 }),
@@ -1967,8 +1967,8 @@ window.__ModuleLoader__.load({
           onClick: () => setPage('plug'),
         }),
         jsx(Row, {
-          title: '自建环境',
-          desc: '在手机上自己编译 / 打包 / 签名（可选，约 193MB）',
+          title: T("自建环境"),
+          desc: T("在手机上自己编译 / 打包 / 签名（可选，约 193MB）"),
           right: jsxs(Fragment, { children: [
             jsx('span', { className: 'ctl-state', children: (state.buildEnv && state.buildEnv.summary) || '' }),
             jsx(primitives.IconChevronRightOutlineRegular, { size: 14 }),
@@ -1977,52 +1977,52 @@ window.__ModuleLoader__.load({
           onClick: () => setPage('buildenv'),
         }),
         jsx(Row, {
-          title: '引擎内核',
-          desc: '换运行时内核版本（实验）；内置内核永远兜底',
+          title: T("引擎内核"),
+          desc: T("换运行时内核版本（实验）；内置内核永远兜底"),
           right: jsxs(Fragment, { children: [
-            jsx('span', { className: 'ctl-state', children: (state.kernel && state.kernel.activeText) || '内置内核' }),
+            jsx('span', { className: 'ctl-state', children: (state.kernel && state.kernel.activeText) || T("内置内核") }),
             jsx(primitives.IconChevronRightOutlineRegular, { size: 14 }),
           ] }),
           onClick: () => setPage('kernel'),
         }),
         jsx(Row, {
-          title: '日志',
+          title: T("日志"),
           desc: log.summary || '',
           right: jsxs(Fragment, { children: [
-            jsx(Button, { variant: 'ghost', size: 'sm', onClick: (ev) => { ev.stopPropagation(); run('log.view', ''); }, children: '查看' }),
-            jsx(Button, { variant: 'ghost', size: 'sm', onClick: (ev) => { ev.stopPropagation(); run('log.share', ''); }, children: '分享' }),
+            jsx(Button, { variant: 'ghost', size: 'sm', onClick: (ev) => { ev.stopPropagation(); run('log.view', ''); }, children: T("查看") }),
+            jsx(Button, { variant: 'ghost', size: 'sm', onClick: (ev) => { ev.stopPropagation(); run('log.share', ''); }, children: T("分享") }),
             jsx(primitives.IconChevronRightOutlineRegular, { size: 14 }),
           ] }),
           onClick: () => setPage('log'),
         }),
         jsx(Row, {
-          title: '时光机全站备份',
-          desc: '一键打包记忆库、历史会话与配置',
-          right: jsx(Button, { variant: 'outline', size: 'sm', onClick: () => run('snapshot', ''), children: '立即备份' }),
+          title: T("时光机全站备份"),
+          desc: T("一键打包记忆库、历史会话与配置"),
+          right: jsx(Button, { variant: 'outline', size: 'sm', onClick: () => run('snapshot', ''), children: T("立即备份") }),
         }),
         jsx(Row, {
-          title: '界面主题',
+          title: T("界面主题"),
           desc: theme.label || '',
           right: jsx(primitives.SegmentedControl, {
             id: 'dshctl-theme',
             value: String(theme.mode == null ? 0 : theme.mode),
-            label: '界面主题',
+            label: T("界面主题"),
             options: [
-              { value: '0', label: '跟随系统' },
-              { value: '1', label: '浅色' },
-              { value: '2', label: '深色' },
+              { value: '0', label: T("跟随系统") },
+              { value: '1', label: T("浅色") },
+              { value: '2', label: T("深色") },
             ],
             onChange: (v) => run('theme.set', v),
           }),
         }),
         jsx(Row, {
-          title: '检查更新',
-          desc: '当前版本 ' + (state.version || ''),
-          right: jsx(Button, { variant: 'outline', size: 'sm', onClick: () => run('update.check', ''), children: '检查' }),
+          title: T("检查更新"),
+          desc: T("当前版本 ") + (state.version || ''),
+          right: jsx(Button, { variant: 'outline', size: 'sm', onClick: () => run('update.check', ''), children: T("检查") }),
         }),
         jsx(Row, {
-          title: 'QQ 交流群',
-          desc: '群号 1050918023 · 装不上、想问两句都可以来',
+          title: T("QQ 交流群"),
+          desc: T("群号 1050918023 · 装不上、想问两句都可以来"),
           right: jsx(Button, {
             variant: 'outline',
             size: 'sm',
@@ -2032,40 +2032,40 @@ window.__ModuleLoader__.load({
               const s = shell();
               if (s) {
                 s.ctlAct('open.url', uri);
-                say('正在打开 QQ 群…');
+                say(T("正在打开 QQ 群…"));
               } else {
-                say('群号 1050918023，复制到 QQ 里搜索即可');
+                say(T("群号 1050918023，复制到 QQ 里搜索即可"));
               }
             },
-            children: '加入',
+            children: T("加入"),
           }),
           onClick: () => {
             const uri = 'mqqapi://card/show_pslcard?src_type=internal&version=1&uin=1050918023&card_type=group&source=qrcode';
             const s = shell();
             if (s) {
               s.ctlAct('open.url', uri);
-              say('正在打开 QQ 群…');
+              say(T("正在打开 QQ 群…"));
             } else {
-              say('群号 1050918023，复制到 QQ 里搜索即可');
+              say(T("群号 1050918023，复制到 QQ 里搜索即可"));
             }
           },
         }),
         jsx(Row, {
-          title: '开源主页与 Star 支持',
-          desc: '欢迎前往 GitHub 给作者点一颗 ⭐ 支持！',
+          title: T("开源主页与 Star 支持"),
+          desc: T("欢迎前往 GitHub 给作者点一颗 ⭐ 支持！"),
           right: jsx(Button, {
             variant: 'outline',
             size: 'sm',
             onClick: () => {
               openUrl('https://github.com/guzhou079-arch/deepseek-harness-android');
-              say('正在打开 GitHub 开源主页…');
+              say(T("正在打开 GitHub 开源主页…"));
             },
-            children: '去 Star ⭐',
+            children: T("去 Star ⭐"),
           }),
           last: true,
         }),
 
-        jsx(Note, { children: '换内核版本 / 覆盖安装后需要重新解压；平时只用到「启动引擎」。' }),
+        jsx(Note, { children: T("换内核版本 / 覆盖安装后需要重新解压；平时只用到「启动引擎」。") }),
         confirmBar,
         flashBar,
       ] });
@@ -2075,25 +2075,25 @@ window.__ModuleLoader__.load({
     function nativeInput() { return typeof window.__DSH_INPUT_TOKEN === 'string' ? window.dshinput || null : null; }
     function nativeJson(method, ...args) {
       const bridge = nativeInput();
-      if (!bridge || typeof bridge[method] !== 'function') throw new Error('需要在更新后的安卓 App 内使用');
+      if (!bridge || typeof bridge[method] !== 'function') throw new Error(T("需要在更新后的安卓 App 内使用"));
       const result = JSON.parse(bridge[method](window.__DSH_INPUT_TOKEN, ...args));
-      if (!result.ok) throw new Error(result.error || '操作失败');
+      if (!result.ok) throw new Error(result.error || T("操作失败"));
       return result;
     }
     async function sharedFiles(batch, call = nativeJson) {
       const output = []; let total = 0;
       for (const item of batch.files || []) {
-        if (!Number.isSafeInteger(item.bytes) || item.bytes < 0 || item.bytes > 16 * 1024 * 1024) throw new Error('无效附件大小');
+        if (!Number.isSafeInteger(item.bytes) || item.bytes < 0 || item.bytes > 16 * 1024 * 1024) throw new Error(T("无效附件大小"));
         total += item.bytes;
-        if (total > 32 * 1024 * 1024) throw new Error('分享附件总量超过 32MB');
+        if (total > 32 * 1024 * 1024) throw new Error(T("分享附件总量超过 32MB"));
         const parts = []; let offset = 0;
         do {
           const part = call('shareChunk', batch.id, item.index, offset);
           const bytes = atob(part.data); const chunk = new Uint8Array(bytes.length);
-          if (bytes.length > 65536 || offset + bytes.length > item.bytes || (!part.eof && !bytes.length)) throw new Error('附件分块不完整');
+          if (bytes.length > 65536 || offset + bytes.length > item.bytes || (!part.eof && !bytes.length)) throw new Error(T("附件分块不完整"));
           for (let i = 0; i < bytes.length; i++) chunk[i] = bytes.charCodeAt(i);
           parts.push(chunk); offset += chunk.length;
-          if (part.eof) { if (offset !== item.bytes) throw new Error('附件长度不匹配'); break; }
+          if (part.eof) { if (offset !== item.bytes) throw new Error(T("附件长度不匹配")); break; }
           await new Promise(resolve => setTimeout(resolve, 0));
         } while (offset < item.bytes);
         output.push(new File(parts, item.name, { type: item.mime }));
@@ -2105,15 +2105,15 @@ window.__ModuleLoader__.load({
     }
     async function putShareInDraft(batch, sessionId, inputActions, conversation, call = nativeJson, current = () => true) {
       const files = await sharedFiles(batch, call);
-      if (!current()) throw new Error("聊天已切换，分享仍保留在收件箱");
+      if (!current()) throw new Error(T("聊天已切换，分享仍保留在收件箱"));
       const drafts = files.length ? conversation.createDrafts(sessionId, files) : [];
       if (drafts.length && !inputActions.addAttachments(drafts.map(file => file.id))) {
-        conversation.releaseDraftAttachments(drafts); throw new Error('草稿暂时不可编辑，请稍后重试');
+        conversation.releaseDraftAttachments(drafts); throw new Error(T("草稿暂时不可编辑，请稍后重试"));
       }
       // Attachment insertion changes draftRev, so capture the text span after adding them.
       if (batch.text && !insertTranscript(inputActions, batch.text, inputActions.captureInsertion())) {
         if (drafts.length) { inputActions.pruneAttachments(drafts.map(file => file.id)); conversation.releaseDraftAttachments(drafts); }
-        throw new Error('草稿已改变，请重新选择加入草稿');
+        throw new Error(T("草稿已改变，请重新选择加入草稿"));
       }
       return true;
     }
@@ -2123,7 +2123,7 @@ window.__ModuleLoader__.load({
      */
     async function autoPutShareInDraft(batch, sessionId, inputActions, conversation, call = nativeJson, current = () => true) {
       await putShareInDraft(batch, sessionId, inputActions, conversation, call, current);
-      if (!current()) throw new Error('聊天已切换，分享仍保留在收件箱');
+      if (!current()) throw new Error(T("聊天已切换，分享仍保留在收件箱"));
       call('shareAck', batch.id);
       return true;
     }
@@ -2150,9 +2150,9 @@ window.__ModuleLoader__.load({
             if (['final', 'empty', 'error', 'cancelled'].includes(result.state)) {
               active.current = null;
               if (result.state === 'final') {
-                if (insertTranscript(inputActions, result.text, current.span)) { setTranscript(''); setMessage('听写已加入草稿'); }
-                else { setTranscript(result.text); setMessage('草稿已改变，转写已保留，可手动加入'); }
-              } else setMessage(result.error || (result.state === 'empty' ? '未识别到内容' : '听写已取消'));
+                if (insertTranscript(inputActions, result.text, current.span)) { setTranscript(''); setMessage(T("听写已加入草稿")); }
+                else { setTranscript(result.text); setMessage(T("草稿已改变，转写已保留，可手动加入")); }
+              } else setMessage(result.error || (result.state === 'empty' ? T("未识别到内容") : T("听写已取消")));
             }
           } catch (e) { setMessage(e.message); active.current = null; }
         };
@@ -2180,7 +2180,7 @@ window.__ModuleLoader__.load({
           } catch (e) {
             if (alive.current) {
               setAutoFailed(pending.id);
-              setMessage('自动挂载失败：' + ((e && e.message) || e) + '，可点「加入草稿」');
+              setMessage(T("自动挂载失败：") + ((e && e.message) || e) + T("，可点「加入草稿」"));
               try { setShare(nativeJson('shareState')); } catch (_) {}
             }
           } finally { autoBusy.current = false; }
@@ -2188,11 +2188,11 @@ window.__ModuleLoader__.load({
       }, [share, sessionId, inputActions, draftConversation]);
       if (!nativeInput() || !inputActions || !sessionId) {
         const why = !nativeInput()
-          ? (typeof window.__DSH_INPUT_TOKEN === "string" ? "window.dshinput 缺失" : "window.__DSH_INPUT_TOKEN 未注入")
-          : (!inputActions ? "宿主没给 inputActions" : "会话未就绪 sessionId=undefined");
+          ? (typeof window.__DSH_INPUT_TOKEN === "string" ? T("window.dshinput 缺失") : T("window.__DSH_INPUT_TOKEN 未注入"))
+          : (!inputActions ? T("宿主没给 inputActions") : T("会话未就绪 sessionId=undefined"));
         return jsxs("div", { className: "ctl-input-native", style: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "6px 8px", margin: "0 0 6px", fontSize: 12, lineHeight: 1.4, border: "1px solid #f5a524", borderRadius: 8 }, children: [
-          jsx("span", { children: "⚠ 分享桥未就绪：" + why }),
-          jsx(Button, { size: "sm", variant: "secondary", onClick: () => { try { location.reload(); } catch (e) {} }, children: "重新加载页面" })
+          jsx("span", { children: T("⚠ 分享桥未就绪：") + why }),
+          jsx(Button, { size: "sm", variant: "secondary", onClick: () => { try { location.reload(); } catch (e) {} }, children: T("重新加载页面") })
         ] });
       }
       const busy = active.current !== null;
@@ -2233,14 +2233,14 @@ window.__ModuleLoader__.load({
         message ? jsx('span', { role: 'status', children: message }) : null,
 
         batch && autoFailed === batch.id ? jsxs('div', { style: { padding: 8, border: '1px solid var(--border, #8885)', borderRadius: 8 }, children: [
-          jsx('strong', { children: '收到分享' + (share.count > 1 ? ' · 待处理 ' + share.count + ' 条' : '') }),
+          jsx('strong', { children: T("收到分享") + (share.count > 1 ? T(" · 待处理 ") + share.count + T(" 条") : '') }),
           jsx('div', { style: { whiteSpace: 'pre-wrap', maxHeight: 100, overflow: 'auto' }, children: batch.text?.slice(0, 600) || '' }),
           jsx('div', { children: (batch.files || []).map(file => file.name + (Number.isSafeInteger(file.bytes) ? '（' + fileSizeText(file.bytes) + '）' : '')).join('、') }),
-          batch.archive ? jsx('div', { style: { opacity: .7 }, children: '副本：' + batch.archive }) : null,
+          batch.archive ? jsx('div', { style: { opacity: .7 }, children: T("副本：") + batch.archive }) : null,
           (batch.errors || []).length ? jsx('div', { children: batch.errors.join('；') }) : null,
           jsxs('div', { style: { display: 'flex', gap: 8, marginTop: 6 }, children: [
-            jsx(Button, { size: 'sm', disabled: importing || busy, onClick: receive, children: importing ? '正在接收…' : received.current.has(batch.id) ? '清理收件箱' : '加入草稿' }),
-            jsx(Button, { size: 'sm', variant: 'ghost', disabled: importing, onClick: discard, children: '忽略' }),
+            jsx(Button, { size: 'sm', disabled: importing || busy, onClick: receive, children: importing ? T("正在接收…") : received.current.has(batch.id) ? T("清理收件箱") : T("加入草稿") }),
+            jsx(Button, { size: 'sm', variant: 'ghost', disabled: importing, onClick: discard, children: T("忽略") }),
           ] }),
         ] }) : null,
       ] });
@@ -2255,7 +2255,7 @@ window.__ModuleLoader__.load({
       shareMounting = batch.id;
       try {
         await putShareInDraft(batch, sessionId, inputActions, conversation, nativeJson, current);
-        if (!current()) throw new Error('聊天已切换，分享仍保留在收件箱');
+        if (!current()) throw new Error(T("聊天已切换，分享仍保留在收件箱"));
         nativeJson('shareAck', batch.id);
         return true;
       } finally {
@@ -2290,9 +2290,9 @@ window.__ModuleLoader__.load({
       if (!batch) return '';
       const files = (batch.files || []).map(file => file.name + (Number.isSafeInteger(file.bytes) ? '（' + fileSizeText(file.bytes) + '）' : ''));
       const head = batch.text ? batch.text.trim().slice(0, 60) : files.join('、');
-      const rest = share.count > 1 ? '（另有 ' + (share.count - 1) + ' 条待处理）' : '';
-      const where = batch.archive ? '，副本已存到 ' + batch.archive : '';
-      return '收到分享：' + head + where + rest;
+      const rest = share.count > 1 ? T("（另有 ") + (share.count - 1) + T(" 条待处理）") : '';
+      const where = batch.archive ? T("，副本已存到 ") + batch.archive : '';
+      return T("收到分享：") + head + where + rest;
     }
 
     // 分享到货提示：分享卡片只挂在聊天输入框里（conversation.composer.dock），用户若停在
@@ -2318,14 +2318,554 @@ window.__ModuleLoader__.load({
       if (!batch || batch.id === shown || batch.id === hidden) return null;
       return jsx(Toast, {
         tone: 'success', holdMs: 9000, text: shareNoticeText(share),
-        actions: [{ label: '忽略', onClick: () => {
+        actions: [{ label: T("忽略"), onClick: () => {
           try { nativeJson('shareAck', batch.id); setHidden(batch.id); setShare(nativeJson('shareState')); } catch (e) {}
         } }],
         onDone: () => setShown(batch.id),
       });
     }
 
-    const inject = ['slots', 'sessions'];
+    const NS = 'dsh-android-console';
+    /** 中文原文即 key：zh 不需要词典（缺词回落成 key 本身），只维护 en。 */
+    const en = {
+ "window.dshinput 缺失": "window.dshinput is missing",
+ "window.__DSH_INPUT_TOKEN 未注入": "window.__DSH_INPUT_TOKEN was not injected",
+ "宿主没给 inputActions": "The host did not provide inputActions",
+ "会话未就绪 sessionId=undefined": "Session not ready: sessionId=undefined",
+ "⚠ 分享桥未就绪：": "⚠ Share bridge not ready: ",
+ "重新加载页面": "Reload the page",
+ "收到分享": "Share received",
+ " · 待处理 ": " · pending ",
+ " 条": " item(s)",
+ "副本：": "Copy: ",
+ "正在接收…": "Receiving…",
+ "清理收件箱": "Clear inbox",
+ "加入草稿": "Add to draft",
+ "忽略": "Ignore",
+ "聊天已切换，分享仍保留在收件箱": "Chat switched; the share stays in the inbox",
+ "（另有 ": " (",
+ " 条待处理）": " more pending)",
+ "，副本已存到 ": ", copy saved to ",
+ "收到分享：": "Share received: ",
+ "读不到安装状态：": "Cannot read install state: ",
+ "启动下载失败：": "Failed to start download: ",
+ "正在读取…": "Loading…",
+ "已安装 v": "Installed v",
+ "（占用 ": " (using ",
+ "正在下载 ": "Downloading ",
+ "正在解压…": "Extracting…",
+ "安装失败：": "Install failed: ",
+ "未知错误": "Unknown error",
+ "未安装": "Not installed",
+ "文档预览组件": "Document preview component",
+ "docx / xlsx / pptx 的预览需要一个 LibreOffice 引擎（下载约 48MB，装好后占约 150MB）。它不随安装包分发，用到再装；装好立即生效，不用重启。不装只影响这几种文档的预览，其它功能不受影响。": "Previewing docx / xlsx / pptx needs a LibreOffice engine (about 48MB to download, about 150MB installed). It is not bundled with the App; install it on demand. It takes effect immediately without a restart. Skipping it only affects previews for these formats.",
+ "正在启动…": "Starting…",
+ "下载并安装（约 48MB）": "Download and install (~48MB)",
+ "我在。": "I am here.",
+ "别戳，痒。": "Stop poking, that tickles.",
+ "慢慢来，不着急。": "Take your time, no rush.",
+ "写完这段就歇会儿。": "Take a break after this part.",
+ "今天也一起加油。": "Let us do our best today too.",
+ "记得喝水。": "Remember to drink water.",
+ "这个 bug 会怕你的。": "This bug is afraid of you.",
+ "摸鱼也是正经事。": "Slacking off is legitimate work too.",
+ "嗯……让我想想。": "Hmm… let me think.",
+ "你忙，我就在旁边。": "You work; I will stay right here.",
+ "我是大肥鱼。按住我可以拖到别处。": "I am Big Fat Fish. Hold me to drag me elsewhere.",
+ "大肥鱼桌宠：点一下互动，按住拖动": "Big Fat Fish pet: tap to interact, hold to drag",
+ "请求超时": "Request timed out",
+ "悬浮窗还没启动，先点「召回桌宠」。": "The overlay is not running yet. Tap \"Recall pet\" first.",
+ "连不上 App 本地桥，刷新页面再试。": "Cannot reach the App local bridge. Refresh the page and try again.",
+ "动作没有成功，再点一次试试。": "The action did not succeed. Tap once more.",
+ "状态读取失败": "Failed to read status",
+ "连不上 App 本地桥（127.0.0.1:3081）": "Cannot reach the App local bridge (127.0.0.1:3081)",
+ "动作失败": "Action failed",
+ "已生效。": "Applied.",
+ "桌宠已收起。": "Pet hidden.",
+ "桌宠已召回，正在当前界面显示。": "Pet recalled and now showing on this screen.",
+ "桌宠面板已打开。": "Pet panel opened.",
+ "流体云已开启。": "Fluid cloud enabled.",
+ "流体云已关闭。": "Fluid cloud disabled.",
+ "悬浮屏预览已开启。": "Virtual screen preview enabled.",
+ "悬浮屏预览已关闭。": "Virtual screen preview disabled.",
+ "状态已刷新。": "Status refreshed.",
+ "检测中…": "Checking…",
+ "未连接": "Not connected",
+ "未运行": "Not running",
+ "在线": "Online",
+ "已隐藏": "Hidden",
+ "状态读不到：": "Cannot read status: ",
+ "改完立即生效。点「召回桌宠」会取消贴边半藏，直接把它叫到当前界面；状态每 5 秒自动刷新。": "Changes apply immediately. \"Recall pet\" cancels the edge-docking and brings it to this screen; status refreshes every 5 seconds.",
+ "悬浮窗现在没开：打开「显示桌宠」或点「召回桌宠」即可。": "The overlay is off. Turn on \"Show pet\" or tap \"Recall pet\".",
+ "大肥鱼": "Big Fat Fish",
+ "鲸鱼娘": "Whale girl",
+ "安卓悬浮窗里那只鲸鱼娘。点一下听她说句话，点台词才打开面板。": "The whale girl in the Android overlay. Tap her for a line; tap the line to open the panel.",
+ "轻点 → 台词": "Tap → line",
+ "点台词 → 面板": "Tap line → panel",
+ "长按 → 说话": "Hold → speak",
+ "桌宠设置": "Pet settings",
+ "显示桌宠": "Show pet",
+ "在桌面和其他应用上显示整只大肥鱼。按住可拖到别处；关掉即收起悬浮窗。": "Show the whole Big Fat Fish over the launcher and other apps. Hold to drag; turning it off hides the overlay.",
+ "流体云": "Fluid cloud",
+ "AI 回复时把一张卡片飘到桌宠旁边；通知栏按钮也能开关。": "Float a card next to the pet when the AI replies; the notification button toggles it too.",
+ "悬浮屏预览": "Virtual screen preview",
+ "把虚拟屏画面实时缩到桌宠上看，适合盯自动化在做什么。": "Mirror the virtual screen onto the pet in real time, handy for watching automation run.",
+ "召回中…": "Recalling…",
+ "召回桌宠": "Recall pet",
+ "打开中…": "Opening…",
+ "打开桌宠面板": "Open pet panel",
+ "刷新中…": "Refreshing…",
+ "刷新状态": "Refresh status",
+ "控制台": "Console",
+ "sessions.selectModel 不可用": "sessions.selectModel is unavailable",
+ "切换失败": "Switch failed",
+ "文档预览": "Document preview",
+ "分享到货提示": "Share arrival toast",
+ "桌宠": "Pet",
+ "最新一条": "Newest",
+ "最旧一条": "Oldest",
+ "最多 2.5 秒空白": "Up to 2.5s of silence",
+ "需要在本应用内使用": "Must be used inside this App",
+ "小鲸鱼,DeepSeek": "Whale,DeepSeek",
+ "星蓝 · 官方女声": "Star Blue · official female",
+ "官方/自然/沉稳": "official / natural / calm",
+ "潮汐 · 官方男声": "Tide · official male",
+ "官方/低沉/叙事": "official / low / narrative",
+ "自定义模型": "Custom model",
+ "填自己的 URL / Key / 模型名": "Fill in your own URL / Key / model name",
+ "确认": "Confirm",
+ "关闭": "Close",
+ "取消": "Cancel",
+ "确定": "OK",
+ "控制台页面出错了": "The console page failed",
+ "原生控制台没有删：文件没解压、或引擎启动失败时会自动出现。": "The native console is not removed: it appears automatically when the payload is not extracted or the engine fails to start.",
+ "前端 UI 与审美": "Frontend UI and aesthetics",
+ "界面设计、交互细节、视觉打磨和前端实现": "Interface design, interaction details, visual polish and frontend implementation",
+ "后端与复杂编码": "Backend and complex coding",
+ "服务端、数据链路、疑难排错和复杂仓库修改": "Server side, data pipelines, hard debugging and large repo changes",
+ "需求分析与拆解": "Requirement analysis and breakdown",
+ "临时把本会话切到 Kimi max 拆需求，拆完切回；日常需求分析用子代理跑": "Temporarily switch this session to Kimi max to break down requirements, then switch back; use a subagent for routine analysis",
+ "中文长文与翻译": "Long-form Chinese and translation",
+ "中文长文、翻译和文档改写；不做需求或生活常识终审": "Long Chinese text, translation and document rewriting; no final review of requirements or common sense",
+ "Go · Qwen 默认档": "Go · Qwen default tier",
+ "测试与第二遍查错": "Testing and second-pass review",
+ "测试用例、静态查错和代码复检；不派读图任务": "Test cases, static checks and code re-review; no image-reading tasks",
+ "日常工作": "Daily work",
+ "日常问答、常规脚本、文档和一般工具任务": "Everyday Q&A, routine scripts, docs and general tool tasks",
+ "轻量与重复任务": "Light and repetitive tasks",
+ "取数、转格式、摘要、分类和批量重复任务": "Data extraction, format conversion, summaries, classification and batch repetitive tasks",
+ "尚未读取": "Not read yet",
+ "模型服务还在启动，稍后点“刷新状态”重试": "The model service is still starting; tap \"Refresh status\" in a moment",
+ "诊断失败 ": "Diagnosis failed ",
+ "读不到模型服务：sessions=": "Cannot read the model service: sessions=",
+ "，模型目录=": ", model catalog=",
+ "当前会话": "Current session",
+ "有多个会话在主视图，请先打开一个会话。": "Several sessions are open in the main view; open one first.",
+ "目标会话已离开主视图，请重新打开后再切换。": "The target session left the main view; reopen it and switch again.",
+ "DeepSeek 官方已暂停使用。": "DeepSeek official is currently suspended.",
+ "目标模型不在当前目录中，请刷新后再试。": "The target model is not in the current catalog; refresh and try again.",
+ "该模型未提供此思考档位，请重新选择。": "This model does not offer that reasoning tier; pick another.",
+ "当前已使用此配置。": "This configuration is already active.",
+ "模型切换未成功": "Model switch did not succeed",
+ "已切换为 ": "Switched to ",
+ "，后续请求使用新配置。": "; later requests use the new configuration.",
+ "模型分工": "Model roles",
+ "按任务手动选模型。当前页面只操作正在打开的会话，切换时也会更新引擎默认模型。": "Pick a model per task. This page only affects the session that is open, and switching also updates the engine default model.",
+ "当前使用": "In use",
+ " · 思考深度 ": " · reasoning depth ",
+ "模型默认": "model default",
+ "先打开一个会话，再进入模型分工": "Open a session first, then open Model roles",
+ "修改角色：": "Edit role: ",
+ "厂商 (provider)": "Provider",
+ "模型 id": "Model id",
+ " · 档位 ": " · tier ",
+ "思考深度": "Reasoning depth",
+ "保存": "Save",
+ "恢复默认": "Restore default",
+ "按任务选择": "Pick by task",
+ "已暂停": "Suspended",
+ "使用中": "In use",
+ "暂不使用": "Not in use",
+ "目录中不可用": "Unavailable in catalog",
+ "已选定": "Selected",
+ "选择此角色": "Use this role",
+ "更换模型": "Change model",
+ "本次配置": "This configuration",
+ "目标模型": "Target model",
+ "保持当前档位 / 模型默认": "Keep current tier / model default",
+ "此模型未声明思考档位，使用模型默认值。": "This model declares no reasoning tiers; the model default applies.",
+ "正在切换…": "Switching…",
+ "应用配置": "Apply configuration",
+ "回到上一次配置": "Back to the previous configuration",
+ "保持当前模型": "Keep the current model",
+ "参考倍率来自既有角色配置，可能变化，也不是每条消息的实际价格。模型目录可用不代表账户有余额；此页不发起付费试聊。": "Reference multipliers come from existing role configuration, may change, and are not the actual price of each message. A model being available does not mean the account has balance; this page does not start paid trials.",
+ "日常与重复任务中的 DeepSeek 走 dp 中继，不使用 DeepSeek 官方余额。切换模型会把当前对话上下文交给对应服务。": "DeepSeek for daily and repetitive tasks goes through the dp relay and does not use the official DeepSeek balance. Switching models hands the current conversation context to the corresponding service.",
+ "应用模型配置": "Apply model configuration",
+ "，思考深度 ": ", reasoning depth ",
+ "周日": "Sun",
+ "周一": "Mon",
+ "周二": "Tue",
+ "周三": "Wed",
+ "周四": "Thu",
+ "周五": "Fri",
+ "周六": "Sat",
+ "年": "Y",
+ "月": "M",
+ "日 ": "D ",
+ "（今天）": " (today)",
+ "（昨天）": " (yesterday)",
+ "读取失败（HTTP ": "Read failed (HTTP ",
+ "消费": "Spending",
+ "自动记账": "Auto bookkeeping",
+ "全部账目": "All entries",
+ "正在读取全部账目…": "Loading all entries…",
+ "暂时无法读取账目，请重试。": "Cannot read entries right now; try again.",
+ "自动记账 + 手工补录的全部流水，按天倒序。共 ": "All flows from auto bookkeeping plus manual entries, newest day first. Total ",
+ " 笔：支出 ¥": " entries: spent ¥",
+ "，收入 ¥": ", received ¥",
+ "读取失败：": "Read failed: ",
+ "这里还没有账目。": "No entries here yet.",
+ "已加载合计 · 支出 ": "Loaded so far · spent ",
+ " 收入 ": " received ",
+ "加载中…": "Loading…",
+ "重试读取": "Retry",
+ "加载更多（还有 ": "Load more (",
+ " 笔）": " left)",
+ "你好！我是 DeepSeek 智能语音分身，随时为您服务。": "Hello! I am the DeepSeek voice companion, at your service.",
+ "控制台只在安卓应用内可用": "The console is only available inside the Android App",
+ "这一页通过手机壳的桥（dshshell）执行解压 / 起引擎 / 授权等动作；桌面浏览器里没有这条通道。": "This page uses the shell bridge (dshshell) to extract, start the engine and grant permissions; a desktop browser has no such channel.",
+ "进入模型分工": "Open Model roles",
+ "授予权限": "Grant permission",
+ "root / Shizuku 二选一即可（root 优先）。root 只能由你在 root 管理器（Magisk / KernelSU）里授予本应用；设备没 root 时这一项显示": "Either root or Shizuku is enough (root preferred). root can only be granted to this App by you in a root manager (Magisk / KernelSU); on a device without root this item shows",
+ "管理": "Manage",
+ "去授权": "Authorize",
+ "AI 工作区（可选）": "AI workspace (optional)",
+ "未设置（AI 文件操作在内部目录）": "Not set (AI file operations stay in the internal directory)",
+ "选择": "Choose",
+ "更改": "Change",
+ "插件": "Plugins",
+ "关掉的插件不加载：工具不进 AI 的工具表，也少占上下文。改动在重启引擎后生效。": "Disabled plugins do not load: their tools stay out of the AI tool table and take less context. Changes take effect after restarting the engine.",
+ "重启引擎": "Restart engine",
+ "插件的加载与关闭要重启引擎才生效。": "Loading and disabling plugins takes effect only after restarting the engine.",
+ "正在重启引擎…": "Restarting the engine…",
+ "重启引擎生效": "Restart the engine to apply",
+ "自建环境": "Self-build environment",
+ "装上它之后，你可以在这台手机上自己编译、打包、签名、安装这个 App —— 也就是这个项目本来的核心能力。主包不含这部分（约 193MB），所以按需下载。GitHub 与 Gite": "Once installed you can compile, package, sign and install this App on this very phone — the core capability of this project. The main package does not include it (about 193MB), so it is downloaded on demand. GitHub and Gite",
+ "正在安装，请保持网络与前台。": "Installing; keep the network on and the App in the foreground.",
+ "取消安装": "Cancel install",
+ "重新安装自建环境": "Reinstall self-build environment",
+ "下载并安装自建环境": "Download and install self-build environment",
+ "重新安装 / 修复自建环境？": "Reinstall / repair the self-build environment?",
+ "开始下载并安装自建环境？": "Start downloading and installing the self-build environment?",
+ "（约 193MB，保持前台与网络）": " (about 193MB; keep it in the foreground with network)",
+ "已开始下载安装…": "Download started…",
+ "用 ": "Use ",
+ " 重新安装 / 修复": " to reinstall / repair",
+ "从 ": "Download from ",
+ " 下载安装": " and install",
+ "正在查询…": "Checking…",
+ "重新查询两个仓库": "Re-check both repositories",
+ "查询两个仓库": "Check both repositories",
+ "⚠️ 解压必须落在内部存储 —— /sdcard 是 FUSE，存不了 rootfs 里的符号链接（918 个）。分卷会留在 /sdcard/DeepSeekHarness/bui": "⚠️ Extraction must land on internal storage — /sdcard is FUSE and cannot hold the 918 symlinks in the rootfs. Volumes stay under /sdcard/DeepSeekHarness/bui",
+ "（由 App 指定）": " (set by the App)",
+ "引擎内核": "Engine kernel",
+ "内核就是引擎跑的那棵 node 包（bin.js + node_modules）。内核包是 tar.gz + manifest.json，从 /sdcard 装进应用私有目录（内部": "The kernel is the node package the engine runs (bin.js + node_modules). A kernel package is tar.gz + manifest.json, installed from /sdcard into the app private directory (internal",
+ "当前：": "Current: ",
+ "内置内核": "Built-in kernel",
+ "从应用私有目录加载 · 切换会重启一次引擎": "Loaded from the app private directory · switching restarts the engine once",
+ "从 APK 的 payload/dshroot 加载 · 永远兜底": "Loaded from the APK payload/dshroot · always the fallback",
+ "（使用中）": " (in use)",
+ "切换到 ": "Switch to ",
+ "会重启一次引擎（几秒）。记忆和会话都在 dshhome，不受影响。如果这个内核起不来，90 秒内会自动回退到内置内核。": " restarts the engine once (a few seconds). Memory and sessions live in dshhome and are unaffected. If the kernel fails to start, it falls back to the built-in kernel within 90 seconds.",
+ "切换中，引擎会重启…": "Switching; the engine restarts…",
+ "切换": "Switch",
+ "删除内核 ": "Delete kernel ",
+ "删掉这份已解压的内核，不影响内置内核。": "Delete this extracted kernel; the built-in kernel is unaffected.",
+ "已删除": "Deleted",
+ "删除": "Delete",
+ "已安装": "Installed",
+ "还没装过内核包。「可安装」里的包点一下就装进来。": "No kernel package installed yet. Tap one under \"Installable\" to install it.",
+ "安装内核 ": "Install kernel ",
+ "先校验 sha256，再解压到应用私有目录（约十几秒到一分钟），不会重启引擎。": "Verify sha256, then extract into the app private directory (tens of seconds to a minute); the engine is not restarted.",
+ "安装中…": "Installing…",
+ "安装": "Install",
+ "可安装": "Installable",
+ "目录：": "Directory: ",
+ "（放 kernel-*.tar.gz 和 manifest.json）· 现在没有新包": " (put kernel-*.tar.gz and manifest.json here) · no new packages right now",
+ "回退到内置内核": "Fall back to built-in kernel",
+ "删掉激活记录，下次启动引擎用 APK 内置的那份。受管内核出问题时用。": "Clear the activation record so the next engine start uses the one bundled in the APK. Use when a managed kernel misbehaves.",
+ "已回退，下次启动引擎生效": "Fell back; takes effect on the next engine start",
+ "语音交互与 TTS 调音台": "Voice interaction and TTS mixer",
+ "全能语音中枢：支持端侧低功耗语音唤醒、多模型超自然 TTS 音色调优、一句话连贯问答与小鲸鱼悬浮球对讲。": "All-in-one voice hub: on-device low-power wake word, multi-model natural TTS tuning, one-shot Q&A and walkie-talkie via the whale ball.",
+ "⚡ 语音唤醒与识别 (Wake-up & STT)": "⚡ Wake word and speech recognition (Wake-up & STT)",
+ "语音热词唤醒": "Wake word",
+ "🟢 待命监听中 · 喊出唤醒词自动开麦（支持一句话直达）": "🟢 Listening · say the wake word to open the mic (one-shot supported)",
+ "已关闭（更省电，仍可通过长按悬浮球或耳机按键随时唤醒）": "Off (saves power; still wakeable by holding the floating ball or a headset button)",
+ "自定义唤醒词": "Custom wake word",
+ "当前唤醒词：": "Current wake word: ",
+ "（支持同音字与拼音智能容错）": " (homophones and pinyin are tolerated)",
+ "请输入自定义唤醒词（支持多个，逗号隔开）：": "Enter a custom wake word (several allowed, comma separated):",
+ "修改": "Edit",
+ "唤醒交互模式": "Wake interaction mode",
+ "双步交互：喊唤醒词 ➔ 叮~ 冒泡提示 ➔ 等待您说指令": "Two-step: say the wake word ➔ ding ➔ wait for your command",
+ "一句话直达：一口气说「小鲸鱼 帮我查天气」连贯执行（推荐）": "One-shot: say \"Whale, check the weather\" in one breath (recommended)",
+ "一句话直达": "One-shot",
+ "双步等待": "Two-step",
+ "🔊 TTS 语音模型与音色调音台": "🔊 TTS models and voice mixer",
+ "自动朗读": "Auto read aloud",
+ "开启后助手每条回复自动朗读；关掉就完全安静": "Read every assistant reply aloud; turn it off for complete silence",
+ "开启": "On",
+ "TTS 播报引擎": "TTS engine",
+ "官方接口或你自己的模型，两条都真能出声": "The official endpoint or your own model; both really produce audio",
+ "DeepSeek 官方": "DeepSeek official",
+ "官方音色（点击切换）": "Official voices (tap to switch)",
+ "已切换音色：": "Voice switched: ",
+ "播报语速": "Speaking rate",
+ "当前倍速：": "Current rate: ",
+ "x（标准为 1.0x）": "x (1.0x is standard)",
+ "0.8x 舒缓": "0.8x slow",
+ "1.0x 标准": "1.0x standard",
+ "1.25x 快速": "1.25x fast",
+ "1.5x 极速": "1.5x fastest",
+ "⚙️ 云端 TTS / 中转站 API 配置": "⚙️ Cloud TTS / relay API configuration",
+ "支持 OpenAI、CosyVoice、豆包TTS、FishSpeech 等兼容接口": "Works with OpenAI-compatible endpoints such as CosyVoice, Doubao TTS and FishSpeech",
+ "API 地址，如 https://api.openai.com/v1/audio/speech": "API URL, e.g. https://api.openai.com/v1/audio/speech",
+ "API Key (sk-...)，留空默认使用系统环境变量": "API Key (sk-...); leave blank to use the system environment variable",
+ "模型名称，如 tts-1 / cosyvoice-v1 / doubao-tts": "Model name, e.g. tts-1 / cosyvoice-v1 / doubao-tts",
+ "音色名（可选，照你的模型文档填，如 alloy / zh_female_1）": "Voice name (optional; follow your model docs, e.g. alloy / zh_female_1)",
+ "拉到 ": "Fetched ",
+ " 个音色": " voices",
+ "没拉到音色，手填就行": "No voices fetched; just type one",
+ "🔄 拉取音色列表": "🔄 Fetch voice list",
+ "已选音色：": "Selected voice: ",
+ "🎧 实时试听与对讲调音 (Live Audition)": "🎧 Live audition and tuning",
+ "🎵 试听文案与声音测试": "🎵 Sample text and sound test",
+ "输入试听文案...": "Enter sample text...",
+ "正在生成并播报语音…": "Generating and playing audio…",
+ "正在播报…": "Speaking…",
+ "🎵 试听当前音色": "🎵 Audition current voice",
+ "已播放提示音": "Prompt sound played",
+ "🔔 提示音": "🔔 Prompt sound",
+ "已开麦收音": "Mic is open",
+ "🎤 实时开麦": "🎤 Open mic",
+ "💡 提示：按蓝牙耳机播放/暂停键，或长按桌宠小鲸鱼悬浮球，也可一键唤醒语音对讲。": "💡 Tip: press play/pause on a Bluetooth headset, or hold the whale ball, to wake voice chat.",
+ "智能生活助理": "Smart life assistant",
+ "全自动无感感知：短信/通知验证码自动提取写入剪贴板、微信/支付宝/银行动账自动记账、快递取件码聚合与定时任务调度。": "Fully automatic sensing: extract verification codes from SMS and notifications into the clipboard, book WeChat/Alipay/bank transactions, aggregate parcel pickup codes and schedule tasks.",
+ "生活助理守护进程：运行中": "Life assistant daemon: running",
+ "生活助理守护进程：未运行": "Life assistant daemon: not running",
+ "正在实时监听系统通知流，自动提取验证码、记账与包裹": "Listening to the system notification stream for codes, transactions and parcels",
+ "启动后可在后台自动感知通知并写入剪贴板与记账数据库": "Once started it senses notifications in the background and writes them to the clipboard and ledger",
+ "正在重启守护进程…": "Restarting the daemon…",
+ "重启": "Restart",
+ "已停止守护进程": "Daemon stopped",
+ "停止": "Stop",
+ "正在启动守护进程…": "Starting the daemon…",
+ "启动守护": "Start daemon",
+ "🌟 情境模式与每日简报": "🌟 Context modes and daily briefings",
+ "正在生成晨间生活早报…": "Generating the morning briefing…",
+ "早报已生成并推送系统通知": "Morning briefing generated and pushed as a notification",
+ "☀️ 晨间早报": "☀️ Morning briefing",
+ "正在生成晚间收支复盘…": "Generating the evening review…",
+ "复盘已生成并推送系统通知": "Review generated and pushed as a notification",
+ "🌙 晚间复盘": "🌙 Evening review",
+ "早晨汇总包裹与记账预算，夜间复盘今日开销流水与未取提醒": "Summarize parcels and budgets in the morning; review today spending and unclaimed items at night",
+ "📦 待取快递包裹 (": "📦 Parcels to collect (",
+ "件)": ")",
+ "正在扫描历史通知…": "Scanning past notifications…",
+ "扫描通知": "Scan notifications",
+ "🎉 暂无待取包裹，所有快递都已取完！": "🎉 No parcels waiting; everything is collected!",
+ "快递": "Parcel",
+ "快递驿站/柜": "Parcel station / locker",
+ "已标记取件完成": "Marked as collected",
+ "已取": "Collected",
+ "💰 今日记账与消费流水": "💰 Today bookkeeping and spending",
+ "支出: ": "Spent: ",
+ "  收入: ": "  Received: ",
+ "账户余额：": "Account balance: ",
+ "账户": "Account",
+ "本月净收入 ": "Net income this month ",
+ "本月净支出 ": "Net spending this month ",
+ " · 支出 ¥": " · spent ¥",
+ " / 收入 ¥": " / received ¥",
+ "今日暂无新记账记录。收到微信/支付宝/银行支付通知时将自动记账。": "No new entries today. Transactions are booked automatically when WeChat/Alipay/bank payment notifications arrive.",
+ "今日还有 ": "Also today: ",
+ " 笔未显示（进「全部账目」看）": " more entries hidden (open \"All entries\")",
+ "全部账目（共 ": "All entries (",
+ " 笔）›": ") ›",
+ "📱 最近验证码": "📱 Recent codes",
+ "收到自动复制进剪贴板": "Auto-copied to the clipboard when received",
+ "暂无最近验证码记录。": "No recent codes.",
+ "短信验证码": "SMS code",
+ "验证码已复制": "Code copied",
+ "复制": "Copy",
+ "⏰ 定时任务 (": "⏰ Scheduled tasks (",
+ "项)": ")",
+ "生活助理任务读取失败: ": "Failed to read life assistant tasks: ",
+ "暂无等待触发的任务。": "No pending tasks.",
+ "App 闹钟": "App alarm",
+ "生活助理": "Life assistant",
+ "每天": "Every day",
+ "每 ": "Every ",
+ " 分钟": " min",
+ "一次性": "Once",
+ "等待触发": "Pending",
+ " · 下次: ": " · next: ",
+ "正在执行生活助理任务…": "Running life assistant task…",
+ "立即执行": "Run now",
+ "取消请求已提交": "Cancel request submitted",
+ "删除定时任务": "Delete scheduled task",
+ "确定删除 App 闹钟任务「": "Delete the App alarm task \"",
+ "」？会从任务列表里移除。注意：已经注册进系统的闹钟在老版本 App 上撤不掉，可能仍触发最后一次。": "\"? It is removed from the list. Note: an alarm already registered with the system cannot be revoked by older App versions and may still fire once.",
+ "确定永久删除生活助理任务「": "Permanently delete the life assistant task \"",
+ "」？删除后不会再触发，也无法从界面恢复。": "\"? It will never fire again and cannot be restored from the UI.",
+ "已删除任务: ": "Deleted task: ",
+ "最近执行记录 (": "Recent runs (",
+ "暂无 App 闹钟执行记录。": "No App alarm runs yet.",
+ "取消 = 暂停（阻止后续触发，已开始的会继续）；删除 = 从列表永久移除。App 闹钟任务的登记行会被清掉，但老版本 App 里已注册进系统的闹钟撤不掉，可能仍触发最后一次。": "Cancel = pause (blocks future triggers; already-started ones continue); Delete = remove permanently. The App alarm registration row is cleared, but an alarm already registered with the system by older App versions cannot be revoked and may still fire once.",
+ "本地知识库与全域检索": "Local knowledge base and global search",
+ "零 Token 开销端侧语义检索：全域扫描手机 Download / Documents 目录文档，支持随时快速剪藏笔记并实时构建倒排索引。": "Zero-token on-device semantic search: scans documents under Download / Documents, and supports quick clips that build an inverted index in real time.",
+ "🔍 本地全域秒级检索": "🔍 Local instant search",
+ "输入问题、代码关键词或文档标题...": "Enter a question, code keyword or document title...",
+ "检索中…": "Searching…",
+ "搜索": "Search",
+ "未找到相关匹配段落。": "No matching passages found.",
+ "📝 随手剪藏 (Quick Clip)": "📝 Quick clip",
+ "笔记/剪藏标题 (如: 关键配置备份)": "Note / clip title (e.g. key config backup)",
+ "粘贴网页摘录、代码片段或备忘事项...": "Paste a web excerpt, code snippet or memo...",
+ "剪藏成功并已自动建立索引！": "Clipped and indexed automatically!",
+ "剪藏失败: ": "Clip failed: ",
+ "保存并索引": "Save and index",
+ "📚 已建索引库 (": "📚 Indexed libraries (",
+ " 个)": ")",
+ "暂无已构建知识库。": "No knowledge base built yet.",
+ "文件: ": "Files: ",
+ " 个 · 切片: ": " · chunks: ",
+ "局域网协同与隔空投送": "LAN collaboration and AirDrop",
+ "跨设备互联：电脑浏览器直连手机 DSH 控制台，支持跨设备剪贴板双向同步与大文件拖拽隔空投送。": "Cross-device link: open the phone DSH console from a desktop browser, with two-way clipboard sync and drag-and-drop file transfer.",
+ "局域网访问": "LAN access",
+ "已开启 · 引擎绑 ": "On · engine bound to ",
+ " · 同网段浏览器可直连": " · browsers on the same subnet can connect",
+ "已关闭 · 只有手机自己能打开。开启会重启引擎（几秒）": "Off · only the phone itself can connect. Enabling restarts the engine (a few seconds)",
+ "已开启，引擎重启中…": "Enabled; the engine is restarting…",
+ "已关闭局域网访问": "LAN access disabled",
+ "操作失败": "Operation failed",
+ " · 带登录令牌，点开即用": " · carries the login token, open and go",
+ " · 无令牌，需手动带 token": " · no token, add it manually",
+ "令牌走明文 HTTP（同网段可嗅探），只在可信 Wi-Fi 下开启；不用时记得关掉。": "The token travels over plain HTTP (sniffable on the same subnet); enable only on trusted Wi-Fi and turn it off when done.",
+ "🌐 局域网访问地址": "🌐 LAN address",
+ "未连接局域网 Wi-Fi。请连接同一 Wi-Fi 后刷新。": "Not connected to a LAN Wi-Fi. Connect to the same Wi-Fi and refresh.",
+ " · 电脑浏览器直接打开": " · open directly in a desktop browser",
+ "📋 跨设备双向剪贴板": "📋 Two-way clipboard",
+ "输入文本推送至手机剪贴板...": "Type text to push to the phone clipboard...",
+ "当前手机剪贴板: ": "Current phone clipboard: ",
+ "空": "empty",
+ "已同步推送到手机剪贴板": "Pushed to the phone clipboard",
+ "推送到手机": "Push to phone",
+ "📦 隔空投送文件箱 (": "📦 Transfer inbox (",
+ "暂无投送文件。电脑端可通过 /lan-mesh 接口快速投送文件至手机。": "No files transferred. Send files to the phone through the /lan-mesh endpoint.",
+ "日志": "Logs",
+ "「查看」直接看末尾 200 行；「分享」调用系统分享（QQ / 微信 / 邮件…都能选），正文里带完整日志路径与末尾 400 行。日志会随使用不断追加，太长不好读时可「清空日志」。": "\"View\" shows the last 200 lines; \"Share\" opens the system share sheet (QQ / WeChat / mail…) with the full log path and the last 400 lines. The log keeps growing; use \"Clear log\" when it gets too long.",
+ "查看日志": "View log",
+ "分享": "Share",
+ "清空日志": "Clear log",
+ "\\n\\n清空不影响正在运行的引擎，之后的新日志会继续正常写入。": "\\n\\nClearing does not affect the running engine; new log lines keep being written.",
+ "日志已清空": "Log cleared",
+ "运行环境": "Runtime",
+ "重新解压": "Re-extract",
+ "会覆盖内部运行环境与内核树（会话 / 凭证 / 设置都在 dshhome，不受影响）。继续？": "This overwrites the internal runtime and kernel tree (sessions, credentials and settings live in dshhome and are unaffected). Continue?",
+ "正在重新解压…": "Re-extracting…",
+ "解压中…": "Extracting…",
+ "解压文件": "Extract files",
+ "当前会话会被中断一会儿，界面会自己连回来。": "The current session is interrupted briefly; the UI reconnects by itself.",
+ "停止引擎": "Stop engine",
+ "停止后这个设置页也会跟着断开，需要重新启动引擎。": "Stopping also disconnects this settings page; start the engine again.",
+ "正在停止引擎…": "Stopping the engine…",
+ "启动中…": "Starting…",
+ "启动引擎": "Start engine",
+ "通知历史": "Notification history",
+ "查看最近 100 条 AI 通知的完整内容": "View the full content of the last 100 AI notifications",
+ "查看": "View",
+ "救援": "Rescue",
+ "安全模式：已开启": "Safe mode: on",
+ "安全模式": "Safe mode",
+ "退出安全模式": "Exit safe mode",
+ "安全模式启动": "Start in safe mode",
+ "会把旁置的用户层还回去，并重启引擎。": "Restores the sidelined user layer and restarts the engine.",
+ "会旁置 profile 的用户层，用出厂配置启动引擎（会话 / 凭证 / 设置都还在）。": "Sidelined the profile user layer and starts the engine with factory configuration (sessions, credentials and settings remain).",
+ "正在退出安全模式…": "Exiting safe mode…",
+ "正在进入安全模式…": "Entering safe mode…",
+ "导出全部数据": "Export all data",
+ "把 dshhome（会话/凭证/设置）打包至 DSH_Backups": "Package dshhome (sessions/credentials/settings) into DSH_Backups",
+ "导出": "Export",
+ "从备份导入还原": "Restore from backup",
+ "选择之前导出的 zip 压缩包，还原 dshhome": "Pick a previously exported zip to restore dshhome",
+ "选择文件": "Choose file",
+ "从时光机快照还原": "Restore from time machine snapshot",
+ "选择时光机生成的 .dshbackup，还原全站资产（记忆 / 会话 / 配置）": "Pick a .dshbackup from the time machine to restore everything (memory / sessions / config)",
+ "设置": "Settings",
+ "查看当前模型 · 按任务切换 · 调整思考深度": "See the current model · switch per task · adjust reasoning depth",
+ "进入": "Open",
+ "验证码 · 待取快递 · 自动记账 · 定时任务": "Codes · parcels · bookkeeping · scheduled tasks",
+ "守护中": "Running",
+ "未启动": "Not started",
+ "秒级全文搜索 · 随手剪藏 · 0 Token 端侧 RAG": "Instant full-text search · quick clips · zero-token on-device RAG",
+ " 个库": " libraries",
+ "已就绪": "Ready",
+ "跨设备剪贴板双向同步 · 电脑文件秒传投送": "Two-way clipboard sync · instant file transfer from desktop",
+ " 个IP": " IPs",
+ "语音唤醒 · 多模型 TTS 音色 · 实时对讲调音": "Wake word · multi-model TTS voices · live tuning",
+ "已开启": "On",
+ "已配置": "Configured",
+ "存储 · 通知 · 悬浮窗 · 电池 · root · Shizuku · 无障碍": "Storage · notifications · overlay · battery · root · Shizuku · accessibility",
+ "关掉用不到的，省上下文": "Turn off what you do not use to save context",
+ "在手机上自己编译 / 打包 / 签名（可选，约 193MB）": "Compile / package / sign on the phone (optional, about 193MB)",
+ "换运行时内核版本（实验）；内置内核永远兜底": "Switch the runtime kernel (experimental); the built-in kernel always falls back",
+ "时光机全站备份": "Time machine full backup",
+ "一键打包记忆库、历史会话与配置": "Package the memory store, session history and config in one tap",
+ "立即备份": "Back up now",
+ "界面主题": "Theme",
+ "跟随系统": "Follow system",
+ "浅色": "Light",
+ "深色": "Dark",
+ "检查更新": "Check for updates",
+ "当前版本 ": "Current version ",
+ "检查": "Check",
+ "QQ 交流群": "QQ group",
+ "群号 1050918023 · 装不上、想问两句都可以来": "Group 1050918023 · drop by if install fails or you have questions",
+ "正在打开 QQ 群…": "Opening the QQ group…",
+ "群号 1050918023，复制到 QQ 里搜索即可": "Group 1050918023; copy it and search in QQ",
+ "加入": "Join",
+ "开源主页与 Star 支持": "Open-source page and Star support",
+ "欢迎前往 GitHub 给作者点一颗 ⭐ 支持！": "Drop a ⭐ on GitHub to support the author!",
+ "正在打开 GitHub 开源主页…": "Opening the GitHub page…",
+ "去 Star ⭐": "Star it ⭐",
+ "换内核版本 / 覆盖安装后需要重新解压；平时只用到「启动引擎」。": "After switching kernels or reinstalling, re-extract; day to day you only need \"Start engine\".",
+ "需要在更新后的安卓 App 内使用": "Requires the updated Android App",
+ "无效附件大小": "Invalid attachment size",
+ "分享附件总量超过 32MB": "Shared attachments exceed 32MB in total",
+ "附件分块不完整": "Attachment chunks incomplete",
+ "附件长度不匹配": "Attachment length mismatch",
+ "草稿暂时不可编辑，请稍后重试": "The draft cannot be edited right now; try again later",
+ "草稿已改变，请重新选择加入草稿": "The draft changed; choose \"Add to draft\" again",
+ "听写已加入草稿": "Dictation added to the draft",
+ "草稿已改变，转写已保留，可手动加入": "The draft changed; the transcript is kept and can be added manually",
+ "未识别到内容": "Nothing recognized",
+ "听写已取消": "Dictation cancelled",
+ "自动挂载失败：": "Auto-mount failed: ",
+ "，可点「加入草稿」": "; tap \"Add to draft\"",
+ "App 没响应，等两秒再点一次。": "The App did not respond; wait two seconds and tap again.",
+ "root / Shizuku 二选一即可（root 优先）。root 只能由你在 root 管理器（Magisk / KernelSU）里授予本应用；设备没 root 时这一项显示「本机无 root」。": "Either root or Shizuku is enough (root preferred). root can only be granted to this App by you in a root manager (Magisk / KernelSU); on a device without root this item shows \"no root on this device\".",
+ "装上它之后，你可以在这台手机上自己编译、打包、签名、安装这个 App —— 也就是这个项目本来的核心能力。主包不含这部分（约 193MB），所以按需下载。GitHub 与 Gitee 都放了同样的分卷，任选其一。": "Once installed you can compile, package, sign and install this App on this very phone — the core capability of this project. The main package does not include it (about 193MB), so it is downloaded on demand. GitHub and Gitee host the same volumes; pick either.",
+ "⚠️ 解压必须落在内部存储 —— /sdcard 是 FUSE，存不了 rootfs 里的符号链接（918 个）。分卷会留在 /sdcard/DeepSeekHarness/buildenv，重装 App 后不用重新下载，重新解压即可。": "⚠️ Extraction must land on internal storage — /sdcard is FUSE and cannot hold the 918 symlinks in the rootfs. The volumes stay under /sdcard/DeepSeekHarness/buildenv, so after reinstalling the App you do not need to download again, just re-extract.",
+ "内核就是引擎跑的那棵 node 包（bin.js + node_modules）。内核包是 tar.gz + manifest.json，从 /sdcard 装进应用私有目录（内部 ext4），不占主屏可见空间。内置内核永远随 APK 一起：切换失败、内核坏掉、启动超时，都会自动回落，不会有起不来的风险。": "The kernel is the node package the engine runs (bin.js + node_modules). A kernel package is tar.gz + manifest.json, installed from /sdcard into the app private directory (internal ext4) and takes no visible space. The built-in kernel always ships with the APK: a failed switch, a broken kernel or a start timeout all fall back automatically, so the engine cannot be left unable to start."
+};
+    let T = (key, params) => {
+      const template = en[key] === undefined ? key : en[key];
+      if (!params) return template;
+      return template.replace(/\{(\w+)\}/g, (m, name) => (name in params ? String(params[name]) : m));
+    };
+
+    const inject = ['slots', 'sessions', 'locale'];
 
     /**
      * 「文档预览」设置页 —— 按需安装 LibreOffice 引擎。
@@ -2345,7 +2885,7 @@ window.__ModuleLoader__.load({
           fetch('/dsh-office-kit/status', { credentials: 'same-origin', cache: 'no-store' })
             .then((response) => response.json())
             .then((data) => { if (alive) setState(data); })
-            .catch((error) => { if (alive) setNote('读不到安装状态：' + (error && error.message || error)); });
+            .catch((error) => { if (alive) setNote(T("读不到安装状态：") + (error && error.message || error)); });
         };
         load();
         const timer = setInterval(load, 1200);
@@ -2356,7 +2896,7 @@ window.__ModuleLoader__.load({
         fetch('/dsh-office-kit/install', { method: 'POST', credentials: 'same-origin' })
           .then((response) => response.json())
           .then((data) => { setState(data); setReload((n) => n + 1); })
-          .catch((error) => setNote('启动下载失败：' + (error && error.message || error)));
+          .catch((error) => setNote(T("启动下载失败：") + (error && error.message || error)));
         setTimeout(() => setStarting(false), 800);
       };
       const fmt = (bytes) => {
@@ -2370,18 +2910,18 @@ window.__ModuleLoader__.load({
       const busy = phase === 'downloading' || phase === 'extracting';
       const pct = state && state.total > 0 ? Math.min(99, Math.floor(state.received * 100 / state.total)) : 0;
       let line, tone;
-      if (!state) { line = '正在读取…'; tone = 'var(--dsh-text-secondary, #888)'; }
-      else if (state.installed) { line = '已安装 v' + state.version + '（占用 ' + fmt(state.bytesOnDisk) + '）'; tone = '#2e7d32'; }
-      else if (phase === 'downloading') { line = '正在下载 ' + (state.total > 0 ? pct + '%（' + fmt(state.received) + ' / ' + fmt(state.total) + '）' : fmt(state.received)); tone = 'var(--dsh-text-secondary, #888)'; }
-      else if (phase === 'extracting') { line = '正在解压…'; tone = 'var(--dsh-text-secondary, #888)'; }
-      else if (phase === 'error') { line = '安装失败：' + (state.error || '未知错误'); tone = '#c62828'; }
-      else { line = '未安装'; tone = 'var(--dsh-text-secondary, #888)'; }
+      if (!state) { line = T("正在读取…"); tone = 'var(--dsh-text-secondary, #888)'; }
+      else if (state.installed) { line = T("已安装 v") + state.version + T("（占用 ") + fmt(state.bytesOnDisk) + '）'; tone = '#2e7d32'; }
+      else if (phase === 'downloading') { line = T("正在下载 ") + (state.total > 0 ? pct + '%（' + fmt(state.received) + ' / ' + fmt(state.total) + '）' : fmt(state.received)); tone = 'var(--dsh-text-secondary, #888)'; }
+      else if (phase === 'extracting') { line = T("正在解压…"); tone = 'var(--dsh-text-secondary, #888)'; }
+      else if (phase === 'error') { line = T("安装失败：") + (state.error || T("未知错误")); tone = '#c62828'; }
+      else { line = T("未安装"); tone = 'var(--dsh-text-secondary, #888)'; }
       return jsxs('div', { style: { padding: '4px 0', display: 'flex', flexDirection: 'column', gap: '10px' }, children: [
-        jsx('div', { style: { fontSize: '15px', fontWeight: 600 }, children: '文档预览组件' }),
-        jsx('div', { style: { fontSize: '13px', lineHeight: 1.6, opacity: 0.85 }, children: 'docx / xlsx / pptx 的预览需要一个 LibreOffice 引擎（下载约 48MB，装好后占约 150MB）。它不随安装包分发，用到再装；装好立即生效，不用重启。不装只影响这几种文档的预览，其它功能不受影响。' }),
+        jsx('div', { style: { fontSize: '15px', fontWeight: 600 }, children: T("文档预览组件") }),
+        jsx('div', { style: { fontSize: '13px', lineHeight: 1.6, opacity: 0.85 }, children: T("docx / xlsx / pptx 的预览需要一个 LibreOffice 引擎（下载约 48MB，装好后占约 150MB）。它不随安装包分发，用到再装；装好立即生效，不用重启。不装只影响这几种文档的预览，其它功能不受影响。") }),
         jsx('div', { style: { fontSize: '13px', color: tone }, children: line }),
         state && !state.installed && !busy
-          ? jsx(Button, { variant: 'primary', onClick: start, disabled: starting, children: starting ? '正在启动…' : '下载并安装（约 48MB）' })
+          ? jsx(Button, { variant: 'primary', onClick: start, disabled: starting, children: starting ? T("正在启动…") : T("下载并安装（约 48MB）") })
           : null,
         note ? jsx('div', { style: { fontSize: '12px', color: '#c62828' }, children: note }) : null,
       ] });
@@ -2396,16 +2936,16 @@ window.__ModuleLoader__.load({
     const PET_GREET_KEY = 'dsh-whale-pet.greeted.v1';
     const PET_SIZES = { small: 88, medium: 112, large: 140 };
     const PET_LINES = [
-      '我在。',
-      '别戳，痒。',
-      '慢慢来，不着急。',
-      '写完这段就歇会儿。',
-      '今天也一起加油。',
-      '记得喝水。',
-      '这个 bug 会怕你的。',
-      '摸鱼也是正经事。',
-      '嗯……让我想想。',
-      '你忙，我就在旁边。',
+      T("我在。"),
+      T("别戳，痒。"),
+      T("慢慢来，不着急。"),
+      T("写完这段就歇会儿。"),
+      T("今天也一起加油。"),
+      T("记得喝水。"),
+      T("这个 bug 会怕你的。"),
+      T("摸鱼也是正经事。"),
+      T("嗯……让我想想。"),
+      T("你忙，我就在旁边。"),
     ];
     const PET_CSS_ID = 'dsh-android-console/whale-pet-v2.css';
     const PET_CSS = [
@@ -2608,7 +3148,7 @@ const PET_SVG = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 322 335
         if (greeted) return;
         const timer = setTimeout(() => {
           if (!aliveRef.current) return;
-          setBubble({ text: '我是大肥鱼。按住我可以拖到别处。', key: Date.now() });
+          setBubble({ text: T("我是大肥鱼。按住我可以拖到别处。"), key: Date.now() });
           try { window.localStorage.setItem(PET_GREET_KEY, '1'); } catch (e) {}
           clearTimeout(bubbleTimer.current);
           bubbleTimer.current = setTimeout(() => { if (aliveRef.current) setBubble(null); }, 4200);
@@ -2704,7 +3244,7 @@ const PET_SVG = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 322 335
             className: 'dsh-whale-hit',
             role: 'button',
             tabIndex: 0,
-            'aria-label': '大肥鱼桌宠：点一下互动，按住拖动',
+            'aria-label': T("大肥鱼桌宠：点一下互动，按住拖动"),
             onPointerDown: onPointerDown,
             onPointerMove: onPointerMove,
             onPointerUp: (event) => finishDrag(event, true),
@@ -2750,7 +3290,7 @@ const PET_SVG = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 322 335
           if (settled) return;
           settled = true;
           if (ctrl) { try { ctrl.abort(); } catch (e) {} }
-          reject(new Error('请求超时'));
+          reject(new Error(T("请求超时")));
         }, timeoutMs || 6000);
         const finish = (fn, value) => {
           if (settled) return;
@@ -2774,10 +3314,10 @@ const PET_SVG = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 322 335
 
     function petActionError(e) {
       const raw = String(e && e.message ? e.message : e || '');
-      if (/请求超时|timeout|abort/i.test(raw)) return 'App 没响应，等两秒再点一次。';
-      if (/overlay not running/i.test(raw)) return '悬浮窗还没启动，先点「召回桌宠」。';
-      if (/Failed to fetch|NetworkError|Load failed|fetch/i.test(raw)) return '连不上 App 本地桥，刷新页面再试。';
-      return raw || '动作没有成功，再点一次试试。';
+      if (/请求超时|timeout|abort/i.test(raw)) return T("App 没响应，等两秒再点一次。");
+      if (/overlay not running/i.test(raw)) return T("悬浮窗还没启动，先点「召回桌宠」。");
+      if (/Failed to fetch|NetworkError|Load failed|fetch/i.test(raw)) return T("连不上 App 本地桥，刷新页面再试。");
+      return raw || T("动作没有成功，再点一次试试。");
     }
 
     function WhalePetSection() {
@@ -2793,12 +3333,12 @@ const PET_SVG = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 322 335
       const reload = () => {
         overlayCall('action=status')
           .then((j) => {
-            if (!j || j.ok === false) throw new Error((j && j.error) || '状态读取失败');
+            if (!j || j.ok === false) throw new Error((j && j.error) || T("状态读取失败"));
             setSt(j);
             setErr('');
           })
           .catch((e) => {
-            setErr(String(e && e.message ? e.message : '连不上 App 本地桥（127.0.0.1:3081）'));
+            setErr(String(e && e.message ? e.message : T("连不上 App 本地桥（127.0.0.1:3081）")));
           });
       };
       react.useEffect(() => {
@@ -2832,7 +3372,7 @@ const PET_SVG = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 322 335
           : call();
         request
           .then((j) => {
-            if (!j || j.ok === false) throw new Error((j && j.error) || '动作失败');
+            if (!j || j.ok === false) throw new Error((j && j.error) || T("动作失败"));
             const hide = query.indexOf('action=hide') >= 0;
             if (tag === 'refresh') setSt(j);
             setSt((prev) => {
@@ -2842,12 +3382,12 @@ const PET_SVG = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 322 335
               if (tag === 'vscreen') return { ...prev, vscreen: !!j.on };
               return prev;
             });
-            let msg = '已生效。';
-            if (tag === 'show') msg = hide ? '桌宠已收起。' : '桌宠已召回，正在当前界面显示。';
-            else if (tag === 'panel') msg = '桌宠面板已打开。';
-            else if (tag === 'fluid') msg = j.on ? '流体云已开启。' : '流体云已关闭。';
-            else if (tag === 'vscreen') msg = j.on ? '悬浮屏预览已开启。' : '悬浮屏预览已关闭。';
-            else if (tag === 'refresh') msg = '状态已刷新。';
+            let msg = T("已生效。");
+            if (tag === 'show') msg = hide ? T("桌宠已收起。") : T("桌宠已召回，正在当前界面显示。");
+            else if (tag === 'panel') msg = T("桌宠面板已打开。");
+            else if (tag === 'fluid') msg = j.on ? T("流体云已开启。") : T("流体云已关闭。");
+            else if (tag === 'vscreen') msg = j.on ? T("悬浮屏预览已开启。") : T("悬浮屏预览已关闭。");
+            else if (tag === 'refresh') msg = T("状态已刷新。");
             notify(msg, false);
             // 原生服务 start 是异步的：立刻查可能还是 running=false，700ms 后再对一次。
             setTimeout(reload, 700);
@@ -2862,18 +3402,18 @@ const PET_SVG = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 322 335
       const visible = !!(st && st.visible);
       const fluid = !!(st && st.fluid);
       const vscreen = !!(st && st.vscreen);
-      let stateText = '检测中…';
+      let stateText = T("检测中…");
       let stateCls = '';
-      if (err && !st) { stateText = '未连接'; stateCls = ' ctl-pet-bad'; }
+      if (err && !st) { stateText = T("未连接"); stateCls = ' ctl-pet-bad'; }
       else if (st) {
-        if (!running) { stateText = '未运行'; stateCls = ' ctl-pet-bad'; }
-        else if (visible) { stateText = '在线'; stateCls = ' ctl-pet-ok'; }
-        else { stateText = '已隐藏'; }
+        if (!running) { stateText = T("未运行"); stateCls = ' ctl-pet-bad'; }
+        else if (visible) { stateText = T("在线"); stateCls = ' ctl-pet-ok'; }
+        else { stateText = T("已隐藏"); }
       }
-      const note = err ? ('状态读不到：' + err)
+      const note = err ? (T("状态读不到：") + err)
         : (running
-          ? '改完立即生效。点「召回桌宠」会取消贴边半藏，直接把它叫到当前界面；状态每 5 秒自动刷新。'
-          : '悬浮窗现在没开：打开「显示桌宠」或点「召回桌宠」即可。');
+          ? T("改完立即生效。点「召回桌宠」会取消贴边半藏，直接把它叫到当前界面；状态每 5 秒自动刷新。")
+          : T("悬浮窗现在没开：打开「显示桌宠」或点「召回桌宠」即可。"));
       return jsxs('div', { className: 'ctl-root', children: [
         toast ? jsx(Toast, {
           key: toast.id,
@@ -2884,48 +3424,48 @@ const PET_SVG = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 322 335
         }) : null,
         jsxs('div', { className: 'ctl-pet-hero', children: [
           jsx('div', { className: 'ctl-pet-avatar', children: PET_ART_URI
-            ? jsx('img', { src: PET_ART_URI, alt: '大肥鱼' })
+            ? jsx('img', { src: PET_ART_URI, alt: T("大肥鱼") })
             : null }),
           jsxs('div', { className: 'ctl-pet-main', children: [
             jsxs('div', { className: 'ctl-pet-name-row', children: [
-              jsx('span', { className: 'ctl-pet-name', children: '大肥鱼' }),
-              jsx('span', { className: 'ctl-pet-tag', children: '鲸鱼娘' }),
+              jsx('span', { className: 'ctl-pet-name', children: T("大肥鱼") }),
+              jsx('span', { className: 'ctl-pet-tag', children: T("鲸鱼娘") }),
               jsx('span', { className: 'ctl-pet-status' + stateCls, children: stateText }),
             ] }),
-            jsx('div', { className: 'ctl-pet-desc', children: '安卓悬浮窗里那只鲸鱼娘。点一下听她说句话，点台词才打开面板。' }),
+            jsx('div', { className: 'ctl-pet-desc', children: T("安卓悬浮窗里那只鲸鱼娘。点一下听她说句话，点台词才打开面板。") }),
             jsxs('div', { className: 'ctl-pet-tips', children: [
-              jsx('span', { className: 'ctl-pet-tip', children: '轻点 → 台词' }),
-              jsx('span', { className: 'ctl-pet-tip', children: '点台词 → 面板' }),
-              jsx('span', { className: 'ctl-pet-tip', children: '长按 → 说话' }),
+              jsx('span', { className: 'ctl-pet-tip', children: T("轻点 → 台词") }),
+              jsx('span', { className: 'ctl-pet-tip', children: T("点台词 → 面板") }),
+              jsx('span', { className: 'ctl-pet-tip', children: T("长按 → 说话") }),
             ] }),
           ] }),
         ] }),
-        jsx('div', { className: 'ctl-group', children: '桌宠设置' }),
+        jsx('div', { className: 'ctl-group', children: T("桌宠设置") }),
         jsx(Row, {
-          title: '显示桌宠',
-          desc: '在桌面和其他应用上显示整只大肥鱼。按住可拖到别处；关掉即收起悬浮窗。',
+          title: T("显示桌宠"),
+          desc: T("在桌面和其他应用上显示整只大肥鱼。按住可拖到别处；关掉即收起悬浮窗。"),
           right: jsx(Switch, {
             checked: running,
-            label: '显示桌宠',
+            label: T("显示桌宠"),
             onChange: (next) => run('show', next ? 'action=show' : 'action=hide'),
           }),
         }),
         jsx(Row, {
-          title: '流体云',
-          desc: 'AI 回复时把一张卡片飘到桌宠旁边；通知栏按钮也能开关。',
+          title: T("流体云"),
+          desc: T("AI 回复时把一张卡片飘到桌宠旁边；通知栏按钮也能开关。"),
           right: jsx(Switch, {
             checked: fluid,
-            label: '流体云',
+            label: T("流体云"),
             onChange: (next) => run('fluid', 'action=fluid&on=' + (next ? 1 : 0)),
           }),
         }),
         jsx(Row, {
-          title: '悬浮屏预览',
-          desc: '把虚拟屏画面实时缩到桌宠上看，适合盯自动化在做什么。',
+          title: T("悬浮屏预览"),
+          desc: T("把虚拟屏画面实时缩到桌宠上看，适合盯自动化在做什么。"),
           last: true,
           right: jsx(Switch, {
             checked: vscreen,
-            label: '悬浮屏预览',
+            label: T("悬浮屏预览"),
             onChange: (next) => run('vscreen', 'action=vscreen&on=' + (next ? 1 : 0)),
           }),
         }),
@@ -2938,17 +3478,17 @@ const PET_SVG = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 322 335
           jsx(Button, {
             variant: 'outline', size: 'sm', disabled: busy !== '',
             onClick: () => run('show', 'action=show'),
-            children: busy === 'show' ? '召回中…' : '召回桌宠',
+            children: busy === 'show' ? T("召回中…") : T("召回桌宠"),
           }),
           jsx(Button, {
             variant: 'outline', size: 'sm', disabled: busy !== '',
             onClick: () => run('panel', 'action=panel&show=1'),
-            children: busy === 'panel' ? '打开中…' : '打开桌宠面板',
+            children: busy === 'panel' ? T("打开中…") : T("打开桌宠面板"),
           }),
           jsx(Button, {
             variant: 'ghost', size: 'sm', disabled: busy !== '',
             onClick: () => run('refresh', 'action=status'),
-            children: busy === 'refresh' ? '刷新中…' : '刷新状态',
+            children: busy === 'refresh' ? T("刷新中…") : T("刷新状态"),
           }),
         ] }),
         jsx(Note, { children: note }),
@@ -2956,6 +3496,8 @@ const PET_SVG = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 322 335
     }
 
     function apply(ctx) {
+      T = ctx.locale.bind(NS);
+      ctx.effect(() => ctx.locale.register(NS, 'en', en), 'android-console: en');
       ensurePetCss();
       // 2026-10-19 修两个坑（实测导致整块 dock 完全不渲染）：
       // ① 列表槽位注册必须给 id，给 key 会抛 'list slot "..." requires options.id'；
@@ -2982,7 +3524,7 @@ const PET_SVG = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 322 335
         name: 'settings.section',
         id: 'android-console',
         order: 30,
-        label: () => '控制台',
+        label: () => T("控制台"),
         inject: () => ({}),
       }, function ConsoleSectionGuarded(props) {
         // 2026-10-25：服务必须“用时再取”。直接读 ctx.modelDirectories 在服务未注册时会抛异常，
@@ -3060,11 +3602,11 @@ const PET_SVG = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 322 335
             select: function (target) {
               update({ status: 'selecting', pending: target, error: null });
               var sessions = readSvc('sessions');
-              if (!sessions || typeof sessions.selectModel !== 'function') { update({ status: 'error', error: 'sessions.selectModel 不可用' }); return Promise.resolve({ ok: false, error: { code: 'no-sessions', message: 'sessions.selectModel 不可用' } }); }
+              if (!sessions || typeof sessions.selectModel !== 'function') { update({ status: 'error', error: T("sessions.selectModel 不可用") }); return Promise.resolve({ ok: false, error: { code: 'no-sessions', message: T("sessions.selectModel 不可用") } }); }
               var request = Object.assign({ sessionId: sessionId, provider: target.provider, model: target.model }, target.reasoningEffort === undefined ? {} : { reasoningEffort: target.reasoningEffort });
               return Promise.resolve(sessions.selectModel(request)).then(function (result) {
                 if (!result || result.ok) { update({ status: 'ready', pending: null, current: { provider: target.provider, model: target.model, reasoningEffort: target.reasoningEffort } }); return { ok: true, value: undefined }; }
-                update({ status: 'error', pending: null, error: result.error ? (String(result.error.code) + ': ' + String(result.error.message)) : '切换失败' });
+                update({ status: 'error', pending: null, error: result.error ? (String(result.error.code) + ': ' + String(result.error.message)) : T("切换失败") });
                 return result;
               });
             },
@@ -3086,7 +3628,7 @@ const PET_SVG = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 322 335
         name: 'settings.section',
         id: 'android-office-kit',
         order: 25,
-        label: () => '文档预览',
+        label: () => T("文档预览"),
         inject: () => ({}),
       }, function OfficeKitSectionGuarded() {
         return Boundary === null
@@ -3098,14 +3640,14 @@ const PET_SVG = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 322 335
         name: 'shell.overlay',
         id: 'android-share-notice',
         order: 30,
-        label: () => '分享到货提示',
+        label: () => T("分享到货提示"),
       }, ShareNotice));
       // 小鲸鱼桌宠：设置页开关 + 帧级浮层。两个槽都走官方注册，不碰会话与输入框。
       ctx.slots.inject('settings.section', () => ctx.slots.register({
         name: 'settings.section',
         id: 'android-whale-pet-settings',
         order: 35,
-        label: () => '桌宠',
+        label: () => T("桌宠"),
         inject: () => ({}),
       }, function WhalePetSectionGuarded() {
         return PetBoundary === null

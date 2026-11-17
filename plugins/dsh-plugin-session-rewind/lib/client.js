@@ -23,7 +23,26 @@ window.__ModuleLoader__.load({
 		Object.defineProperty(exports, Symbol.toStringTag, { value: 'Module' });
 
 		/** 服务：槽注册表、会话 store、会话→视图绑定、工作区（切会话）。 */
-		const inject = ['slots', 'sessions', 'uiConversation', 'uiWorkspace'];
+		const NS = "dsh-plugin-session-rewind";
+/** 中文原文即 key：zh 不需要词典（缺词回落成 key 本身），只维护 en。 */
+const en = {
+ "取消": "Cancel",
+ "确认回滚": "Confirm rollback",
+ "回滚失败：还没识别出当前会话，刷新页面后再试。": "Rollback failed: the current session is not identified yet; refresh the page and try again.",
+ "回滚失败：拿不到这条消息在日志里的位置（界面可能还没同步完），刷新页面后再试。": "Rollback failed: cannot locate this message in the log (the UI may still be syncing); refresh the page and try again.",
+ "将删除此消息之后的所有消息（含这条），并把会话回滚到此消息之前的状态。": "Everything after this message (including it) will be removed, and the session rolls back to the state before it.",
+ "原会话不会被删，会改名为「…（回滚前）」留作备份。": "The original session is not deleted; it is renamed \"… (before rollback)\" as a backup.",
+ "此操作不可撤销，确定继续吗？": "This cannot be undone. Continue?",
+ "已回滚：这条消息及之后的内容已不在新会话里。\\n新会话：{childId}": "Rolled back: this message and everything after it are gone from the new session.\\nNew session: {childId}",
+ "回滚失败：{error}": "Rollback failed: {error}"
+};
+let T = (key, params) => {
+  const template = en[key] === undefined ? key : en[key];
+  if (!params) return template;
+  return template.replace(/\{(\w+)\}/g, (m, name) => (name in params ? String(params[name]) : m));
+};
+
+const inject = ['slots', 'sessions', 'uiConversation', 'uiWorkspace', 'locale'];
 		/** 长按判定阈值：按住这么久算「长按」。 */
 		const HOLD_MS = 550;
 		/** 手指/指针移动超过这么多像素就不算长按（用户在滚动列表）。 */
@@ -79,11 +98,11 @@ window.__ModuleLoader__.load({
 					padding: '8px 16px', borderRadius: '10px', fontSize: '14px', cursor: 'pointer',
 					background: 'transparent', color: 'var(--dsw-alias-label-secondary, #b6bcc6)',
 					border: '1px solid var(--dsw-alias-border-l4, rgba(255,255,255,.18))',
-				}, '取消');
+				}, T("取消"));
 				const confirm = makeElement('button', {
 					padding: '8px 16px', borderRadius: '10px', fontSize: '14px', cursor: 'pointer',
 					background: 'var(--dsw-alias-button-primary-fill, #4c8dff)', color: '#fff', border: 'none',
-				}, options.confirmText ?? '确认回滚');
+				}, options.confirmText ?? T("确认回滚"));
 
 				const close = (value) => {
 					document.removeEventListener('keydown', onKey, true);
@@ -126,29 +145,29 @@ window.__ModuleLoader__.load({
 		 */
 		async function rollbackBefore(ctx, key) {
 			if (current === null) {
-				toast('回滚失败：还没识别出当前会话，刷新页面后再试。');
+				toast(T("回滚失败：还没识别出当前会话，刷新页面后再试。"));
 				return;
 			}
 			const target = resolveMessage(key);
 			if (target === undefined) {
-				toast('回滚失败：拿不到这条消息在日志里的位置（界面可能还没同步完），刷新页面后再试。');
+				toast(T("回滚失败：拿不到这条消息在日志里的位置（界面可能还没同步完），刷新页面后再试。"));
 				return;
 			}
 			const confirmed = await confirmDialog({
-				title: '确认回滚',
+				title: T("确认回滚"),
 				body: [
-					'将删除此消息之后的所有消息（含这条），并把会话回滚到此消息之前的状态。',
-					'原会话不会被删，会改名为「…（回滚前）」留作备份。',
-					'此操作不可撤销，确定继续吗？',
+					T("将删除此消息之后的所有消息（含这条），并把会话回滚到此消息之前的状态。"),
+					T("原会话不会被删，会改名为「…（回滚前）」留作备份。"),
+					T("此操作不可撤销，确定继续吗？"),
 				].join('\n'),
 			});
 			if (!confirmed) return;
 			try {
 				const childId = await ctx.sessions.fork({ sessionId: current.sessionId, atSeq: target.seq - 1 });
 				ctx.uiWorkspace.openSession(childId);
-				toast(`已回滚：这条消息及之后的内容已不在新会话里。\n新会话：${childId}`);
+				toast(T('已回滚：这条消息及之后的内容已不在新会话里。\\n新会话：{childId}', { childId }));
 			} catch (error) {
-				toast(`回滚失败：${error?.message ?? String(error)}`);
+				toast(T('回滚失败：{error}', { error: error?.message ?? String(error) }));
 			}
 		}
 
@@ -202,6 +221,8 @@ window.__ModuleLoader__.load({
 		 * @param ctx - 客户端根上下文。
 		 */
 		function apply(ctx) {
+  T = ctx.locale.bind(NS);
+  ctx.effect(() => ctx.locale.register(NS, 'en', en), "dsh-plugin-session-rewind: en");
 			// 占位组件：不渲染任何东西，只负责把「当前会话 + chat store」喂进模块级 current。
 			ctx.slots.inject('conversation.chat.turnTail', () => ctx.slots.register({
 				name: 'conversation.chat.turnTail',

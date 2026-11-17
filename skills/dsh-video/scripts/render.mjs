@@ -21,7 +21,7 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 
 const RUN = process.env.DSH_LINUX_RUN
-  || '/data/user/0/com.deepseek.harness/files/work/linux/run.sh';
+  || path.join(process.env.HOME || '/data/user/0/com.deepseek.harness/files', 'work/linux/run.sh');
 const IMG_EXT = new Set(['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.tif', '.tiff', '.avif']);
 
 const OPT = { manifest: null, still: null, dryRun: false };
@@ -41,7 +41,7 @@ function usage() {
 
 最小 manifest：
 {
-  "output": "/sdcard/DeepSeekHarness/videos/demo.mp4",
+  "output": "<输出目录>/videos/demo.mp4",
   "width": 720, "height": 1280, "fps": 30,
   "scenes": [
     { "src": "/sdcard/图片/a.jpg", "duration": 2.4, "motion": "in", "text": "第一句字幕" },

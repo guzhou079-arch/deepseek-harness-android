@@ -15,19 +15,60 @@ const http = require('node:http');
 const { spawn, execSync } = require('node:child_process');
 const { DatabaseSync } = require('node:sqlite');
 
+// 数据根解析（2026-11-17）：老布局放 /sdcard/DeepSeekHarness，开发者本机一直这么用。
+// 新装的应用默认没有「所有文件访问权限」，那里不可写，守护进程会直接起不来。
+// 能写就沿用老布局，写不了退到 App 私有目录。
+const BASE_DIR = (function () {
+  const legacy = '/sdcard/DeepSeekHarness';
+  try {
+    fs.mkdirSync(legacy, { recursive: true });
+    const probe = path.join(legacy, '.wprobe-' + process.pid);
+    fs.writeFileSync(probe, '');
+    fs.unlinkSync(probe);
+    return legacy;
+  } catch {
+    const home = process.env.DSH_HOME || '';
+    const priv = home ? path.resolve(home, '..', '..') : (process.env.HOME || process.cwd());
+    try { fs.mkdirSync(priv, { recursive: true }); } catch { /* 后面写入时会再报 */ }
+    return priv;
+  }
+})();
+const TMP_DIR = (function () {
+  const home = process.env.DSH_HOME || '';
+  const priv = home ? path.resolve(home, '..', '..') : (process.env.HOME || process.cwd());
+  const d = path.join(priv, 'tmp');
+  try { fs.mkdirSync(d, { recursive: true }); } catch { /* 后面写入时会再报 */ }
+  return d;
+})();
+
 // 基础常量配置
-const DB_PATH = '/sdcard/DeepSeekHarness/life.db';
-const PID_FILE = '/data/user/0/com.deepseek.harness/files/tmp/life-daemon.pid';
-const LOG_FILE = '/sdcard/DeepSeekHarness/life-daemon.log';
+const DB_PATH = process.env.DSH_LIFE_DB || path.join(BASE_DIR, 'life.db');
+const PID_FILE = path.join(TMP_DIR, 'life-daemon.pid');
+const LOG_FILE = process.env.DSH_LIFE_LOG || path.join(BASE_DIR, 'life-daemon.log');
+
+/**
+ * 解析随包发布的工具脚本：包内那份优先（随安装包更新，修好的逻辑才跟得上），
+ * 老布局的 /sdcard 运行副本只作兜底。
+ * @param {string} rel 相对 DSH_HOME 的路径，如 'tools/doctor.mjs'
+ */
+function packagedTool(rel) {
+  const home = String(process.env.DSH_HOME || '');
+  const candidates = [
+    home && path.join(home, rel),
+    path.join(BASE_DIR, 'tools', path.basename(rel)),
+  ].filter(Boolean);
+  for (const c of candidates) if (fs.existsSync(c)) return c;
+  return candidates[candidates.length - 1];
+}
 // 本地桥共享密钥：App 启动引擎/守护进程时经 env 注入（APP_LOCAL_TOKEN）。
 // 3081/3181 现在都校验它 —— loopback 对同机任意 App 可见，不校验等于把通知/剪贴板交出去。
 const BRIDGE_TOKEN = String(process.env.APP_LOCAL_TOKEN || '').trim();
 const BRIDGE_3181 = 'http://127.0.0.1:3181';
 const BRIDGE_3081 = 'http://127.0.0.1:3081';
 
-// 确保目录存在
-try { fs.mkdirSync('/sdcard/DeepSeekHarness', { recursive: true }); } catch (_) {}
-try { fs.mkdirSync('/data/user/0/com.deepseek.harness/files/tmp', { recursive: true }); } catch (_) {}
+// 确保目录存在（解析 BASE_DIR/TMP_DIR 时已试过一次，这里兜底）
+try { fs.mkdirSync(BASE_DIR, { recursive: true }); } catch (_) {}
+try { fs.mkdirSync(TMP_DIR, { recursive: true }); } catch (_) {}
 
 // ==================== 1. 数据库管理 ====================
 
@@ -934,7 +975,8 @@ class CronScheduler {
     } else if (action === 'daily_reap' || action === 'memory_reap') {
       // 整理记忆库
       try {
-        execSync('node /sdcard/DeepSeekHarness/tools/mem.js reap --apply', { stdio: 'ignore', shell: '/system/bin/sh' });
+        const memScript = packagedTool('profiles/web/node_modules/dsh-memory-ui/tools/mem.js');
+        execSync(`node ${memScript} reap --apply`, { stdio: 'ignore', shell: '/system/bin/sh' });
         logMessage('[Cron] 记忆库每日清理完成 (mem.js reap)');
       } catch (_) {}
     } else if (action === 'weekly_backup' || action === 'backup') {
@@ -944,10 +986,10 @@ class CronScheduler {
         // 被这里当成"备份完成"（2026-10-21 修：静默假成功）
         // 优先用包里那份技能脚本：它随安装包更新，修好的逻辑才跟得上；
         // sdcard 那份是历史遗留的运行树副本，安装包不会覆盖它，只作兜底。
-        const packagedBackup = path.join(String(process.env.DSH_HOME || ''), 'skills/dsh-backup/scripts/backup.mjs');
-        const backupScript = (process.env.DSH_HOME && fs.existsSync(packagedBackup))
+        const packagedBackup = packagedTool('skills/dsh-backup/scripts/backup.mjs');
+        const backupScript = fs.existsSync(packagedBackup)
           ? packagedBackup
-          : '/sdcard/DeepSeekHarness/tools/backup.mjs';
+          : path.join(BASE_DIR, 'tools/backup.mjs');
         const out = execSync(`node ${backupScript} create --name WeeklyAutoBackup`,
           { encoding: 'utf8', shell: '/system/bin/sh', timeout: 10 * 60 * 1000 });
         const sizeLine = (out.match(/快照大小:.*/) || [''])[0].trim();
@@ -964,7 +1006,8 @@ class CronScheduler {
         let out = '';
         let hasFail = false;
         try {
-          out = execSync('node /sdcard/DeepSeekHarness/tools/doctor.mjs --quiet',
+          const doctorScript = packagedTool('tools/doctor.mjs');
+          out = execSync(`node ${doctorScript} --quiet`,
             { encoding: 'utf8', shell: '/system/bin/sh', timeout: 120000 });
         } catch (e) {
           // doctor 有 fail 项时退出码为 1，此时输出仍在 stdout 上，别丢掉
@@ -2135,7 +2178,8 @@ function balanceChainSegments(db, days = 30) {
 }
 
 /** App 侧闹钟任务注册表（纯文本，一行一条：id|triggerAt|repeat|intervalMin|text）。 */
-const APP_SCHED_TASKS = process.env.DSH_SCHED_FILE || '/data/user/0/com.deepseek.harness/files/scheduled-tasks.json';
+const APP_SCHED_TASKS = process.env.DSH_SCHED_FILE
+  || path.join(process.env.HOME || '/data/user/0/com.deepseek.harness/files', 'scheduled-tasks.json');
 
 /**
  * 直接从 App 的定时任务注册表里删掉一个任务：
@@ -2202,7 +2246,7 @@ function isBridgeUnsupported(msg) {
 const WATCHDOG_ID = 'daemon_watchdog';
 const WATCHDOG_INTERVAL_SEC = 3600;
 const WATCHDOG_TEXT = 'DSH 生活助理守护自检（只跑本地脚本，不调用 AI）';
-const WATCHDOG_FLAG = '/sdcard/DeepSeekHarness/state/life-watchdog-arm';
+const WATCHDOG_FLAG = process.env.DSH_WATCHDOG_FLAG || path.join(BASE_DIR, 'state/life-watchdog-arm');
 
 function watchdogArmed() {
   try { return fs.existsSync(WATCHDOG_FLAG); } catch (_) { return false; }

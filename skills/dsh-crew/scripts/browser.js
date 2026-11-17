@@ -22,7 +22,7 @@
 'use strict';
 
 const { spawnSync } = require('child_process');
-const APX = process.env.APX_BIN || '/data/user/0/com.deepseek.harness/files/bin/apx';
+const APX = process.env.APX_BIN || (process.env.HOME || '/data/user/0/com.deepseek.harness/files') + '/bin/apx';
 const BROWSER = process.env.BROWSER_PKG || 'mark.via';
 
 function apx(args, opts) {

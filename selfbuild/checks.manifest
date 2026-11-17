@@ -7,7 +7,13 @@
 # App /overlay 实际返回的 visible/appForeground/fluid/vscreen/debug 五个字段 ——
 # 此前 additionalProperties:false 导致每次调用都被输出校验打回（工具必报错）。
 # 2026-10-26：三个特权插件统一使用 App 探测并传入的 ROOT_SU；仅更新这三条的预期 MD5。
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-android/lib/index.js|2837a44fce0da5f2f341b11d40670e00|appShellCmd|all||2
+# 2026-11-17：三条内核工具去掉写死的设备路径，改成「能写就沿用老布局、写不了退到 App 私有目录」。
+#   原因：发行包给的是新用户，他们没有「所有文件访问权限」，/sdcard 直接 EACCES ——
+#   截图工具会存不进去，虚拟屏拿不到桥密钥。只在三条里加路径解析，工具语义没动。
+#   dsh-tool-android：截图默认目录 → SHOT_DIR（可写探测）
+#   dsh-tool-vscreen：桥密钥脚本 → 包内 dshhome/tools/bridge-token.sh 优先
+#   dsh-tool-accessibility：错误提示里的示例路径 → <截图目录>
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-android/lib/index.js|7d83e251cec0168c9793b71ca28edd64|appShellCmd|all||2
 # ⚠️ 2026-10-15 更新 md5：该插件在 overlay 里故意加了「定时任务查看/取消走 3081 桥」
 #    与 schedule 回传 taskId/triggerAt（+80 行，df53d58a→0ec8ea14）。不是随机漂移：
 #    同一批未发布功能，Java 侧有 ScheduleBridge/ScheduleAlarms/ScheduledTaskStore。
@@ -15,12 +21,12 @@ dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-and
 #    而副本还是旧版，会把这次漂移洗白。
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-shizuku/lib/index.js|23f5332c5cc92f5bedaf0df8ba79ca20|appShellCmd|all||3
 # ② 无障碍：三个 render 不能吞真实结果（v1.14）+ 通知读取 3 工具（v1.23）
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-accessibility/lib/index.js|a7ae1f251cb055d8dcda4a3de4688a0f|renderA11yStatus|all||2
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-accessibility/lib/index.js|a7ae1f251cb055d8dcda4a3de4688a0f|android_notifications_wait|all||1
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-accessibility/lib/index.js|9a3e1b1deb75f2cc33e977d5c83ef2e5|renderA11yStatus|all||2
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-accessibility/lib/index.js|9a3e1b1deb75f2cc33e977d5c83ef2e5|android_notifications_wait|all||1
 # ③ NFC 读卡（v1.16）
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-nfc/lib/index.js|83c552775dab64b32a697a08a58b82a0|nfcPost|all||3
 # ④ 虚拟屏（移植自 Operit）
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-vscreen/lib/index.js|3ab7b0534269f458cf59e0b2c749c27d|android_vscreen_create|all||5
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-vscreen/lib/index.js|410e80bf1bd393ec44e45da571408c60|android_vscreen_create|all||5
 # ⑤ 交付文件「打开」的引擎侧 android 分支（v1.15）
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-native-command/lib/index.js|6b2e9e9eeb7c9e7bdb53b830155705dc|androidBridgeOpen|all||3
 # ⑤b app-boot 的 warn/error 落地日志（DSH_ANDROID_PLUGIN_LOG）—— 2026-11-06 补进清单
@@ -104,8 +110,8 @@ dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-fs-
 #    且"到货卡片"只挂在会话页 → 用户分享进来的文件收下了却没人看见。
 #    这两条把「带 shell.overlay 到货横幅的那一份」钉死，两份副本都必须一致）
 # 2026-11-04：设置页「控制台」加 QQ 群入口（群号 1050918023），md5 随改动更新。
-dshhome/profiles/web/node_modules/dsh-android-console/lib/client.js|47f9e60f1237e740180467a1e799bc02|android-share-notice|all||1
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-android-console/lib/client.js|47f9e60f1237e740180467a1e799bc02|android-share-notice|all||1
+dshhome/profiles/web/node_modules/dsh-android-console/lib/client.js|f71ba51771866e44abec4df08b838197|android-share-notice|all||1
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-android-console/lib/client.js|f71ba51771866e44abec4df08b838197|android-share-notice|all||1
 # ⚠️ 2026-10-15 之前这条清单**没覆盖**这两个文件，于是"源码改了、包里带的还是旧的"
 #    能一路通过 verify。装 1.39 之前，patch-check 对这两条会报漂移（装机副本还是旧的）——那是**正确**的。
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-plugin-auto-summary-policy/lib/index.js|d0beb2db51a199d1d7b4a45b5cc74936|0.1.2-effective-policy|all||1
@@ -115,7 +121,7 @@ dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-plugin-auto-summary-p
 #     两侧都由 build-overlay 同一份源复制而来；清单钉住 profile 侧，防止以后只更新一边。
 dshhome/profiles/web/node_modules/dsh-plugin-auto-summary-policy/lib/index.js|d0beb2db51a199d1d7b4a45b5cc74936|0.1.2-effective-policy|all||1
 dshhome/profiles/web/node_modules/dsh-plugin-session-rewind/lib/index.js|d70735de575f2015d7a6b047747b9dbe|rewindSession|all||2
-dshhome/profiles/web/node_modules/dsh-plugin-turn-notify/lib/index-v3.js|22515a72db8c552d706c343b8be65c0f|turn-notify|all||7
+dshhome/profiles/web/node_modules/dsh-plugin-turn-notify/lib/index-v3.js|e605063b66ec1fca45b43e333136c860|turn-notify|all||7
 # ③ App 每次冷启动都会用包里的 dshhome/cordis.patch.yml 覆盖用户家目录（最后生效的一层）——
 #    同 id 条目会替换前一层并**静默丢掉它的 config**，1.38 的"新建会话失败"就是这么来的
 # 2026-10-24 更新 md5：新增 dsh-smart-search，并把 web.searchProvider 设为 auto-search。
@@ -130,10 +136,10 @@ dshhome/cordis.patch.yml|350949d4dbe01e399a1f0f99a9528bb3|dsh-doc-media|all||1
 # ERR_PACKAGE_PATH_NOT_EXPORTED（17:11 那版就漏了这两个文件）。
 dshhome/profiles/web/node_modules/dsh-doc-media/package.json|14da7cd85a49a158016c945f2a168748|dsh-doc-media|all||1
 dshhome/profiles/web/node_modules/dsh-doc-media/lib/index.js|7dbb4a8f650d34075f653ff92d706dcf|dsh-doc-media|all||2
-dshhome/profiles/web/node_modules/dsh-doc-media/lib/client.js|4ea81d80c519c8c1939d8f028272f2f5|<video|all||1
+dshhome/profiles/web/node_modules/dsh-doc-media/lib/client.js|0920c4dccaea83618c33407b8e2759b0|<video|all||1
 dshhome/profiles/web/node_modules/dsh-doc-actions/package.json|89feeb75fd4b64772ff5fd04904da3c2|dsh-doc-actions|all||1
 dshhome/profiles/web/node_modules/dsh-doc-actions/lib/index.js|f8a9ae506cc5c1318f3098ce42d3ad0c|dsh-doc-actions|all||2
-dshhome/profiles/web/node_modules/dsh-doc-actions/lib/client.js|f2824720b87c167d5ce66e22bf9184fa|127.0.0.1:3081/open|all||1
+dshhome/profiles/web/node_modules/dsh-doc-actions/lib/client.js|c56f5d7088b82639862ea56b20e251fa|127.0.0.1:3081/open|all||1
 
 # 2026-10-18 v1.39.5：文档预览引擎改为按需下载（不随包），插件提供
 # /dsh-office-kit/status 与 /install 两条路由；装了引擎才解析得到。
@@ -145,7 +151,7 @@ dshhome/profiles/web/node_modules/@deepseek-ai/dsh-session-admin/lib/index.js|74
 dshhome/profiles/web/node_modules/dsh-session-delete/package.json|3bdc3facb75ffa77bebae7e136e63431|dsh-session-delete|all||1
 dshhome/profiles/web/node_modules/dsh-session-delete/cordis.patch.yml|ab91020b5d7bc179e36fc143d93361a4|dsh-session-delete|all||3
 dshhome/profiles/web/node_modules/dsh-session-delete/lib/index.js|348f3274289ac550b7ab7a6226273a5b|dsh-session-delete|all||2
-dshhome/profiles/web/node_modules/dsh-session-delete/lib/client.js|2025320c13b37025ed13a7fe7e53d47d|data-dsd-confirm|all||1
+dshhome/profiles/web/node_modules/dsh-session-delete/lib/client.js|a9b7befcd5ff242fb513d8ae580eaed9|data-dsd-confirm|all||1
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-experimental-agent-team/lib/index.js|3b45c39de893c8d7d01684ea01fb033a|agentOptions|all||4
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-experimental-tool-agent-team/lib/index.js|f31f3b71a168defb527f2e652626353f|top-level array of roles|all||1
 

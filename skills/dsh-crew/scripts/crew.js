@@ -16,7 +16,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const DSH_HOME = process.env.DSH_HOME || '/data/user/0/com.deepseek.harness/files/payload/dshhome';
+const DSH_HOME = process.env.DSH_HOME || path.join(process.env.HOME || '.', 'payload', 'dshhome');
 const ROOT = process.env.DSH_CREW_DIR || path.join(DSH_HOME, 'crew');
 const NAME_RE = /^[a-z][a-z0-9_-]{0,31}$/;
 const BOARD_FILE = path.join(ROOT, 'board.json');

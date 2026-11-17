@@ -12,7 +12,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const RUN = process.env.DSH_LINUX_RUN
-  || '/data/user/0/com.deepseek.harness/files/work/linux/run.sh';
+  || path.join(process.env.HOME || '/data/user/0/com.deepseek.harness/files', 'work/linux/run.sh');
 const IMG = new Set(['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.tif', '.tiff', '.avif']);
 const VID = new Set(['.mp4', '.mov', '.mkv', '.webm', '.m4v', '.3gp', '.avi']);
 const AUD = new Set(['.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg', '.opus']);
@@ -86,7 +86,8 @@ for (const f of files) {
 }
 
 const draft = {
-  output: '/sdcard/DeepSeekHarness/videos/' + path.basename(path.resolve(o.dir)) + '.mp4',
+  output: path.join(process.env.DSH_OUT_DIR || path.resolve(o.dir), 'videos',
+    path.basename(path.resolve(o.dir)) + '.mp4'),
   width: o.width,
   height: o.height,
   fps: o.fps,

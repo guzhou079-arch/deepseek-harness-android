@@ -13,8 +13,24 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const DSH_HOME = process.env.DSH_HOME || '/data/user/0/com.deepseek.harness/files/payload/dshhome';
-const MEM_DIR = process.env.DSH_MEM_DIR || '/sdcard/DeepSeekHarness/memory';
+const DSH_HOME = process.env.DSH_HOME || path.join(process.env.HOME || '.', 'payload', 'dshhome');
+// 主记忆目录：老布局在 /sdcard/DeepSeekHarness/memory，新装应用没「所有文件访问权限」
+// 时不可写，退到 App 私有目录。
+const MEM_DIR = (function () {
+  for (const d of [process.env.DSH_MEM_DIR, process.env.DSH_MEMORY_DIR, '/sdcard/DeepSeekHarness/memory']) {
+    if (!d) continue;
+    try {
+      require('node:fs').mkdirSync(d, { recursive: true });
+      const probe = path.join(d, '.wprobe-' + process.pid);
+      require('node:fs').writeFileSync(probe, '');
+      require('node:fs').unlinkSync(probe);
+      return d;
+    } catch (_) { /* 试下一个 */ }
+  }
+  const d = path.join(process.env.HOME || '.', 'memory');
+  try { require('node:fs').mkdirSync(d, { recursive: true }); } catch (_) {}
+  return d;
+})();
 const CREW_ROOT = process.env.DSH_CREW_DIR || path.join(DSH_HOME, 'crew');
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 

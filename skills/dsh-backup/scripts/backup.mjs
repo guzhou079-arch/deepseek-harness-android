@@ -17,10 +17,39 @@ import zlib from 'node:zlib';
 import crypto from 'node:crypto';
 import { execSync } from 'node:child_process';
 
-const DSH_HOME = process.env.DSH_HOME || '/data/user/0/com.deepseek.harness/files/payload/dshhome';
-const MEM_DIR = process.env.DSH_MEM_DIR || '/sdcard/DeepSeekHarness/memory';
-const TOOLS_DIR = process.env.DSH_TOOLS_DIR || '/sdcard/DeepSeekHarness/tools';
-const BACKUP_DIR = process.env.DSH_BACKUP_DIR || '/sdcard/Download/DSH_Backups';
+// 路径解析（2026-11-17）：老布局把库/工具放 /sdcard/DeepSeekHarness、备份落 /sdcard/Download。
+// 新装的应用默认没有「所有文件访问权限」，这些路径都不可写，备份会直接不可用。
+// 能写就沿用老布局，写不了退到 App 私有目录。
+function writable(dir) {
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const p = path.join(dir, '.wprobe-' + process.pid);
+    fs.writeFileSync(p, '');
+    fs.unlinkSync(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function privRoot() {
+  const home = process.env.DSH_HOME || '';
+  return home ? path.resolve(home, '..', '..') : process.cwd();
+}
+function pick(envKeys, legacy, fallback) {
+  for (const k of envKeys) {
+    const v = process.env[k];
+    if (v && writable(v)) return v;
+  }
+  if (legacy && writable(legacy)) return legacy;
+  const d = path.join(privRoot(), fallback);
+  try { fs.mkdirSync(d, { recursive: true }); } catch { /* 调用方会报错 */ }
+  return d;
+}
+
+const DSH_HOME = process.env.DSH_HOME || path.join(privRoot(), 'payload', 'dshhome');
+const MEM_DIR = pick(['DSH_MEM_DIR', 'DSH_MEMORY_DIR'], '/sdcard/DeepSeekHarness/memory', 'memory');
+const TOOLS_DIR = pick(['DSH_TOOLS_DIR'], '/sdcard/DeepSeekHarness/tools', 'tools');
+const BACKUP_DIR = pick(['DSH_BACKUP_DIR'], '/sdcard/Download/DSH_Backups', 'backups');
 
 // 确保备份目录存在
 if (!fs.existsSync(BACKUP_DIR)) {

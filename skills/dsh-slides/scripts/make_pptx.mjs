@@ -1,3 +1,4 @@
+import path from 'node:path';
 import pptxgen from 'pptxgenjs';
 
 async function main() {
@@ -111,7 +112,7 @@ async function main() {
     });
   });
 
-  await pptx.writeFile({ fileName: '/sdcard/DeepSeekHarness/demo.pptx' });
+  await pptx.writeFile({ fileName: path.join(process.env.DSH_OUT_DIR || process.cwd(), 'demo.pptx') });
   console.log('✅ Polished PPTX generated!');
 }
 

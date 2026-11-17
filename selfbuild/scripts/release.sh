@@ -8,7 +8,9 @@ F=/data/user/0/com.deepseek.harness/files
 NODE="$F/.bin/node"
 export LD_LIBRARY_PATH="$F/payload/runtime/lib:${LD_LIBRARY_PATH:-}"
 export DSH_PROJECT="$R"
-BASE="$SB/work/base-current-175.apk"
+# 发行底包只认 lib/base-apk.js 的 PINNED_DIST 一处声明（路径 + sha256 一起钉）。
+# 以前这里另写了一份 base-current-175.apk，换底包时两边不同步，构建直接死在「底包不存在」。
+BASE="$("$NODE" "$SB/lib/base-apk.js" --dist --path)"
 DEX="$SB/work/appbuild/out/classes.dex"
 COMPILE="$SB/work/appbuild/out/compile-receipt.json"
 ARTIFACT=""

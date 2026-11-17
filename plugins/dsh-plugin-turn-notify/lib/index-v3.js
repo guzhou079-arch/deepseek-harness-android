@@ -34,13 +34,35 @@
  *
  * @module dsh-plugin-turn-notify
  */
+const LANG = String(process.env.DSH_LANG || process.env.LANG || 'zh').toLowerCase().startsWith('zh') ? 'zh' : 'en';
+const EN = {"（用时 ": " (took ", " 分钟）": " min)", "✅ DSH 任务完成": "✅ DSH task finished", "这一轮没有文字输出。": "This turn produced no text."};
+const t = (k) => (LANG === 'en' && EN[k] !== undefined ? EN[k] : k);
+
 import http from 'node:http';
 import fs from 'node:fs';
+import path from 'node:path';
 
 export const name = 'turn-notify';
 
-const CFG_PATH = process.env.DSH_TURN_NOTIFY_CFG || '/sdcard/DeepSeekHarness/turn-notify.json';
-const LOG_PATH = process.env.DSH_TURN_NOTIFY_LOG || '/sdcard/DeepSeekHarness/turn-notify.log';
+// 配置和日志放数据根：老布局在 /sdcard/DeepSeekHarness，新装应用没「所有文件访问权限」
+// 时不可写，退到 App 私有目录，别让通知插件直接崩在启动期。
+const BASE_DIR = (function () {
+  const legacy = '/sdcard/DeepSeekHarness';
+  try {
+    fs.mkdirSync(legacy, { recursive: true });
+    const probe = path.join(legacy, '.wprobe-' + process.pid);
+    fs.writeFileSync(probe, '');
+    fs.unlinkSync(probe);
+    return legacy;
+  } catch {
+    const home = process.env.DSH_HOME || '';
+    const priv = home ? path.resolve(home, '..', '..') : (process.env.HOME || process.cwd());
+    try { fs.mkdirSync(priv, { recursive: true }); } catch { /* 写入时会再报 */ }
+    return priv;
+  }
+})();
+const CFG_PATH = process.env.DSH_TURN_NOTIFY_CFG || path.join(BASE_DIR, 'turn-notify.json');
+const LOG_PATH = process.env.DSH_TURN_NOTIFY_LOG || path.join(BASE_DIR, 'turn-notify.log');
 const SELF = 'com.deepseek.harness';
 
 const DEFAULTS = {
@@ -83,15 +105,23 @@ function httpJson({ host, port, path, method = 'GET', body, timeoutMs = 1500 }) 
     };
     try {
       const payload = body === undefined ? null : JSON.stringify(body);
+      // 本机桥（3081 notify / 3181 a11y）强制 X-DSH-Token，缺了就是静默 401，
+      // 日志里只剩 ok=false（2026-11-05 装上新 dex 后整晚都在响这个）。
+      // token 由 App 启动引擎时注入进程环境 APP_LOCAL_TOKEN；不读环境就拿不到。
+      const headers = {};
+      const tk = String(process.env.APP_LOCAL_TOKEN || '').trim();
+      if (tk !== '') headers['X-DSH-Token'] = tk;
+      if (payload !== null) {
+        headers['Content-Type'] = 'application/json';
+        headers['Content-Length'] = Buffer.byteLength(payload);
+      }
       const req = http.request(
         {
           host,
           port,
           path,
           method,
-          headers: payload
-            ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }
-            : {},
+          headers,
         },
         (res) => {
           let data = '';
@@ -270,7 +300,7 @@ export function apply(ctx) {
 
         const title = sessionTitleOf(agent);
         const body = condense(reply, cfg.excerptChars);
-        const suffix = seconds !== null && seconds >= 60 ? `（用时 ${Math.round(seconds / 60)} 分钟）` : '';
+        const suffix = seconds !== null && seconds >= 60 ? `${t('（用时 ')}${Math.round(seconds / 60)}${t(' 分钟）')}` : '';
 
         inFlight = true;
         lastNotifiedAt = now;
@@ -295,8 +325,8 @@ export function apply(ctx) {
               path: '/notify',
               method: 'POST',
               body: {
-                title: title ? `✅ ${title}` : '✅ DSH 任务完成',
-                text: `${body === '' ? '这一轮没有文字输出。' : body}${suffix}`,
+                title: title ? `✅ ${title}` : t('✅ DSH 任务完成'),
+                text: `${body === '' ? t('这一轮没有文字输出。') : body}${suffix}`,
               // 点击只把 App 拉到前台看会话，别再弹「通知卡片」。
               // 旧版 App 会忽略这个未知字段（仍弹卡片），所以是向前兼容的。
               open: 'app',

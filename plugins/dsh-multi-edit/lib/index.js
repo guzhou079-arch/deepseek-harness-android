@@ -15,7 +15,7 @@ import { createHash, randomBytes } from 'node:crypto';
 export const name = 'multi-edit';
 export const inject = ['tools'];
 
-const HOME = process.env.DSH_HOME || '/data/user/0/com.deepseek.harness/files/payload/dshhome';
+const HOME = process.env.DSH_HOME || path.join(process.env.HOME || '.', 'payload', 'dshhome');
 const STORE = process.env.DSH_MULTI_EDIT_HOME || path.join(path.dirname(path.dirname(HOME)), 'multi-edit');
 const TXN_DIR = path.join(STORE, 'txn');
 const MAX_FILES = 400;
