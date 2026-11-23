@@ -1,0 +1,40 @@
+{
+  "_comment": [
+    "随包的 dshhome/tools/ 白名单 —— 唯一真相源。",
+    "",
+    "为什么单独抽成这个文件：同一份名单原来在三个地方各抄一遍",
+    "（strip-dist-payload.js 的 ALLOW、assert-dist-privacy.js 的 TOOLS_ALLOW、",
+    "scan-dist-privacy.py 的 tools_allow）。三份手抄的名单一定会漂：谁改了其中一份，",
+    "另外两份就是错的，而错的方向恰恰是最危险的那个 —— 打包时删掉技能要调的工具，",
+    "装到新机器上 SKILL.md 里每一行 $DSH_HOME/tools/xxx 都指向空路径，",
+    "而三道闸各自拿自己的名单比对，三道全绿。这个坑已经踩过不止一次。",
+    "",
+    "加一个文件进这里的判据只有一条：有没有随包的东西真的在调它。",
+    "  skills/dsh-tier/SKILL.md        → tools/tier.mjs（→ rpc-call.mjs → lib/paths.cjs）",
+    "  skills/dsh-flashgou/SKILL.md    → tools/vs.sh（→ psh.sh / curl.sh / pngscale.js）",
+    "  skills/dsh-data-craft/SKILL.md  → tools/work-trace.mjs（→ lib/paths.cjs）",
+    "  skills/dsh-crew/SKILL.md        → tools/crew.js / weekly.js / browser.js / crew-selftest.sh",
+    "答不上来「是哪个技能的哪一行在调它」就别加 —— 目录级放行会让以后丢进来的私货一起进包。",
+    "反向断言（assert-tools-doors.js）会核对 tools-doors.json 的 ship 门必须是这份名单的子集。"
+  ],
+  "tools": [
+    "dshhome/tools/bridge-token.sh",
+    "dshhome/tools/browser.js",
+    "dshhome/tools/crew-selftest.sh",
+    "dshhome/tools/crew.js",
+    "dshhome/tools/curl.sh",
+    "dshhome/tools/doctor.mjs",
+    "dshhome/tools/lan-mesh.js",
+    "dshhome/tools/lib/paths.cjs",
+    "dshhome/tools/office.js",
+    "dshhome/tools/pngscale.js",
+    "dshhome/tools/psh.sh",
+    "dshhome/tools/rag.mjs",
+    "dshhome/tools/rpc-call.mjs",
+    "dshhome/tools/tier.mjs",
+    "dshhome/tools/voice.js",
+    "dshhome/tools/vs.sh",
+    "dshhome/tools/weekly.js",
+    "dshhome/tools/work-trace.mjs"
+  ]
+}
