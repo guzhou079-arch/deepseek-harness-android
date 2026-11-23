@@ -11,9 +11,9 @@ whenToUse: 每一轮用户消息进来时（判档后在动手前调用一次）
 引擎 RPC **`session/selectModel`** 可以**当场**改会话的推理档，**不用重启引擎、不用重装**：
 
 ```
-node /sdcard/DeepSeekHarness/tools/tier.mjs low|high|max
-node /sdcard/DeepSeekHarness/tools/tier.mjs --auto "<用户这句话>"   # 启发式判档
-node /sdcard/DeepSeekHarness/tools/tier.mjs --show                  # 当前档
+node $DSH_HOME/tools/tier.mjs low|high|max
+node $DSH_HOME/tools/tier.mjs --auto "<用户这句话>"   # 启发式判档
+node $DSH_HOME/tools/tier.mjs --show                  # 当前档
 ```
 
 - 底层：`node tools/rpc-call.mjs session/selectModel '{"sessionId":…,"provider":"deepseek-official","model":"deepseek-flash","reasoningEffort":"low"}'`

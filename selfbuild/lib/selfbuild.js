@@ -10,6 +10,7 @@
  * 子命令：
  *   payload-extract <apk> <out.zip>
  *   payload-patch   <in.zip> <out.zip> <overlayDir>       # overlay 目录按 payload 相对路径覆盖
+ *   forced-list-filter <in.txt> <out.txt> --payload <zip> --overlay <dir>  # 强制清单收敛到包里真有的条目
  *   apk-pack        <base.apk> <payload.zip> <out.apk> [--dex <classes.dex>] [--asset <本地文件>:<APK内条目>]
  *   apk-marks       <in.apk> <out.apk> [--kernel V] [--revision T]   # 写 dshroot 标记（原样搬运，不动对齐）
  *   check           <dir|zip> <manifest>                  # path|md5|keyword 行式校验
@@ -21,6 +22,7 @@ const zlib = require('zlib');
 const { isSkipped } = require('./overlay-skip.js');
 const crypto = require('crypto');
 const { readZip, writeZip } = require('./ziptool.js');
+const { slimDrop, slimEnabled } = require('./slim-payload.js');
 
 const ASSET = 'assets/payload.zip';
 const KERNEL_PKG = 'dshroot/lib/node_modules/@deepseek-ai/dsh/package.json';
@@ -34,6 +36,7 @@ const stamp = (d) => `${d.getFullYear()}${pad2(d.getMonth() + 1)}${pad2(d.getDat
   + `${pad2(d.getHours())}${pad2(d.getMinutes())}${pad2(d.getSeconds())}`;
 const die = (m) => { console.error('✗ ' + m); process.exit(1); };
 const log = (m) => console.log(m);
+
 
 /** zip 条目取原始数据（method 0=store，8=deflate） */
 function data(e) {
@@ -138,22 +141,46 @@ else if (cmd === 'payload-patch') {
   const [zipIn, zipOut, overlay] = args;
   if (!overlay) die('用法: payload-patch <in.zip> <out.zip> <overlayDir>');
   const map = walk(overlay, '', new Map());
-  log(`overlay 文件数: ${map.size}`);
+  const overlayTotal = map.size;
+  log(`overlay 文件数: ${overlayTotal}`);
   // 2026-10-19：改成**流式**。原来 readZip(zipIn) 默认 load=true 会把 155MB 的 payload
   // 整份读进堆，writeZip 再攒一份输出 —— 手机上 free 只有 200~300MB 时直接 OOM 或被
   // LMK 杀（被杀的就是 com.deepseek.harness 自己，Shizuku 也跟着没）。
   // 现在只读中央目录，条目按需从源 zip 读**原始压缩字节**（不 inflate）原样搬运；
   // writeZip 见到 raw 就不重压缩、不重算 crc，所以输出与输入逐条等价。
   const es = readZip(zipIn, { load: false });
-  let rep = 0, add = 0;
+  let rep = 0, add = 0, dropped = 0;
+  // 默认剥开发期文件；DSH_SLIM_PAYLOAD=0 可整体关掉（排查「某个包少了东西」时用）。
+  const slim = slimEnabled();
   const added = [];       // overlay 里 payload 原本没有的路径：必须出声，不许静默追加
   const rewritten = [];   // 本轮真的被改写的条目：写进 .patched.txt，供事后核对「补丁到底跑没跑」
   const suspicious = [];  // 可疑追加（塞进已存在的包 / 开发备份名 / 整棵目录不存在）
+  // 瘦身必须在**组装名册之前**就生效（2026-11-20 修）。
+  // 以前 pending 直接拷整份 overlay，主循环又拿 `!pending.has(e.name)` 当前置条件，
+  // 于是「overlay 里有、但属于开发期」的条目两头都进：既不剥掉，还作为覆盖内容写回 payload。
+  // 实测一次出包就这样漏了 124 条（dshhome/profiles/web/node_modules 下的 .d.ts/.map 与 test 目录），
+  // 压缩包里多背 1.27MB，设备端解包也要多解这些。
+  // 在这里先按名称把 overlay 名册剥一遍 → 被判为开发期的名字既不进 payload，也不进 pending；
+  // 下一步 forced 清单才能安心要求「pending 里的每一条都在包里」（见 selfbuild.sh 的 forced-list-filter）。
+  let overlayDropped = 0;
+  const overlayDroppedNames = [];
+  if (slim) {
+    for (const name of [...map.keys()]) {
+      if (slimDrop(name)) { map.delete(name); overlayDropped++; overlayDroppedNames.push(name); }
+    }
+  }
   const pending = new Map(map);
   const fd = fs.openSync(zipIn, 'r');
   function* entries() {
     try {
       for (const e of es) {
+        // 瘦身对**全部条目**一致生效，底包和 overlay 同一条路径同一套规则。
+        // 这里**不能**再写成 `slim && !pending.has(e.name) && slimDrop(e.name)`：
+        // overlay 覆盖进来的条目走的是同一条组装路径，用 pending.has 短路等于给 overlay 开后门——
+        // 底包侧的开发期文件被剥掉，overlay 里同名的那份却原样写回（2026-11-20 实测残留 124 条）。
+        // pending 已在上面按 slimDrop 收敛过，所以这里不会有「清单要求一个已被砍的文件」：
+        // 被砍的条目既不在 payload 里，也不在名册里。
+        if (slim && slimDrop(e.name)) { dropped++; continue; }
         if (pending.has(e.name)) {
           const buf = pending.get(e.name);
           log(`  替换 ${e.name}（${buf.length} 字节）→ ${md5(buf)}`);
@@ -171,7 +198,7 @@ else if (cmd === 'payload-patch') {
     } finally { fs.closeSync(fd); }
   }
   writeZip(entries(), zipOut);
-  log(`✓ 写出 ${zipOut}（替换 ${rep}，新增 ${add}，总条目 ${es.length + add}，${fs.statSync(zipOut).size} 字节）`);
+  log(`✓ 写出 ${zipOut}（替换 ${rep}，新增 ${add}，剥掉开发文件 ${dropped}（底包）+ ${overlayDropped}（overlay 名册），总条目 ${es.length + add - dropped}，${fs.statSync(zipOut).size} 字节）`);
   // 2026-11-07：补丁痕迹必须可核对，光看产物不行。
   // 背景：14 个真补丁早就烘进 295 出货包，于是「patch 阶段没跑」和「跑了但结果与底包相同」
   // 在产物上完全看不出区别；哪次漏跑，谁都不会发现。所以两样东西必须留下：
@@ -181,6 +208,9 @@ else if (cmd === 'payload-patch') {
   // 改写过的条目**必须**在里面，否则包内是新的、设备上还是旧的，症状是「改了没生效」。
   const patchedSide = zipOut + '.patched.txt';
   fs.writeFileSync(patchedSide, rewritten.length ? rewritten.join('\n') + '\n' : '');
+  // overlay 侧被瘦身剥掉的名字单独留一份：这是 2026-11-20 那次漏口的证据面，
+  // 想复核「这条到底是漏了还是有意剥的」不用重跑构建。
+  if (overlayDropped) fs.writeFileSync(zipOut + '.slim-overlay-dropped.txt', overlayDroppedNames.join('\n') + '\n');
   const norm = (n) => n.replace(/^dshroot\//, '');
   // forced 清单只管**内核树**。`assets/dshroot_forced.txt` 是设备端「开机强制覆盖哪些文件」的白名单，
   // 而真正发出去的两份（1.48/295 共 119 条、1.48.1/297 共 123 条）里一条 dshhome 都没有 ——
@@ -193,7 +223,8 @@ else if (cmd === 'payload-patch') {
   let forcedNote = '（未提供 forced 清单，跳过对账）';
   const forcedList = process.env.DSH_FORCED_LIST;
   if (forcedList && fs.existsSync(forcedList)) {
-    const forced = new Set(fs.readFileSync(forcedList, 'utf8').split('\n').map((x) => norm(x.trim())).filter(Boolean));
+    const forcedLines = fs.readFileSync(forcedList, 'utf8').split('\n').map((x) => x.trim()).filter(Boolean);
+    const forced = new Set(forcedLines.map(norm));
     const touched = [...rewritten, ...added];            // 新增条目同样要进 forced 清单，否则设备端不会强刷
     const inKernelScope = (n) => !NON_FORCED_SCOPE.some((p) => n.startsWith(p));
     const notForced = touched.map(norm).filter((n) => inKernelScope(n) && !forced.has(n));
@@ -202,8 +233,26 @@ else if (cmd === 'payload-patch') {
       ? `⚠ forced 清单 ${forced.size} 条，但本轮动过的 ${notForced.length} 条内核文件不在其中（设备端开机不会强刷，改了等于没改）：${notForced.slice(0, 5).join(', ')}`
       : `✓ 本轮动过的内核文件（改写 ${rewritten.length} + 新增 ${added.length} 共 ${touched.length} 条里的 ${touched.length - userSpace.length} 条）全在 forced 清单里（清单共 ${forced.size} 条）；另有 ${userSpace.length} 条用户空间种子（${NON_FORCED_SCOPE.join(' ')}）按设备侧白名单处理，不进 forced`;
     if (notForced.length) process.exitCode = 1;
+    // 反方向对账（2026-11-20 加）：清单里**每一条都必须真的在写出的 payload 里**。
+    // 这一半以前没人查，而这个漏洞的另一半正好长在这里：瘦身只砍了底包侧，overlay 侧的开发期
+    // 条目留着进包；一旦有人把它也从 payload 里剥掉，名字却还留在清单里，设备端开机强刷这条
+    // 路径就落空（静默跳过），症状与「补丁没生效」完全一样，事后无从分辨。
+    // 判据是**回读产物**而不是内存里的集合——写包的 bug 也能一起抓。
+    const packed = new Set(readZip(zipOut, { load: false }).map((e) => norm(e.name)));
+    const missingFromPkg = forcedLines.filter((n) => !packed.has(norm(n)));
+    const slimInForced = forcedLines.filter((n) => slim && slimDrop(norm(n)));
+    if (slimInForced.length) {
+      log(`  ✗ forced 清单里有 ${slimInForced.length} 条被瘦身剥掉的开发期条目（设备端会强刷一条空路径）：${slimInForced.slice(0, 5).join(', ')}`);
+      process.exitCode = 1;
+    }
+    if (missingFromPkg.length) {
+      log(`  ✗ forced 清单 ${forcedLines.length} 条里有 ${missingFromPkg.length} 条不在 payload 里（设备端强刷会落空）：${missingFromPkg.slice(0, 5).join(', ')}`);
+      process.exitCode = 1;
+    } else if (!slimInForced.length) {
+      log(`  ✓ forced 清单 ${forcedLines.length} 条全部在 payload 里（回读产物逐条核对，无瘦身误伤）`);
+    }
   }
-  log(`✓ patch 痕迹：overlay ${map.size} 个文件 → 改写 ${rep} 条 / 新增 ${add} 条（清单 ${patchedSide}）`);
+  log(`✓ patch 痕迹：overlay ${overlayTotal} 个文件（名册侧剥掉 ${overlayDropped} 条开发期文件）→ 改写 ${rep} 条 / 新增 ${add} 条（清单 ${patchedSide}）`);
   log(`  ${forcedNote}`);
   // 2026-11-07 修死代码：原来这里是
   //     if (missing.length) die('overlay 路径在 payload 中不存在: ...')
@@ -235,7 +284,7 @@ else if (cmd === 'payload-patch') {
       }
     }
     // 这些容器下长出全新子树是正常的（新包/新技能/新 profile 文件）
-    const NEW_SUBTREE_OK = [/\/node_modules\//, /^dshhome\/skills\//, /^dshhome\/profiles\//];
+    const NEW_SUBTREE_OK = [/\/node_modules\//, /^dshhome\/skills\//, /^dshhome\/profiles\//, /^dshhome\/tools\//];
     const mode = process.env.DSH_PATCH_STRICT; // '1' 全严格 / '0' 全警告 / 其它=默认
     const fatal = [];
     for (const n of added) {
@@ -427,6 +476,41 @@ else if (cmd === 'apk-marks') {
   log(`✓ 标记已写入并回读验证：kernel=${gk}  revision=${gr}`);
 }
 
+else if (cmd === 'forced-list-filter') {
+  // 把「overlay 强制清单」收敛到「这一版 payload 里真会有的条目」。
+  //
+  // 为什么必须在 payload-patch **之前**做（2026-11-20）：
+  //   · 瘦身会从 payload 里剥掉开发期文件（规则在 lib/slim-payload.js）。清单若还列着它们，
+  //     设备端开机强刷就是刷一条空路径，静默跳过 —— 症状和「补丁没生效」一模一样，事后分不出。
+  //   · 清单有两个来源：build-overlay/dshroot（本次输入）与 ../v118/dsh-patches/overlay（历史补丁）。
+  //     后者带着旧内核的 hashed chunk 名（runner-launch-*.js），底包换代后那些文件已经不存在；
+  //     而 payload 的内容只可能来自「底包 + overlay」，所以这种名字永远进不了包。
+  // 判据只有两条，都能当场推导，不另写名单：
+  //   ① 名字被 slimDrop 命中 → patch 阶段会剥掉，砍；
+  //   ② 底包里没有、overlay 里也没有 → patch 阶段不可能产出它，砍。
+  const [inList, outList] = args;
+  const pi = args.indexOf('--payload');
+  const oi = args.indexOf('--overlay');
+  const baseZip = pi >= 0 ? args[pi + 1] : null;
+  const overlayDir = oi >= 0 ? args[oi + 1] : null;
+  if (!inList || !outList || !baseZip || !overlayDir) {
+    die('用法: forced-list-filter <in.txt> <out.txt> --payload <底包 payload.zip> --overlay <overlayDir>');
+  }
+  const inBase = new Set(readZip(baseZip, { load: false }).map((e) => e.name));
+  const lines = fs.readFileSync(inList, 'utf8').split('\n').map((x) => x.trim()).filter(Boolean);
+  const slim = slimEnabled();
+  const kept = [], cutSlim = [], cutDead = [];
+  for (const n of lines) {
+    if (slim && slimDrop(n)) { cutSlim.push(n); continue; }
+    if (!inBase.has(n) && !fs.existsSync(path.join(overlayDir, n))) { cutDead.push(n); continue; }
+    kept.push(n);
+  }
+  fs.writeFileSync(outList, kept.length ? kept.join('\n') + '\n' : '');
+  log(`✓ forced 清单收敛：${lines.length} → ${kept.length} 条（瘦身命中 ${cutSlim.length}，底包与 overlay 都没有 ${cutDead.length}）`);
+  if (cutSlim.length) log(`  · 瘦身命中（会从 payload 剥掉，不能要求它存在）：${cutSlim.slice(0, 5).join(', ')}${cutSlim.length > 5 ? ' …' : ''}`);
+  if (cutDead.length) log(`  · 历史残留（底包换代后已不存在）：${cutDead.slice(0, 5).join(', ')}${cutDead.length > 5 ? ' …' : ''}`);
+}
+
 else if (cmd === 'dex-extract') {
   const [apk, out] = args;
   const e = readZip(apk, { load: false }).find((x) => x.name === 'classes.dex');
@@ -438,8 +522,15 @@ else if (cmd === 'dex-extract') {
 
 else if (cmd === 'check') {
   const [target, manifestPath] = args;
-  if (!manifestPath) die('用法: check <dir|zip> <manifest>');
+  if (!target || !manifestPath) die('用法: check <dir|zip> <manifest> [--dist] [--overlay <dir>]');
   const isZip = /\.zip$/i.test(target);
+  // 清单第 2 列的 md5 是从某一棵树刷下来的**记录**，不是活的判据：拿活文件跟记录比，
+  // 出包源一动就必红，红得没有意义。所以它只报漂移，判死交给「在不在 / 关键字 /
+  // 与出包源是否一致」——后者是两份活的东西直接对，能常绿也真能拦住。
+  const ovIdx = args.indexOf('--overlay');
+  const overlayDir = ovIdx >= 0 ? args[ovIdx + 1] : null;
+  if (ovIdx >= 0 && !overlayDir) die('--overlay 后面要跟一个目录');
+  if (overlayDir && !fs.existsSync(overlayDir)) die('出包源目录不存在: ' + overlayDir);
   let map = null;
   if (!isZip) {
     if (!fs.statSync(target).isDirectory()) die('目标既不是目录也不是 .zip: ' + target);
@@ -450,7 +541,7 @@ else if (cmd === 'check') {
   }
   const lines = fs.readFileSync(manifestPath, 'utf8').split('\n');
   let pass = 0, fail = 0, skip = 0;
-  const fails = [];
+  const fails = [], drifts = [];
   for (const raw of lines) {
     const line = raw.trim();
     if (!line || line.startsWith('#')) continue;
@@ -479,6 +570,13 @@ else if (cmd === 'check') {
       okKw = kwCount >= kwMin;
     }
     if (okMd5 && okKw) { pass++; }
+    else if (okKw) {
+      // 关键字判据过了 = 补丁语义还在。md5 变了只是说明这棵树不是清单刷下来的那棵。
+      // 装了旧包、出包源又往前走了一步，就是这个状态，不该报成「补丁丢了」。
+      // 但要能出声：真被换成别的内容时，下面的「与出包源不一致」会把假绿补回来。
+      pass++;
+      drifts.push(`${rel}\n    · md5 ${got.slice(0, 12)} 与清单记录不同（关键字「${keyword}」命中 ${kwCount} 次，语义还在）`);
+    }
     else {
       fail++;
       const p = [];
@@ -488,8 +586,52 @@ else if (cmd === 'check') {
       fails.push(`${rel}\n    ✗ ${p.join('；')}`);
     }
   }
+
+  // 与出包源逐条对内容。这是**两份活的东西**直接比，不是跟记录比。
+  // 差多少算问题，取决于被查的是谁：
+  //   · zip（--apk 装机前预检）：包是刚从 overlay 打出来的，就该跟源一致；不同 = 打过之后
+  //     源又动了，或者包拿错了 —— 这类要报出来。
+  //   · 目录（装机副本）：装机是覆盖安装，出包源永远更新，落后是**正常状态**，只报不拦。
+  // 判死靠上面那条（关键字），这里只负责把「差在哪」说清楚。
+  const lagged = [];
+  if (overlayDir) {
+    const ovCache = new Map();
+    for (const raw of lines) {
+      const line = raw.trim();
+      if (!line || line.startsWith('#')) continue;
+      const rel = line.split('|')[0].trim();
+      if (!rel) continue;
+      const ovf = path.join(overlayDir, rel);
+      let ov = ovCache.get(rel);
+      if (ov === undefined) {
+        ov = fs.existsSync(ovf) ? fs.readFileSync(ovf) : null;
+        ovCache.set(rel, ov);
+      }
+      if (!ov) continue;
+      let cur = null;
+      if (isZip) {
+        const hit = map.get(rel);
+        if (hit) cur = hit();
+      } else {
+        const f = path.join(target, rel);
+        if (fs.existsSync(f)) cur = fs.readFileSync(f);
+      }
+      if (cur && Buffer.compare(cur, ov) !== 0) lagged.push(rel);
+    }
+  }
+
   log(`检查 ${isZip ? 'zip' : '目录'}: ${target}`);
   for (const f of fails) log('  ' + f);
+  for (const d of drifts) log('  ' + d);
+  if (overlayDir) {
+    if (!lagged.length) log('  与出包源比：逐条一致');
+    else if (isZip) log(`  与出包源比：${lagged.length} 份不同 —— 这个包不是当前 overlay 打的，别拿它去装机`);
+    else log(`  与出包源比：${lagged.length} 份不同（装机副本落后，等下次装机对齐）`);
+    for (const l of lagged.slice(0, 8)) log(`    · ${l}`);
+    if (lagged.length > 8) log(`    · …其余 ${lagged.length - 8} 份`);
+  } else {
+    log('  ⚠ 没给 --overlay：只按清单关键字判，无法发现「文件被换成同一代别的内容」');
+  }
   log(`结果: ✅ ${pass} 通过  ❌ ${fail} 失败  (共 ${pass + fail})`);
   process.exit(fail ? 1 : 0);
 }

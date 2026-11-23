@@ -353,6 +353,83 @@ public class AccessibilityService extends android.accessibilityservice.Accessibi
         int q = path.indexOf('?');
         if (q >= 0) base = path.substring(0, q);
 
+        // 屏幕操作指示条：只有真正会改变屏幕的动作才进条（读屏/查询类不进，免得一直在闪）。
+        String opsLabel = opsBarLabel(base, path, body);
+        if (opsLabel == null) return dispatchRoute(base, path, body);
+        if (!OpsBar.begin(this, base, opsLabel)) {
+            // 用户刚按过条上的「停止」：这一步直接拦下，并让模型知道是被用户掐断的，
+            // 而不是当作工具故障去重试。
+            return jsonError("用户按了屏幕操作条上的「停止」，本次操作没有执行（约 5 秒内会继续拦下新的屏幕操作）。");
+        }
+        String res;
+        boolean ok = true;
+        try {
+            res = dispatchRoute(base, path, body);
+            ok = res != null && res.indexOf("\"ok\":false") < 0;
+        } finally {
+            OpsBar.end(this, ok);
+        }
+        return res;
+    }
+
+    /** 把一条路由翻成条上的一句话；null = 这条路由不动屏幕，不显示。 */
+    private String opsBarLabel(String base, String path, String body) {
+        try {
+            if (base.equals("/tap")) {
+                String text = queryParam(path, "text");
+                String desc = queryParam(path, "desc");
+                String target = !text.isEmpty() ? text : desc;
+                if (!target.isEmpty()) return "点击「" + cutForBar(target, 12) + "」";
+                int[] size = screenSize();
+                int x = coordFromParams(path, "x", "fx", size[0]);
+                int y = coordFromParams(path, "y", "fy", size[1]);
+                return x >= 0 && y >= 0 ? "点按 (" + x + ", " + y + ")" : "点按";
+            }
+            if (base.equals("/input")) {
+                String text = queryParam(path, "text");
+                if ("paste".equals(queryParam(path, "mode"))) return "粘贴输入";
+                return text.isEmpty() ? "输入文字" : "输入「" + cutForBar(text, 10) + "」";
+            }
+            if (base.equals("/swipe")) {
+                int[] size = screenSize();
+                int x1 = coordFromParams(path, "x1", "fx1", size[0]);
+                int y1 = coordFromParams(path, "y1", "fy1", size[1]);
+                int x2 = coordFromParams(path, "x2", "fx2", size[0]);
+                int y2 = coordFromParams(path, "y2", "fy2", size[1]);
+                if (x1 < 0 || y1 < 0 || x2 < 0 || y2 < 0) return "滑动";
+                int dx = x2 - x1;
+                int dy = y2 - y1;
+                if (Math.abs(dx) > Math.abs(dy)) return dx > 0 ? "向右滑动" : "向左滑动";
+                return dy > 0 ? "向下滑动" : "向上滑动";
+            }
+            if (base.equals("/hold")) return "长按";
+            if (base.equals("/scroll")) {
+                String direction = queryParam(path, "direction");
+                if ("up".equals(direction)) return "向上滚动";
+                if ("down".equals(direction)) return "向下滚动";
+                if ("left".equals(direction)) return "向左滚动";
+                if ("right".equals(direction)) return "向右滚动";
+                return "滚动";
+            }
+            if (base.equals("/back")) return "返回上一屏";
+            if (base.equals("/home")) return "回到桌面";
+            if (base.equals("/gesture")) return "多指手势";
+            if (base.equals("/touch")) return "按住屏幕";
+            if (base.equals("/touch-release")) return "松手";
+            return null;
+        } catch (Throwable t) {
+            return "操作屏幕";
+        }
+    }
+
+    /** 条宽有限，长文案先截断再加省略号，别让它自己在中途硬切。 */
+    private static String cutForBar(String s, int max) {
+        if (s == null) return "";
+        String t = s.replace('\n', ' ').trim();
+        return t.length() <= max ? t : t.substring(0, max) + "…";
+    }
+
+    private String dispatchRoute(String base, String path, String body) throws Exception {
         if (base.equals("/status")) return handleStatus();
         if (base.equals("/dump")) return handleDump();
         // v1.40 多屏读取：虚拟屏（display != 0）上的窗口不是 active window，
@@ -1011,6 +1088,8 @@ public class AccessibilityService extends android.accessibilityservice.Accessibi
             if (x1 < 0 || y1 < 0 || x2 < 0 || y2 < 0) {
                 return jsonError("swipe 需要起点(x1/y1 或 fx1/fy1)和终点(x2/y2 或 fx2/fy2)");
             }
+            // 起点压在指示条上时让开：否则滑动从条上起手，落不到目标 App。
+            if (OpsBar.collidesWith(this, x1, y1)) OpsBar.passThrough(this, 1200L);
             long dur = (long) parseDoubleSafe(queryParam(path, "duration"), 300);
             JSONObject op = new JSONObject();
             op.put("kind", "swipe");
@@ -1465,6 +1544,8 @@ public class AccessibilityService extends android.accessibilityservice.Accessibi
                 return o.toString();
             }
             if (tapX >= 0 && tapY >= 0) {
+                // 落点正好压在指示条上：先把条切成不可触摸，否则点到的是条而不是下面的 App。
+                if (OpsBar.collidesWith(this, tapX, tapY)) OpsBar.passThrough(this, 1200L);
                 boolean gestureOk = gestureTap(tapX, tapY);
                 o.put("found", gestureOk);
                 o.put("method", gestureOk ? "gesture" : "none");

@@ -33,7 +33,7 @@ flowchart LR
 ## 🛠️ 核心交付规范
 
 ### 1. 零依赖极速数据分析
-- 可调用 `/sdcard/DeepSeekHarness/tools/work-trace.mjs` 中的 `analyzeDataset()` 或 `parseCSV()` 进行秒级计算；
+- 可调用 `$DSH_HOME/tools/work-trace.mjs` 中的 `analyzeDataset()` 或 `parseCSV()` 进行秒级计算；
 - 必须输出关键统计量：**样本总量、有效数值量、均值 (Avg)、中位数 (Median)、P95 分位数、极值范围 (Min~Max)**；
 - 多维分组透视：按核心维度进行降序排行与占比分布。
 

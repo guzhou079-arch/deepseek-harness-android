@@ -36,7 +36,18 @@ R="${DSH_PROJECT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 SB="$R/selfbuild"
 NODE=$F/.bin/node
 CURL=$F/payload/runtime/bin/curl
-APK="$1"
+#
+# 参数判空必须排在**任何可能崩的操作之前**：`set -u` 下 `APK="$1"` 没给参数就当场崩，
+# 崩出来的 exit 1 在三态里等于「这个包不合规」—— 而事实是根本没开始验。
+# 顺序也定死：先判「给没给 / 在不在」（人给错了，去补参数），再探 node（环境起不来，去修环境）。
+# 两种都是「无法判定」，但要让读日志的人分得清该补哪边，所以文案分开、不合并。
+APK="${1:-}"
+if [ -z "$APK" ]; then
+  echo "用法：sh verify-dist-isolated.sh <dist.apk>（返回 2 = 无法判定，不是包不合格）"
+  exit 2
+fi
+[ -f "$APK" ] || { echo "✗ 找不到 APK：$APK（返回 2 = 无法判定，不是包不合格）"; exit 2; }
+APK=$(realpath "$APK") || { echo "✗ 无法解析 APK 绝对路径：$1（返回 2 = 无法判定）"; exit 2; }
 # 2026-10-15：本脚本全靠 $NODE / $CURL 抽 payload 与探活，而它们需要 runtime 的 .so。
 # 以前靠**调用方**自己 export；忘了 export 就报 `CANNOT LINK EXECUTABLE … libcares.so not found`，
 # 看着像"包有问题"，其实是门禁没跑起来（同类坑已在 check-console-plugin-isolated.sh 修过一次）。
@@ -52,12 +63,23 @@ ISO=$F/tmp/distverify
 iso_tree_cleanup() {
   [ -n "${ISO:-}" ] || return 0
   in_iso() {
-    tr '\0' '\n' <"/proc/$1/cmdline" 2>/dev/null | awk -v p="$ISO/" 'index($0,p)==1 {f=1; exit} END {exit(f?0:1)}'
+    # 扫 /proc/N/cmdline 有个会在真机上挂死人的坑：进程在「打开 cmdline」和「读完」
+    # 之间消失时，这个内核上 read() 会一直返回 0 字节而不置 EOF，`tr` 于是无限空转 ——
+    # 实测烧到 92% CPU 连跑 3.5 小时，把整轮 run-all 钉死在那儿，还顺带让后面每一次
+    # 跑测试都拿到假红。head -c 给读取量封顶：它读满就关管道，下游必然拿到 EOF，
+    # 不依赖 /proc 那头肯不肯给。判据本身一个字没放宽。
+    head -c 65536 "/proc/$1/cmdline" 2>/dev/null \
+      | tr '\0' '\n' \
+      | awk -v p="$ISO/" 'index($0,p)==1 {f=1; exit} END {exit(f?0:1)}'
   }
   for sig in TERM KILL; do
     for d in /proc/[0-9]*; do
       p=${d#/proc/}
       [ "$p" = "$$" ] && continue
+      # 先看这进程还在不在：stat 读不到 = 已消失；第三字段 Z/X = 僵尸（cmdline 是空的）。
+      # 这两种进去读等于往上面那个坑里跳，直接跳过 —— 它们也不可能是残留的守护进程。
+      st=$(awk '{print $3}' "/proc/$p/stat" 2>/dev/null) || continue
+      case "$st" in ''|Z|X) continue ;; esac
       # 逐参数匹配「以 $ISO/ 开头的路径」，不按整条命令行做子串匹配：
       # 子串版会把只是"提到"该路径的 shell 也杀掉（自测时真把自己杀了）；
       # 也不能只看 argv[0]，mksh 会把符号链接解析成真实路径。
@@ -75,8 +97,7 @@ note() { echo "  $1"; }
 bad()  { echo "  ❌ $1"; FAIL=1; }
 ok()   { echo "  ✅ $1"; }
 
-[ -n "${APK:-}" ] && [ -f "$APK" ] || { echo "用法：sh verify-dist-isolated.sh <dist.apk>"; exit 2; }
-APK=$(realpath "$APK") || { echo "✗ 无法解析 APK 绝对路径"; exit 2; }
+# 参数守卫已上移到文件头部（在 $NODE 探活之前）—— 那里才拦得住「没给参数」。
 echo "=== 验证 $APK（$(stat -c%s "$APK") 字节）==="
 
 rm -rf "$ISO"; mkdir -p "$ISO"
@@ -84,7 +105,7 @@ echo "== 1/6 取出 APK 里的 payload 并解压到隔离目录 =="
 "$NODE" "$SB/lib/selfbuild.js" payload-extract "$APK" "$ISO/payload.zip" >/dev/null || exit 2
 mkdir -p "$ISO/payload"
 cd "$ISO/payload" || exit 2
-unzip -qo "$ISO/payload.zip" -d "$ISO/payload" || { echo "✗ 解压失败"; exit 2; }
+unzip -qo "$ISO/payload.zip" -d "$ISO/payload" || { echo "✗ payload.zip 解压失败 —— 无法判定，不是包不合规（返回 2）"; exit 2; }
 FILES_N=$(find "$ISO/payload" -type f | wc -l)
 note "解压完成：$FILES_N 个文件"
 

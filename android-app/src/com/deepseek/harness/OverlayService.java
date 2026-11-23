@@ -132,6 +132,17 @@ public class OverlayService extends Service {
     // v1.25 读回复：面板里可滚动的回复区 + 等待/刷新状态
     private android.widget.ScrollView replyScroll = null;
     private TextView replyText = null;
+
+    // 干活状态条：让操作者看得见当前这步和下一步在做什么。
+    // 状态由引擎侧写 files/agent-status.txt（第一行=正在做，第二行=下一步），
+    // 这里只轮询渲染，不参与任何业务判断，文件缺失就静默隐藏。
+    private View agentBarView = null;
+    private TextView agentNowText = null;
+    private TextView agentNextText = null;
+    private Handler agentBarHandler = null;
+    private Runnable agentBarTick = null;
+    private String agentBarLast = "";
+    private static final long AGENT_BAR_POLL_MS = 700L;
     private TextView replyHint = null;
     /** 最近一次已显示的助手回复（用于判断"有没有新回复"，避免无意义重绘）。 */
     private volatile String lastReplyShown = null;
@@ -335,6 +346,7 @@ public class OverlayService extends Service {
         handler.removeCallbacksAndMessages(null);
         hideBubble();   // v1.71：气泡是第二个窗口，必须一起 remove
         hideCard();     // v1.77：回复卡是第三个窗口，同样要 remove
+        detachAgentBar();   // 状态条是第四个窗口，连轮询一起停，否则会随 Service 一起泄漏
         if (rootView != null && wm != null) {
             try { wm.removeView(rootView); } catch (Throwable ignored) {}
         }
@@ -3483,6 +3495,118 @@ public class OverlayService extends Service {
                 stopSelf();
             }
         }
+        attachAgentBar();
+    }
+
+    // ---- 状态条：把引擎侧写的当前动作/下一步渲染成一条常驻细条 ----
+
+    private void attachAgentBar() {
+        try {
+            if (agentBarView != null) return;
+
+            LinearLayout bar = new LinearLayout(this);
+            bar.setOrientation(LinearLayout.VERTICAL);
+            bar.setPadding(dp(12), dp(7), dp(12), dp(7));
+
+            GradientDrawable bg = new GradientDrawable();
+            bg.setColor(0xE6141720);
+            bg.setCornerRadius(dp(13));
+            bg.setStroke(dp(1), 0x1FFFFFFF);
+            bar.setBackground(bg);
+
+            agentNowText = new TextView(this);
+            agentNowText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f);
+            agentNowText.setTextColor(0xFFF2F4F9);
+            agentNowText.setShadowLayer(4f, 0f, 1f, 0xCC000000);
+
+            agentNextText = new TextView(this);
+            agentNextText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f);
+            agentNextText.setTextColor(0xFFAEB6CB);
+            agentNextText.setPadding(0, dp(2), 0, 0);
+            agentNextText.setShadowLayer(4f, 0f, 1f, 0xCC000000);
+
+            bar.addView(agentNowText);
+            bar.addView(agentNextText);
+            agentBarView = bar;
+
+            WindowManager.LayoutParams alp = new WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.WRAP_CONTENT,
+                    WindowManager.LayoutParams.WRAP_CONTENT,
+                    overlayWindowType(),
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                            | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                            | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                    PixelFormat.TRANSLUCENT);
+            alp.gravity = Gravity.TOP | Gravity.START;
+            alp.x = dp(14);
+            alp.y = dp(92);
+
+            wm.addView(agentBarView, alp);
+            agentBarView.setVisibility(View.GONE);
+
+            agentBarHandler = new Handler(Looper.getMainLooper());
+            agentBarTick = new Runnable() {
+                @Override public void run() {
+                    pollAgentStatus();
+                    if (agentBarHandler != null) {
+                        agentBarHandler.postDelayed(this, AGENT_BAR_POLL_MS);
+                    }
+                }
+            };
+            agentBarHandler.post(agentBarTick);
+        } catch (Throwable t) {
+            logVis("attachAgentBar failed: " + t);
+        }
+    }
+
+    /** 读 files/agent-status.txt；内容没变就不重绘，文件不在就把整条隐掉。 */
+    private void pollAgentStatus() {
+        try {
+            if (agentBarView == null) return;
+            File f = new File(getFilesDir(), "agent-status.txt");
+            if (!f.exists()) {
+                if (agentBarView.getVisibility() != View.GONE) agentBarView.setVisibility(View.GONE);
+                agentBarLast = "";
+                return;
+            }
+            java.io.FileInputStream in = new java.io.FileInputStream(f);
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            byte[] buf = new byte[512];
+            int n;
+            while ((n = in.read(buf)) > 0) bos.write(buf, 0, n);
+            in.close();
+            String txt = bos.toString("UTF-8");
+            if (txt.equals(agentBarLast)) return;
+            agentBarLast = txt;
+
+            String[] lines = txt.split("\n", 3);
+            String now = lines.length > 0 ? lines[0].trim() : "";
+            String next = lines.length > 1 ? lines[1].trim() : "";
+            agentNowText.setText(now);
+            agentNextText.setText(next);
+            agentNextText.setVisibility(next.isEmpty() ? View.GONE : View.VISIBLE);
+            agentBarView.setVisibility(now.isEmpty() ? View.GONE : View.VISIBLE);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private void detachAgentBar() {
+        try {
+            if (agentBarHandler != null && agentBarTick != null) {
+                agentBarHandler.removeCallbacks(agentBarTick);
+            }
+        } catch (Throwable ignored) {
+        }
+        agentBarHandler = null;
+        agentBarTick = null;
+        try {
+            if (agentBarView != null) wm.removeView(agentBarView);
+        } catch (Throwable ignored) {
+        }
+        agentBarView = null;
+        agentNowText = null;
+        agentNextText = null;
+        agentBarLast = "";
     }
 
     /**

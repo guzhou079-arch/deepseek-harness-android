@@ -4,7 +4,7 @@
 # 约 30~60 秒（proot 启动 + 5 秒 720×1280 编码）。
 set -eu
 
-# 临时目录：老布局在 /sdcard/DeepSeekHarness/tmp，新装应用没「所有文件访问权限」时不可写，
+# 临时目录：老布局的数据根下 tmp，新装应用没「所有文件访问权限」时那里不可写，
 # 退到 App 私有目录。
 pick_tmp() {
   for d in "/sdcard/DeepSeekHarness/tmp" "${DSH_HOME%/payload/dshhome}/tmp" "${HOME:-/tmp}"; do

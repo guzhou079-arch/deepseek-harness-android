@@ -53,11 +53,13 @@ dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-h
 # ⑩ v1.31：update-check 状态路由加懒门禁
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-update-check/lib/index.js|1ee407849236643b41ab354e3ff8b02e|__verdict.rejection|all||4
 # ⑪ v1.31：背景图资产进 payload（重装/重解压不再丢）
-#    ⚠ dsh-bg-user.png 只存在于**本机自建包**；发行包由 strip-dist-payload.js 主动剔除（隐私），
-#      所以这一行标 local —— 发行校验跳过它，本机自建包仍照常校验。
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/dsh-bg.svg|83e42b419ed900dcdcba7f1e6b9e1650|svg|all||4
+#    ⚠ dsh-bg.svg 与 dsh-bg-user.png 都是**只在本机自建包里存在**的东西：发行包既不带机主
+#      那张照片，也不带内置的矢量星空（dsh-bg.css 在发行版里把图变量置 none，底色交给前端
+#      渐变）。两者都由 strip-dist-payload.js 剔除，所以都标 local —— 发行校验跳过，
+#      本机自建包仍照常校验。
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/dsh-bg.svg|83e42b419ed900dcdcba7f1e6b9e1650|svg|local|发行包不带壁纸（dsh-bg.css 置 none），这张矢量图由 strip-dist-payload.js 剔除；自用包仍校验|4
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/dsh-bg-user.png|c4b5a66b33ea99892a76f2c485beed1d|-|local|本机专用背景图，发行包主动剔除（policy=local），字节无法用关键字判语义，只判存在与 md5|0
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-open-in-app/lib/client.js|4118281f195e95e4658b09f209f5b3a4|dsh-user-bg|all||1
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-open-in-app/lib/client.js|6cb77090650307df4b17f1d33dacf0b0|dsh-user-bg|all||1
 # ⑫ v1.32：局域网绑定需要 DSH_ALLOW_LAN=1（默认仍拒绝 0.0.0.0）
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-app/lib/startup.js|d43e847fd89abedb7b8bcfa2c50206b1|DSH_ALLOW_LAN|all||1
 # ⑬ v1.35 起：应用更新日志（随包分发 + 界面可打开 /CHANGELOG.md）
@@ -66,7 +68,7 @@ dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-app/
 #       e6eb41e7 → 88ea18c3），而 verify 里的 `|| true` 又把它吞了 → 四版没人发现。
 #       内容对不对由发版前人工过目保证，不由 md5 保证（md5 在此只制造假警报）。
 #    ⚠ 顺带一条：只换 dex 的包（不动 payload）里这份日志来自骨架版本，本来就比 overlay 旧。
-dshroot/CHANGELOG.md|85507fbbd1fa32fdeffb0350d92bfe52|更新日志|all||5
+dshroot/CHANGELOG.md|0b932e0f784d43e829dd6ec151e94c62|更新日志|all||5
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/CHANGELOG.md|b853168662b1c413bacee24fb17430b5|更新日志|all||5
 # ⑭ v1.36：账户 UI —— 放开上游「桌面独占」门禁（apply 首行 dshDesktop 检查）
 #    刻意不注入全局 dshDesktop，以免挤掉 settings-models 的 API Key 引导。
@@ -95,8 +97,8 @@ dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-bash-loc
 #    改为引擎直接调 App 特权桥执行 am start（shell uid 2000）。
 #    补丁脚本：selfbuild/scripts/patch-bring-to-front.js
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-deepseek-account-platform/lib/index.js|c83acb5ad065aa1e80ecd651731a64bb|dsh-android-patch v4 (bring-to-front)|all||1
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/index.html|e869e305d7148c95d07b5b100938bb49|/mobile.css|all||1
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/mobile.js|bf0ac56f9e063a6509f50dbccc393d40|dsh-update-banner|all||4
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/index.html|bc97fef58d8a2f2f492c866fe6fb0303|/mobile.css|all||1
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/mobile.js|1319867fad5a4151b6c36eeca78f0d2f|dsh-update-banner|all||4
 # ④ Android 运行环境适配（2026-10-03 rc.2 事故后补录：这 6 个文件的补丁原先只手工塞在 payload 里，
 #    换内核时随上游改动一起被覆盖 → 每轮 EACCES。纳入清单后，装机前的 verify 就能拦住）
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/index.js|487373500d5acbc292a66f0f0a906db2|open(currentPath, "wx")|all||1
@@ -110,8 +112,8 @@ dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-fs-
 #    且"到货卡片"只挂在会话页 → 用户分享进来的文件收下了却没人看见。
 #    这两条把「带 shell.overlay 到货横幅的那一份」钉死，两份副本都必须一致）
 # 2026-11-04：设置页「控制台」加 QQ 群入口（群号 1050918023），md5 随改动更新。
-dshhome/profiles/web/node_modules/dsh-android-console/lib/client.js|1cd9c10db35b81a853bad081513dcba2|android-share-notice|all||1
-dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-android-console/lib/client.js|1cd9c10db35b81a853bad081513dcba2|android-share-notice|all||1
+dshhome/profiles/web/node_modules/dsh-android-console/lib/client.js|de45c64110dcca5d758a43ec68804c31|android-share-notice|all||1
+dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-android-console/lib/client.js|a6fc14fc6c1d36c57177beecf2a40678|android-share-notice|all||1
 # ⚠️ 2026-10-15 之前这条清单**没覆盖**这两个文件，于是"源码改了、包里带的还是旧的"
 #    能一路通过 verify。装 1.39 之前，patch-check 对这两条会报漂移（装机副本还是旧的）——那是**正确**的。
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-plugin-auto-summary-policy/lib/index.js|d0beb2db51a199d1d7b4a45b5cc74936|0.1.2-effective-policy|all||1

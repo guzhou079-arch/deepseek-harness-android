@@ -1,5 +1,5 @@
 {
-  "output": "/sdcard/DeepSeekHarness/videos/example.mp4",
+  "output": "./videos/example.mp4",
   "width": 1080,
   "height": 1920,
   "fps": 30,

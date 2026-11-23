@@ -75,6 +75,9 @@ restore_dist() {
   if [ -f "$BK/dsh-bg-user.png" ]; then
     [ ! -e "$DIST/dsh-bg-user.png" ] && mv "$BK/dsh-bg-user.png" "$DIST/dsh-bg-user.png" || result=1
   fi
+  if [ -f "$BK/dsh-bg.svg" ]; then
+    [ ! -e "$DIST/dsh-bg.svg" ] && mv "$BK/dsh-bg.svg" "$DIST/dsh-bg.svg" || result=1
+  fi
   for source in "$BK/dshhome-extra"/* "$BK/dshhome-extra"/.[!.]* "$BK/dshhome-extra"/..?*; do
     [ -e "$source" ] || continue
     name=$(basename "$source"); dest="$OVL/dshhome/$name"
@@ -95,10 +98,16 @@ export DSH_SKIP_BG_SYNC=1
 [ -f "$DIST/dsh-bg.css" ] || { echo '✗ Missing overlay background CSS'; exit 1; }
 cp "$DIST/dsh-bg.css" "$BK/dsh-bg.css"
 # DSH_KEEP_USER_BG=1：自用装机包保留机主壁纸（dsh-bg-user.png 随包 + CSS 指向它）。
-# 默认（发行）仍然脱敏：壁纸挪出 dist、CSS 回落默认 svg。
+# 默认（发行）脱敏：壁纸图挪出 dist，CSS 的图变量置 none（不带任何壁纸，见下面那段）。
+# 自用分支的断言跟着 overlay 的设计值走：暗色顶遮罩是 0.38，不是发行调优那档 0.55。
 if [ "${DSH_KEEP_USER_BG:-0}" != "1" ] && [ -f "$DIST/dsh-bg-user.png" ]; then
   [ "$(realpath "$DIST/dsh-bg-user.png")" = "$(realpath "$DIST")/dsh-bg-user.png" ] || exit 1
   mv "$DIST/dsh-bg-user.png" "$BK/dsh-bg-user.png"
+fi
+# 内置那张矢量壁纸同理：发行版不带，自用包照旧随包。
+if [ "${DSH_KEEP_USER_BG:-0}" != "1" ] && [ -f "$DIST/dsh-bg.svg" ]; then
+  [ "$(realpath "$DIST/dsh-bg.svg")" = "$(realpath "$DIST")/dsh-bg.svg" ] || exit 1
+  mv "$DIST/dsh-bg.svg" "$BK/dsh-bg.svg"
 fi
 # 随包内置插件在 profiles 的落地（v1.38 起必须随包：冷启动 FORCE_OVERWRITE 要有源，
 # 否则"插件改了不生效"的老毛病在发行包里依旧存在）。只允许内置插件目录，
@@ -134,24 +143,32 @@ if [ -d "$OVL/dshhome" ]; then
     esac
   done
 fi
+# 壁纸口径：
+#   · 自用包（DSH_KEEP_USER_BG=1）保留机主那张图 —— 它随包走，CSS 指向它。
+#   · 发行包**不带任何壁纸图**：--dsh-user-bg-image 直接置 none，四层遮罩一并归零。
+#     为什么不再回落内置的 dsh-bg.svg：发行版要跟自用机看到的观感一致，而那台机器上
+#     聊天页的底色由前端那套 !important 渐变决定（dsh-bg.css 的 ::before 优先级更低，
+#     本来就没在画）；挂一张星空图只会让"发行版和本机长得不一样"，还会多一份要么被删、
+#     要么悬空引用的资产。变量置 none 后 ::before 只是一层全透明，等于不存在。
+#     那张 svg 也一并挪出去：留在包里就是一个没人引用、却能在包里直接翻出来的星空图，
+#     和"不带任何壁纸"自相矛盾。
 if [ "${DSH_KEEP_USER_BG:-0}" = "1" ]; then
   sed -i 's#url("/dsh-bg.svg?v=1")#url("/dsh-bg-user.png?v=1")#' "$DIST/dsh-bg.css"
 else
-  sed -i 's#url("/dsh-bg-user.png?v=1")#url("/dsh-bg.svg?v=1")#' "$DIST/dsh-bg.css"
-fi
-# 发行版用一组更"透亮"的遮罩值；自用包（DSH_KEEP_USER_BG=1）保留 bg-patch/ 的设计值，
-# 否则机主自己的壁纸会被发行调优冲淡 —— 暗色尤其明显（0.68 vs 0.76 是能一眼看出来的差别）。
-if [ "${DSH_KEEP_USER_BG:-0}" != "1" ]; then
-  sed -i 's#\(--dsh-user-bg-scrim-top-light:\) *rgba([^)]*)#\1 rgba(247, 249, 253, 0.70)#' "$DIST/dsh-bg.css"
-  sed -i 's#\(--dsh-user-bg-scrim-bottom-light:\) *rgba([^)]*)#\1 rgba(247, 249, 253, 0.82)#' "$DIST/dsh-bg.css"
-  sed -i 's#\(--dsh-user-bg-scrim-top-dark:\) *rgba([^)]*)#\1 rgba(4, 8, 16, 0.55)#' "$DIST/dsh-bg.css"
-  sed -i 's#\(--dsh-user-bg-scrim-bottom-dark:\) *rgba([^)]*)#\1 rgba(4, 8, 16, 0.68)#' "$DIST/dsh-bg.css"
+  sed -i 's#\(--dsh-user-bg-image:\) *url("[^"]*")#\1 none#' "$DIST/dsh-bg.css"
+  sed -i 's#\(--dsh-user-bg-scrim-top-light:\) *rgba([^)]*)#\1 rgba(0, 0, 0, 0)#' "$DIST/dsh-bg.css"
+  sed -i 's#\(--dsh-user-bg-scrim-bottom-light:\) *rgba([^)]*)#\1 rgba(0, 0, 0, 0)#' "$DIST/dsh-bg.css"
+  sed -i 's#\(--dsh-user-bg-scrim-top-dark:\) *rgba([^)]*)#\1 rgba(0, 0, 0, 0)#' "$DIST/dsh-bg.css"
+  sed -i 's#\(--dsh-user-bg-scrim-bottom-dark:\) *rgba([^)]*)#\1 rgba(0, 0, 0, 0)#' "$DIST/dsh-bg.css"
 fi
 if [ "${DSH_KEEP_USER_BG:-0}" = "1" ]; then
-  "$NODE" -e 'const s=require("fs").readFileSync(process.argv[1],"utf8");if(!/--dsh-user-bg-image:\s*url\("\/dsh-bg-user\.png\?v=1"\)/.test(s)||!/--dsh-user-bg-scrim-top-dark:\s*rgba\(4, 8, 16, 0\.60\)/.test(s))process.exit(1)' "$DIST/dsh-bg.css"
+  "$NODE" -e 'const s=require("fs").readFileSync(process.argv[1],"utf8");if(!/--dsh-user-bg-image:\s*url\("\/dsh-bg-user\.png\?v=1"\)/.test(s)||!/--dsh-user-bg-scrim-top-dark:\s*rgba\(4, 8, 16, 0\.38\)/.test(s))process.exit(1)' "$DIST/dsh-bg.css"
   [ -f "$DIST/dsh-bg-user.png" ] || { echo '✗ DSH_KEEP_USER_BG=1 但 dist 里没有 dsh-bg-user.png'; exit 1; }
 else
-  "$NODE" -e 'const s=require("fs").readFileSync(process.argv[1],"utf8");if(!/--dsh-user-bg-image:\s*url\("\/dsh-bg\.svg\?v=1"\)/.test(s)||!/--dsh-user-bg-scrim-top-dark:\s*rgba\(4, 8, 16, 0\.55\)/.test(s))process.exit(1)' "$DIST/dsh-bg.css"
+  # 判据反过来：必须是 none，且四层遮罩全是 0 —— 只要有一条还是实色，壁纸层就还在。
+  "$NODE" -e 'const s=require("fs").readFileSync(process.argv[1],"utf8");if(!/--dsh-user-bg-image:\s*none/.test(s))process.exit(1);for(const k of ["top-light","bottom-light","top-dark","bottom-dark"])if(!new RegExp("--dsh-user-bg-scrim-"+k+":\\s*rgba\\(0, 0, 0, 0\\)").test(s))process.exit(1)' "$DIST/dsh-bg.css"
+  [ ! -e "$DIST/dsh-bg-user.png" ] || { echo '✗ 发行包里不该有 dsh-bg-user.png'; exit 1; }
+  [ ! -e "$DIST/dsh-bg.svg" ] || { echo '✗ 发行包里不该有 dsh-bg.svg'; exit 1; }
 fi
 cd "$SB"
 runlog sh "$SB/selfbuild.sh" payload
@@ -209,17 +226,28 @@ runlog "$NODE" "$SB/scripts/assert-client-factory-loads.js" "$SB/work/payload-ne
 # （旧 index.html 引用 index-BXV-oxvX.js 那套 → 白屏）；②内核：任何 @deepseek-ai 包只要
 # "与干净树不同、又与旧世代树(kernels/*.disabled)字节相同"，就判定整文件旧版被覆盖进来
 # （旧 dsh-host-webserver 21586B → 已认证请求 400 → ERR_HTTP_RESPONSE_CODE_FAILURE）。
-# 参考树/旧树缺失时脚本会大声警告并降级（只跑不需要参考树的那两道），不会静默变绿。
+# 参考树/旧树缺失时脚本判「无法判定」并 exit 2（唯一例外是显式 --no-kernel-baseline，打横幅才允许 0）。
 # 参考树取底包里那份 payload，而不是设备运行树：运行树会被冷启动重铺、也会被人手工
 # patch 过（照着一个动过的地方判断"这个文件是不是旧的"，判出来的结论不可信）。
 REFZIP="$SB/work/payload-ref.zip"
 runlog "$PY" -c 'import sys,zipfile,shutil; s=zipfile.ZipFile(sys.argv[1]).open("assets/payload.zip"); f=open(sys.argv[2],"wb"); shutil.copyfileobj(s,f,1<<20); f.close()' "$BASE" "$REFZIP"
+# 旧世代基线（kernels/*.disabled、.up/cand）不随仓库分发，本机这几棵已经不在了。
+# 所以按"存在才传"：一棵都没有时显式 --no-kernel-baseline，让脚本打降级横幅、
+# 且绝不说"世代一致"；缺基线又不加开关时脚本 exit 2，会把出包活活卡死，
+# 所以这个开关必须跟着判断走，不能写死。补回基线：归档的内核 tar（根目录没有
+# dshroot/ 前缀）解到 kernels/<版本>.disabled/dshroot，这段自动恢复逐条比对，不改代码。
+# （这条链上的旧树路径不含空格；自定义 DSH_OLD_K* 时也别放空格。）
+OLD_ARGS=""
+for d in "${DSH_OLD_K1:-/data/user/0/com.deepseek.harness/files/kernels/0.2.1-rc.5.disabled}" \
+         "${DSH_OLD_K2:-/data/user/0/com.deepseek.harness/files/kernels/0.2.1-rc.2.disabled3}" \
+         "${DSH_OLD_K3:-/data/user/0/com.deepseek.harness/files/.up/cand}"; do
+  if [ -d "$d" ]; then OLD_ARGS="$OLD_ARGS --old $d"; fi
+done
+if [ -z "$OLD_ARGS" ]; then OLD_ARGS=" --no-kernel-baseline"; fi
 runlog "$NODE" "$SB/scripts/check-payload-version-coherence.js" \
   --payload "$SB/work/payload-new.zip" \
   --ref "${DSH_CLEAN_PAYLOAD:-$REFZIP}" \
-  --old "${DSH_OLD_K1:-/data/user/0/com.deepseek.harness/files/kernels/0.2.1-rc.5.disabled}" \
-  --old "${DSH_OLD_K2:-/data/user/0/com.deepseek.harness/files/kernels/0.2.1-rc.2.disabled3}" \
-  --old "${DSH_OLD_K3:-/data/user/0/com.deepseek.harness/files/.up/cand}" \
+  $OLD_ARGS \
   --overlay "$OVL"
 runlog "$NODE" "$RECEIPTS" payload-check --payload "$SB/work/payload-new.zip" --checks "$SB/checks.manifest" --dist yes
 runlog sh "$SB/selfbuild.sh" pack --dex "$DEX" --asset "$R/v118/android-app/splash/boot.html:assets/boot.html" --asset "$R/v118/android-app/splash/fallback.html:assets/fallback.html"

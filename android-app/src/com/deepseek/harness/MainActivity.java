@@ -341,6 +341,10 @@ public class MainActivity extends Activity {
 
     // ===== 开机动画（assets/boot.html 在主 WebView 里跑；原生启动页退为兜底）=====
     private static boolean bootFilmPlayed;          // 每个进程只放一次（Activity 重建不重播）
+    /** 热启动判定只做一次（每进程）；判定完就不再纠结放不放片。 */
+    private static boolean bootFilmDecided;
+    /** 本轮启动的「自动进主界面」是否已经发过（waitForServer 与热启动判定会撞车，靠它幂等）。 */
+    private volatile boolean autoHomeLoaded;
     private boolean bootFilmOn, bootFilmReady, bootFilmDone;
     private String bootFilmPending;
     private float bootFilmP, bootFilmRate, bootFilmTarget;
@@ -1585,7 +1589,48 @@ public class MainActivity extends Activity {
         root.addView(box, bp);
 
         setContentView(root);
-        showBootFilm();
+        // 不再无条件放片：引擎已在答话（前台服务常驻，绝大多数情况）就直接进 GUI，
+        // 热判定在后台做，判定期间原生 splash 保持可见。
+        startBootFilmOrHome();
+    }
+
+    /**
+     * 决定「放片」还是「直接进主界面」。
+     *
+     * 片子是给冷启动（要解压/等 node 起监听）盖等待用的；引擎热着的时候没有等待要盖，
+     * 白看一遍动画反而是负担。判定放后台线程，最多 400ms：
+     *   · nodeProcess 存在但已死 → 必定要重起，直接按冷启动处理；
+     *   · 端口答话 + 令牌捞得到 → 热启动，不放片，直接 loadHome 进 GUI；
+     *   · 其余（含 400ms 内判不出来）→ 按冷启动放片，宁可保守。
+     * 判定期间 splashBox 一直是 VISIBLE，不会出现黑屏空等。
+     */
+    private void startBootFilmOrHome() {
+        if (bootFilmOn || bootFilmPlayed || webView == null) return;
+        if (bootFilmDecided) return;
+        bootFilmDecided = true;
+        new Thread(new Runnable() { @Override public void run() {
+            final long deadline = System.currentTimeMillis() + 400;
+            boolean hot = false;
+            while (true) {
+                Process p = nodeProcess;
+                if (p != null && !p.isAlive()) break;              // 自己起的进程已死 → 冷启动
+                if (healthOk()) { hot = true; break; }
+                if (System.currentTimeMillis() >= deadline) break;
+                try { Thread.sleep(50); } catch (InterruptedException e) { break; }
+            }
+            // 端口通但令牌捞不到 = 上次装包/被杀留下的孤儿引擎，前端配不上会话。
+            // 这种情况交给 startEngine 的「回收孤儿」逻辑，别先导航到 401 页面。
+            if (hot && currentEngineTokenUrl() == null) hot = false;
+            final boolean enterHot = hot;
+            ui.post(new Runnable() { @Override public void run() {
+                if (enterHot) {
+                    diagLog("BOOT", "hot start: engine already answering, skip boot film");
+                    loadHome(true);
+                } else {
+                    showBootFilm();
+                }
+            }});
+        }}, "boot-film-decide").start();
     }
 
     /**
@@ -3608,6 +3653,7 @@ public class MainActivity extends Activity {
         }
         Log.i(TAG, "engine plugins refreshed from payload.zip, files=" + copied);
         retireDeprecatedPayloadEntries(payloadDir);
+        retireDevOnlyPayloadEntries(payloadDir);
     }
 
     /**
@@ -3645,6 +3691,106 @@ public class MainActivity extends Activity {
                 Log.w(TAG, "retire deprecated payload entry failed: " + rel + " " + t.getMessage());
             }
         }
+    }
+
+    /**
+     * 退役 payload/dshroot 里「开发期才有、设备运行时不读」的条目（v1.49.29 起）。
+     *
+     * 解包是覆盖式的：payload.zip 只按条目写文件、不删目标目录里多出来的东西，于是历史
+     * 版本解出来的类型标识、源码 TypeScript、sourcemap、测试目录会一直堆在设备上 ——
+     * 实测内核树 37,413 个文件里有一万多个是这类僵尸，占了近一半磁盘和每次 stat 的开销。
+     * 出包侧已经在 selfbuild/lib/slim-payload.js 里不再写它们，这里把老的清出去，规则同源。
+     *
+     * 做法：只扫 payload/dshroot 子树（dshhome/ 用户技能、node/ runtime 一律不碰），命中就
+     * 移到 payload/dshroot-retired/&lt;相对路径&gt;，不直接删 —— 用户/回滚都还能找回，
+     * 重复执行无副作用。文件夹不动（空目录无害），避免「删到一半中断」留下半棵树。
+     *
+     * 为什么不每次开机扫：这棵树三万多文件，全遍历一遍要很久。用安装包身份戳
+     * （{@link #payloadStamp()}，与 .extracted 同一个值）做标记文件，戳没变就直接返回；
+     * 只有覆盖安装/升级后第一次启动才扫一次。失败只记日志，绝不影响启动。
+     */
+    private void retireDevOnlyPayloadEntries(File payloadDir) {
+        File dshroot = new File(payloadDir, "dshroot");
+        if (!dshroot.isDirectory()) {
+            return;
+        }
+        String stamp = payloadStamp();
+        File stampFile = new File(payloadDir, "dshroot-devretire.stamp");
+        if (!"unknown".equals(stamp) && stamp.equals(readStampFile(stampFile))) {
+            return; // 这次安装已经清过
+        }
+        File retiredRoot = new File(payloadDir, "dshroot-retired");
+        int moved = 0;
+        boolean completed = false;
+        try {
+            moved = retireDevOnlyWalk(dshroot, dshroot, retiredRoot);
+            completed = true;
+        } catch (Throwable t) {
+            Log.w(TAG, "retire dev-only payload entries failed: " + t.getMessage());
+        }
+        // 只有整趟走完才写标记：中途被杀/抛异常就留给下次启动重扫，
+        // 宁可多走一次遍历，也不要留下「标记说清过了、实际没清完」的状态。
+        if (completed && !"unknown".equals(stamp)) {
+            writeStampFile(stampFile, stamp);
+        }
+        if (moved > 0) {
+            Log.i(TAG, "retired dev-only payload entries: " + moved + " files -> dshroot-retired/");
+        }
+    }
+
+    /**
+     * 开发期条目的判定规则，与 selfbuild/lib/slim-payload.js 的 slimDrop 同源：
+     * 只在 node_modules 内命中，`.md` 一律放过（技能正文/插件参考运行时真读）。
+     */
+    private static final java.util.regex.Pattern DEV_ONLY_PAYLOAD = java.util.regex.Pattern.compile(
+            "\\.(d\\.)?(ts|mts|cts)$|\\.map$|(^|/)(test|tests|__tests__)/");
+
+    private boolean isDevOnlyPayloadPath(String rel) {
+        if (!rel.startsWith("node_modules/") && !rel.contains("/node_modules/")) {
+            return false; // 只动 node_modules 内的，与出包规则保持一致
+        }
+        return DEV_ONLY_PAYLOAD.matcher(rel).find();
+    }
+
+    /** 递归把 rel 命中的文件移到 retiredRoot 下同相对路径；返回移走的文件数。 */
+    private int retireDevOnlyWalk(File root, File dir, File retiredRoot) {
+        int moved = 0;
+        File[] kids = dir.listFiles();
+        if (kids == null) {
+            return 0;
+        }
+        String rootPath = root.getAbsolutePath();
+        for (File f : kids) {
+            String abs = f.getAbsolutePath();
+            String rel = abs.length() > rootPath.length() + 1
+                    ? abs.substring(rootPath.length() + 1) : f.getName();
+            rel = rel.replace('\\', '/');
+            if (f.isDirectory()) {
+                moved += retireDevOnlyWalk(root, f, retiredRoot);
+                continue;
+            }
+            if (!f.isFile() || !isDevOnlyPayloadPath(rel)) {
+                continue;
+            }
+            File target = new File(retiredRoot, rel);
+            try {
+                File parent = target.getParentFile();
+                if (parent != null && !parent.isDirectory() && !parent.mkdirs()) {
+                    throw new java.io.IOException("cannot create " + parent);
+                }
+                // 旧同名条目（上次清退留下的）先清掉，否则 renameTo 会失败。
+                if (target.exists()) {
+                    deleteRecursive(target);
+                }
+                if (!f.renameTo(target)) {
+                    throw new java.io.IOException("rename failed");
+                }
+                moved++;
+            } catch (Throwable t) {
+                Log.w(TAG, "retire dev-only file failed: " + rel + " " + t.getMessage());
+            }
+        }
+        return moved;
     }
 
     private File extractVscreenDex() {
@@ -3803,7 +3949,16 @@ public class MainActivity extends Activity {
         super.onResume();
         if (draftInput != null) draftInput.resume();
         injectDraftBootstrap(webView);   // v1.40.5：切回前台补注入令牌，页面可能没走完一次加载
-        if (webView != null) { webView.resumeTimers(); webView.onResume(); }
+        if (webView != null) {
+            webView.resumeTimers();
+            webView.onResume();
+            // 熄屏/退后台期间渲染器被置为后台态、显存被系统收走；回前台若没人要帧，
+            // 画面会停在空白、只露出窗口底色，一直等到页面自己下一次更新（实测空十几秒）。
+            // 光靠 resumeTimers 不够 —— 它只放行定时器，不产生重绘请求。
+            // 下面两步是「主动要一帧」：invalidate 让 View 重新出图，rAF 让页面侧立刻排一帧。
+            webView.postInvalidateOnAnimation();
+            webView.evaluateJavascript("requestAnimationFrame(function(){});", null);
+        }
         rootOk = null; // 从设置页/Shizuku 返回时重新探测 root
         refreshAllStatuses();
         // 从 Shizuku/设置页返回时重新检测
@@ -4434,10 +4589,49 @@ public class MainActivity extends Activity {
                 try { timeoutMs = Math.max(1000, Math.min(Integer.parseInt(tm.trim()), 120000)); }
                 catch (Exception ignored) {}
             }
+            // 这条通道也能直接改屏幕（input tap/swipe/text、am start），
+            // 与无障碍手势共用同一条指示条，否则用 privileged 通道操作时屏幕上没有任何迹象。
+            String opsLabel = shellOpsLabel(command);
+            if (opsLabel != null) {
+                if (!OpsBar.begin(this, "shell", opsLabel)) {
+                    return "{\"ok\":false,\"error\":\"用户按了屏幕操作条上的「停止」，本次操作没有执行\"}";
+                }
+                // 注入的触摸可能落在条上，先让开再执行。
+                OpsBar.passThrough(this, 1800L);
+                String res;
+                boolean ok = true;
+                try {
+                    res = shellViaShizuku(command, timeoutMs);
+                    ok = res != null && res.indexOf("\"ok\":false") < 0;
+                } finally {
+                    OpsBar.end(this, ok);
+                }
+                return res;
+            }
             return shellViaShizuku(command, timeoutMs);
         } catch (Throwable t) {
             return "{\"ok\":false,\"error\":\"shell 路由异常：" + jesc(String.valueOf(t.getMessage())) + "\"}";
         }
+    }
+
+    /** 特权通道里的屏幕动作翻成指示条上的一句话；null = 这条命令不动屏幕。 */
+    private static String shellOpsLabel(String command) {
+        if (command == null) return null;
+        String c = command.trim();
+        if (c.startsWith("input tap")) {
+            String[] parts = c.split("\\s+");
+            return parts.length >= 4 ? "点按 (" + parts[2] + ", " + parts[3] + ")" : "点按";
+        }
+        if (c.startsWith("input swipe")) return "滑动";
+        if (c.startsWith("input text")) return "输入文字";
+        if (c.startsWith("input keyevent")) {
+            String tail = c.substring("input keyevent".length()).trim();
+            if (tail.startsWith("4") || tail.contains("BACK")) return "返回上一屏";
+            if (tail.startsWith("3") || tail.contains("HOME")) return "回到桌面";
+            return "按键";
+        }
+        if (c.startsWith("am start")) return "打开应用";
+        return null;
     }
 
     /** 经 Shizuku（App 进程内）以 shell uid 执行一条命令，回收输出，带超时兜底。 */
@@ -6790,6 +6984,9 @@ public class MainActivity extends Activity {
     }
 
     private void spawnNode(File payload) throws IOException {
+        // 新一轮引擎（冷启动/看门狗重拉/内核回退重起）→ 允许启动流程再自动进一次主界面。
+        // 热启动那条路不会走到这里，所以 autoHomeLoaded 不会被无谓清掉（避免热启动双载）。
+        autoHomeLoaded = false;
         // v1.50：起引擎前先清场 —— 杀掉上一次遗留、还占着引擎端口的 node 进程。
         //
         // 为什么要放在这里（而不是只放 launchEngine）：
@@ -6964,6 +7161,13 @@ public class MainActivity extends Activity {
         // AI 工作区（可选）：用户选择的外部共享存储目录，作为 bash/文件工具的工作根目录
         String ws = workspacePath();
         if (ws != null && !ws.isEmpty()) env.put("DSH_WORKSPACE", ws);
+        // node 启动加速：把 V8 的编译产物缓存到磁盘，二次启动免重复解析上万行 JS。
+        // Node 22+ 认这个环境变量。目录放在 files/ 下（不随 payload 重解清掉），冷启动后自动建。
+        try {
+            File ccDir = new File(getFilesDir(), "node-compile-cache");
+            if (!ccDir.exists()) ccDir.mkdirs();
+            if (ccDir.isDirectory()) env.put("NODE_COMPILE_CACHE", ccDir.getAbsolutePath());
+        } catch (Throwable ignored) {}
         pb.redirectErrorStream(true);
 
         // 装包时系统直接把 App 杀掉，node 子进程不跟着退，会变成孤儿进程继续占着引擎端口。
@@ -7064,12 +7268,14 @@ public class MainActivity extends Activity {
         long deadline = start + 90000;
         while (System.currentTimeMillis() < deadline) {
             if (engineStartAborted) return;   // v1.13：用户点了「停止」→ 立即收手，别再刷“已等待 N 秒”
-            if (healthOk()) { loadHome(); executePendingScheduledTask(); return; }
+            if (healthOk()) { loadHome(true); executePendingScheduledTask(); return; }
             long waited = (System.currentTimeMillis() - start) / 1000;
             if (waited >= 12) {
                 setStatus("正在准备运行环境…");
             }
-            try { Thread.sleep(1000); } catch (InterruptedException e) { return; }
+            // 150ms：探测是回环上的裸 GET，未监听时 ECONNREFUSED 立刻返回，成本可忽略；
+            // 换掉原来的 1000ms 是为了不让「引擎已就绪」白等最多一整个轮询周期。
+            try { Thread.sleep(150); } catch (InterruptedException e) { return; }
         }
         if (engineStartAborted) return;   // v1.13：停止后不再走超时兜底（否则会重新 spawn + 重新加载页面）
         // 超时：带端口提示便于排查（node 日志已写入 files/dsh-web.log）
@@ -7677,13 +7883,31 @@ public class MainActivity extends Activity {
         conDialogView3(title, t, neutral, onNeutral, positive, onPositive, negative);
     }
 
-    private void loadHome() {
+    private void loadHome() { loadHome(false); }
+
+    /**
+     * @param auto true = 启动流程自动进主界面（waitForServer 成功 / 热启动判定），每轮只放行第一次，
+     *             避免热判定与 waitForServer 各 load 一次（双载会白丢一次页面状态）；
+     *             false = 用户主动进（控制台「打开主界面」），不设闸。
+     */
+    private void loadHome(boolean auto) {
         // v1.12：控制台还开着时不抢界面（引擎就绪后由用户点「打开主界面」进来）
         if (consoleVisible) return;
+        if (auto) {
+            // 热判定与 waitForServer 可能同时到（一个 UI 线程、一个探测线程）→ 原子地只放行一次
+            synchronized (MainActivity.class) {
+                if (autoHomeLoaded) return;
+                autoHomeLoaded = true;
+            }
+        }
         startWatchdog();
         final boolean film = bootFilmOn && !bootFilmDone;
         if (film) {
-            // 片子收尾：连接阶段亮起 → 就绪 → 淡黑谢幕，然后才把 WebView 切到 GUI
+            // 片子收尾：连接阶段亮起 → 就绪 → 进度走满 → 淡到黑 → 切 GUI。
+            // 总预算 650ms（200 起点 + 450 停留）：片内收尾是 90ms 走满、100ms 置「启动完成」、
+            // 再停 100ms、最后 200ms 淡到黑，400ms 收完；这里多留 50ms 作黑底压实期
+            // （WebView 换文档那一瞬画的是近黑底，不留时间会看见上一帧）。
+            // 切点在黑场之后，所以收尾是「放完了」而不是半路掐断。改数值要和 boot.html 一起改。
             bootFilmDone = true;
             if (bootStage == 1) recordEngineSecs();
             bootStage = 2;
@@ -7702,9 +7926,9 @@ public class MainActivity extends Activity {
                                 webView.clearHistory();
                             }
                         }
-                    }, 1500);
+                    }, 450);
                 }
-            }, 520);
+            }, 200);
         }
         ui.post(new Runnable() {
             @Override public void run() {
@@ -8154,6 +8378,15 @@ public class MainActivity extends Activity {
         return o.toString();
     }
 
+    /** 打开原生设置页。外观那几项在主界面无处落脚，单独一页比塞进网页控制台干净。 */
+    private void openNativeSettings() {
+        try {
+            startActivity(new Intent(this, SettingsActivity.class));
+        } catch (Throwable t) {
+            toastMsg("设置页打不开：" + t.getMessage());
+        }
+    }
+
     /** 桥入口：执行一个控制台动作。动作本身异步，立刻回 ok（失败会 Toast）。 */
     private String ctlAction(final String id, final String arg) {
         try {
@@ -8191,6 +8424,7 @@ public class MainActivity extends Activity {
             if ("log.view".equals(id)) { conViewLog(); return; }
             if ("log.share".equals(id)) { conShareLog(); return; }
             if ("log.clear".equals(id)) { conClearLogNow(); return; }
+            if ("settings.open".equals(id)) { openNativeSettings(); return; }
             if ("theme.set".equals(id)) {
                 int mode = 0;
                 try { mode = Integer.parseInt(arg); } catch (Throwable ignored) {}
@@ -9529,7 +9763,7 @@ public class MainActivity extends Activity {
                 engineProbeAt = System.currentTimeMillis();
                 if (engineStartTs == 0L) engineStartTs = System.currentTimeMillis();
                 ui.post(new Runnable() { @Override public void run() { refreshConsole(); } });
-                if (!consoleVisible) loadHome();
+                if (!consoleVisible) loadHome(true);
                 return;
             }
         }

@@ -8,7 +8,13 @@ const { patchManifest, describeManifest } = require('../lib/android-manifest.js'
 // 自建包沿用旧骨架 APK 的清单，骨架里没有 RECORD_AUDIO（源码清单里其实早就声明了），
 // 于是装机版永远拿不到麦克风：checkSelfPermission 恒为拒绝，requestPermissions 静默不弹窗，
 // 听写永远停在「等待麦克风权限」。每次出包补上，别再让它漏。
-const BASELINE_PERMISSIONS = ['android.permission.RECORD_AUDIO'];
+// WebView 录音走 getUserMedia + echoCancellation，Chromium 要改音频路由（SCO/通信设备），
+// 骨架清单里也没有这条 → SecurityException 被翻译成 NotReadableError: Could not start audio source。
+// 普通权限，声明即授予，不需要运行时弹窗。
+const BASELINE_PERMISSIONS = [
+  'android.permission.RECORD_AUDIO',
+  'android.permission.MODIFY_AUDIO_SETTINGS',
+];
 function main(args) {
   const input = args[0];
   const get = key => { const i = args.indexOf(key); if (i < 0) return undefined; const v = args[i + 1]; if (!v || v.startsWith('--')) throw new Error('Missing value: ' + key); return v; };

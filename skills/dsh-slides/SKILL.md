@@ -30,7 +30,7 @@ whenToUse: 用户说「做个PPT / 生成演示文稿 / 做几页幻灯片 / 把
 python3 scripts/make_pptx.py \
   --title "DeepSeek Harness 项目汇报" \
   --author "开发团队" \
-  --output "/sdcard/DeepSeekHarness/demo.pptx" \
+  --output "./demo.pptx" \
   --slides-json '[
     {"title": "项目背景与目标", "bullets": ["在安卓端构建自主编译、自进化的智能体", "解决外部网络风控与连接延迟", "打造高颜值内联交互与工具闭环"]},
     {"title": "核心技术突破", "bullets": ["全内网 IEPL 专线接入，90% 纯净度", "原生架构图与 PPTX 自动化引擎", "跨会话持久化记忆中枢 (mem.db)"]}

@@ -37,10 +37,17 @@
  *   ④ overlay-stale    --overlay 预检：build-overlay 里同样判据命中就报，
  *                      把旧文件挡在"进包之前"，而不是发出去了才发现
  *
+ * ③④ 的前提是基线存在：没有干净参考树，就分不清"旧世代"和"本机补丁"；没有旧世代
+ * 树，就没有"旧世代字节"可比。这两棵树曾经是写死的路径，树被清掉之后这道闸照样打
+ * ✓ —— 判据的作用对象没了，出口还是绿的。那比报红更坏，因为红的会被人查。
+ * 所以基线缺一个 = 无法判定（默认 exit 2），不许拿"没报违规"顶"没有残留"。
+ * 同理"树在"也不够：得真有内核文件可比 —— 空包、拿错的 APK 都能打开，会让判据空转
+ * （一条没比、却因为"参考树里没有"全跳过），所以两棵树都先量一遍再开比。
+ *
  * 用法：
  *   node check-payload-version-coherence.js --payload <payload.zip|payload目录> \
- *        [--ref <干净树>] [--old <旧世代树>]... [--overlay <build-overlay>] \
- *        [--expect-version 0.2.2-rc.1] [--json <报告>] [--self-test]
+ *        --ref <干净树> [--old <旧世代树>]... [--overlay <build-overlay>] \
+ *        [--expect-version 0.2.2-rc.1] [--no-kernel-baseline] [--json <报告>] [--self-test]
  *
  *   例（本机实测命令）：
  *     node check-payload-version-coherence.js \
@@ -49,7 +56,13 @@
  *       --old kernels/0.2.1-rc.5.disabled --old kernels/0.2.1-rc.2.disabled3 \
  *       --overlay selfbuild/build-overlay --expect-version 0.2.2-rc.1
  *
- * 退出码：0 = 通过（可能有警告）；1 = 有违规；2 = 用法/读取错误
+ * 结论只有三种，别混：
+ *   ① 世代一致   参考树与至少一棵旧世代树都用上了、逐条比完零残留 → exit 0
+ *   ② 无法判定   基线缺失（--ref/--old 没给或用不了）→ 默认 exit 2；
+ *                只有显式给了 --no-kernel-baseline 才允许 exit 0 并打降级横幅
+ *   ③ 有违规     exit 1（红优先；基线缺失时也照样红）
+ *
+ * 退出码：0 = 真比过且过（或显式降级）；1 = 有违规；2 = 输入不全，世代比对没跑
  */
 
 const fs = require('fs');
@@ -72,18 +85,24 @@ const USAGE = `用法：
 
 必填：
   --payload <p>       要检查的 payload（zip 或已解开的 dshroot 树所在目录）
+  --ref <dir|zip>     干净参考树 —— 判据的一半；必须真有内核文件（空包/拿错的 APK = 输入错）
 
 推荐：
-  --ref <dir|zip>     干净参考树（如 /data/user/0/com.deepseek.harness/files/payload）
-  --old <dir>         旧世代树，可重复（如 kernels/0.2.1-rc.5.disabled）
+  --old <dir>         旧世代树，可重复 —— 判据的另一半（如 kernels/0.2.1-rc.5.disabled）
   --overlay <dir>     预检 build-overlay，进包前抓旧文件
   --expect-version v  声明本次内核版本，不一致即失败
 
 其它：
   --allow <a,b>       允许与参考树不同的路径（本机补丁），支持尾部 * ；默认只警告不当违规
+  --no-kernel-baseline  显式接受"本轮没有旧世代基线"：降级运行、打横幅、绝不说"一致"
   --json <file>       输出机器可读报告
-  --self-test         跑内置合成用例（含坏包/好包两种情况），不读写真实包
+  --self-test         跑内置合成用例（基线缺失 / 逃生口 / overlay 各形态），不读写真实包
   -h, --help          显示本帮助
+
+退出码：
+  0  真比过且通过（或给了 --no-kernel-baseline 的显式降级）
+  1  有违规（红优先；基线缺失时也照样红）
+  2  输入不全：--ref / --old 缺失或用不了，世代比对没跑，结论只能是"无法判定"
 `;
 
 // ── payload 读取抽象：zip 与目录两种都支持，crc 一律按需算、缓存 ──────────
@@ -252,16 +271,19 @@ function checkVersionLine(payload, expectVersion, out) {
 
 // ── 检查 ③：旧世代残留（与干净参考树不同、且与旧世代树相同）──────────────
 function checkOldGeneration(payload, opts, out) {
-  if (!opts.ref) { out.warnings.push('未给 --ref，跳过旧世代比对（只能靠 ①② 抓，覆盖不全）'); return; }
+  if (!out.baseline.ran) {
+    out.warnings.push('世代比对未运行（基线不可用）—— 本轮没有"与旧世代相同"这条判据，没报违规 ≠ 没有残留');
+    return;
+  }
   const allow = allowMatcher(opts.allow);
-  let compared = 0, absent = 0;
+  let compared = 0, absent = 0, matched = 0;
   for (const n of payload.names) {
     if (!KERNEL_RE.test(n)) continue;
     if (allow(n)) { out.allowed.push(n); continue; }
     const mine = payload.stat(n);
     const refSt = refTree ? refTree.stat(n) : diskStat(opts.ref, n, mine);
     if (!refSt) { absent++; out.warnings.push(`参考树里没有 ${n}（新增文件，未参与世代比对）`); continue; }
-    if (same(mine, refSt)) continue;
+    if (same(mine, refSt)) { matched++; continue; }
     compared++;
     const hits = opts.old.map((d) => ({ d, st: diskStat(d, n, mine) })).filter((x) => same(mine, x.st));
     if (hits.length) {
@@ -276,6 +298,15 @@ function checkOldGeneration(payload, opts, out) {
   }
   out.comparedCount = compared;
   out.refAbsentCount = absent;
+  // 参考树和本包得是同一支的近邻，覆盖率才是判据能不能成立的前提：空包、拿错的 APK、
+  // 只剩内核 package.json 的薄包，都会让"参考树里没有"吞掉几乎所有条目 —— 一条没比，
+  // 下面那句"零差异"就是在替一个没运行的判据背书。缺口占一半以上就降成无法判定。
+  const total = matched + compared + absent;
+  if (absent > 0 && (matched + compared) < total / 2) {
+    const msg = `参考树只盖住本包 ${matched + compared}/${total} 个内核文件（缺失 ${absent} 条）`
+      + ' → 没有可比对象，世代比对等于没运行；--ref 是不是拿错文件了？';
+    (opts.noKernelBaseline ? out.warnings : out.inputErrors).push(msg);
+  }
 }
 
 // ── 检查 ④：build-overlay 预检（把旧文件挡在进包之前）────────────────────
@@ -288,20 +319,23 @@ function walkDir(dir, root = dir, acc = []) {
   return acc;
 }
 function checkOverlay(opts, out) {
-  if (!opts.overlay) return;
-  if (!opts.old.length) { out.warnings.push('给了 --overlay 但没有 --old，预检无法判定世代，跳过'); return; }
+  if (!opts.overlay || !fs.existsSync(opts.overlay)) return; // 不在的情况 checkInputs 已提示
   const names = walkDir(opts.overlay);
+  const baseline = out.baseline.ran;
   let stale = 0;
   for (const n of names) {
     if (!KERNEL_RE.test(n)) continue;
-    // .bak / .orig 一律算污染：它们会混进 dshroot_forced.txt，且说明这里被手工兜过
+    // .bak / .orig 不该躺在出包输入里（说明这个文件被手工兜过）。overlay-skip.js 会在
+    // 打包时按 *.bak-* / *.orig 挡掉、进不了 payload —— 但留着它，下一个入口未必这么挡。
     if (/\.(bak|orig)([.-]|$)/i.test(n)) {
       stale++;
-      out.warnings.push(`overlay 里有开发备份 ${n}（会进 dshroot_forced.txt；strip-dist-payload 只是最后一道网）`);
+      out.warnings.push(`overlay 里有开发备份 ${n}（lib/overlay-skip.js 的 *.bak-* / *.orig 规则会把它挡在包外，进不了 payload；strip-dist-payload 只是第三道网，从 overlay 里清掉才干净）`);
       continue;
     }
+    // 没有基线就只查污染，不说"通过" —— 说通过等于替一个没运行过的判据背书
+    if (!baseline) continue;
     const mine = diskStat(opts.overlay, n);
-    const refSt = refTree ? refTree.stat(n) : (opts.ref ? diskStat(opts.ref, n, mine) : null);
+    const refSt = refTree ? refTree.stat(n) : diskStat(opts.ref, n, mine);
     if (refSt && same(mine, refSt)) continue;
     const hits = opts.old.map((d) => ({ d, st: diskStat(d, n, mine) })).filter((x) => same(mine, x.st));
     if (hits.length) {
@@ -313,33 +347,94 @@ function checkOverlay(opts, out) {
       });
     }
   }
-  if (!stale) out.notes.push(`overlay 预检通过：${names.length} 个文件里没有旧世代残留`);
+  if (!baseline) out.warnings.push(`overlay 预检未能比对世代（本轮无基线）：${names.length} 个文件只查了 .bak/.orig 这类污染`);
+  else if (!stale) out.notes.push(`overlay 预检通过：${names.length} 个文件里没有旧世代残留`);
+}
+
+// ── 输入自检：基线是判据的一部分，缺了就是"无法判定" ──────────────────────
+// 这道闸的判据是"与干净树不同、又与旧树字节相同"，两棵树都是判据本身，不是可选装饰。
+// 历史教训：缺了只 console 吼一声、出口照样打 ✓ —— 保护看着在，其实一个字节都没比。
+// 现在缺基线 = 无法判定（exit 2）；要放行必须显式 --no-kernel-baseline，那种跑法
+// 绝不出现"✓ 世代一致"。另外"旧世代树存在"也不够：目录里得真有内核包文件，
+// 空目录当年就是靠一句"路径存在"混过去的。
+function oldTreeStatus(dir) {
+  let st;
+  try { st = fs.statSync(dir); } catch { return { ok: false, why: '路径不存在' }; }
+  if (!st.isDirectory()) return { ok: false, why: '不是目录' };
+  let kernel = 0;
+  (function walk(d) {
+    for (const ent of fs.readdirSync(d, { withFileTypes: true })) {
+      const fp = path.join(d, ent.name);
+      if (ent.isDirectory()) walk(fp);
+      else if (KERNEL_RE.test(path.relative(dir, fp).split(path.sep).join('/'))) kernel++;
+    }
+  })(dir);
+  if (!kernel) return { ok: false, why: '目录里没有任何内核包文件（空树，或布局不是 dshroot/…）' };
+  return { ok: true, kernel };
+}
+
+// 参考树和旧世代树是同一条判据的两半，量纲得一样：能打开 ≠ 里面有东西可比。
+// 一个合法但零条目的 zip、或者把 APK 当 payload.zip 递进来（外层是 zip，里面没有
+// dshroot/ 前缀），都能顺利打开，然后每个内核文件都"参考树里没有" → 一条没比 → ✓。
+// 所以这里先量一遍：有没有内核文件、内核 package.json 读不读得到。
+function refTreeStatus(dir, tree) {
+  if (!tree) return { ok: false, why: '打不开' };
+  let names;
+  try { names = tree.names; } catch { return { ok: false, why: '读不出条目列表' }; }
+  const why = [];
+  const kernelFiles = names.filter((n) => KERNEL_RE.test(n)).length;
+  if (!kernelFiles) why.push(`里面没有任何内核包文件（${names.length} 条条目，布局不是 dshroot/… 或拿错了文件）`);
+  if (!names.includes(KERNEL_JSON)) why.push(`里面没有内核 package.json（${KERNEL_JSON}）`);
+  else {
+    let v = null;
+    try { v = JSON.parse(tree.read(KERNEL_JSON).toString('utf8')).version; } catch (e) { why.push(`内核 package.json 读不出来（${e.message}）`); }
+    if (v === null && !why.length) why.push('内核 package.json 没有 version 字段');
+  }
+  if (why.length) return { ok: false, why: why.join('；') };
+  return { ok: true, files: kernelFiles };
+}
+
+function checkInputs(opts, out) {
+  // 显式降级时把输入问题降为提示，结论落到"无法判定但被放行"
+  const soft = (msg) => (opts.noKernelBaseline ? out.warnings : out.inputErrors).push(msg);
+  if (!opts.ref) soft('没给 --ref 干净参考树 → 分不清"旧世代"和"本机补丁"，世代比对无法运行');
+  else if (!out.baseline.ref) soft(`--ref 用不了（${opts.ref}${out.baseline.refWhy ? '：' + out.baseline.refWhy : ''}）→ 世代比对无法运行`);
+  if (!opts.old.length) soft('没给 --old 旧世代树 → 手里没有"旧世代字节"，世代比对无法运行');
+  else for (const o of opts.old) {
+    const s = oldTreeStatus(o);
+    if (s.ok) out.baseline.oldTrees.push({ dir: o, files: s.kernel });
+    else soft(`--old 不能参与比对（${o}：${s.why}）`);
+  }
+  if (opts.overlay && !fs.existsSync(opts.overlay)) out.warnings.push(`--overlay 不存在（${opts.overlay}）→ 跳过源头预检`);
+  out.baseline.ran = Boolean(out.baseline.ref && out.baseline.oldTrees.length);
+  if (!out.baseline.ran && !opts.noKernelBaseline) {
+    out.inputErrors.push('世代比对没有基线：本轮只核了前端引用 / 本地静态资源 / 内核家族版本号，'
+      + '旧内核整文件被覆盖进来这一档不受任何保护');
+  }
 }
 
 // ── 主流程 ────────────────────────────────────────────────────────────────
-// 输入自检：参考树/旧世代树/overlay 不存在时**必须吼出来**，
-// 否则 old-generation 会静默退化成"全是本机补丁"，看着绿其实没保护。
-function checkInputs(opts, out) {
-  if (opts.ref && !fs.existsSync(opts.ref)) {
-    out.warnings.push(`--ref 不存在（${opts.ref}）→ 无法判断"与干净树不同"，old-generation 检查退化`);
-  }
-  for (const o of opts.old || []) {
-    if (!fs.existsSync(o)) out.warnings.push(`--old 不存在（${o}）→ 这棵旧世代树本轮没参与比对，世代判定可能漏`);
-  }
-  if (!opts.old || !opts.old.length) out.warnings.push('没给 --old 旧世代树 → 世代比对整体失效（本次只保前端引用与版本一条线）');
-  if (opts.overlay && !fs.existsSync(opts.overlay)) out.warnings.push(`--overlay 不存在（${opts.overlay}）→ 跳过源头预检`);
-}
-
 function runChecks(opts) {
-  const out = { violations: [], warnings: [], allowed: [], notes: [], kernelVersion: null };
-  checkInputs(opts, out);
+  const out = { violations: [], warnings: [], allowed: [], notes: [], inputErrors: [], kernelVersion: null };
+  // 参考树先打开：它打不开就是基线不存在，checkInputs 据此判"无法判定"
+  out.baseline = { ran: false, ref: false, refWhy: null, oldTrees: [] };
+  refTree = null;
   if (opts.ref) {
     try {
       refTree = openPayload(opts.ref);
+      const st = refTreeStatus(opts.ref, refTree);
+      if (st.ok) {
+        out.baseline.ref = true;
+        out.baseline.refFiles = st.files;
+      } else {
+        out.baseline.refWhy = st.why;
+        refTree = null; // 不可用的参考树不能留着当基准
+      }
     } catch (e) {
-      out.warnings.push(`--ref 打不开（${opts.ref}：${e.message}）→ old-generation 检查退化`);
+      out.baseline.refWhy = e.message;
     }
   }
+  checkInputs(opts, out);
   let payload;
   try {
     payload = openPayload(opts.payload);
@@ -353,14 +448,12 @@ function runChecks(opts) {
   checkLocalAssetRefs(payload, out);
     checkVersionLine(payload, opts.expectVersion, out);
     // 参考树自己的内核版本也要对得上，否则"与干净树不同"这个判据会整体偏掉
-    if (opts.ref) {
-      try {
-        const raw = refTree ? refTree.read(KERNEL_JSON) : fs.readFileSync(path.join(opts.ref, KERNEL_JSON));
-        const rv = JSON.parse(raw.toString('utf8')).version;
-        if (out.kernelVersion && rv !== out.kernelVersion) {
-          out.warnings.push(`参考树内核版本 ${rv} ≠ 本包 ${out.kernelVersion} → 世代比对基准过期，old-generation 结果只作参考`);
-        }
-      } catch { /* 参考树没有内核 package.json：checkInputs 已按缺失处理 */ }
+    // refTreeStatus 已经验过内核 package.json 读得出来，这里直接取版本；再读失败就是真异常，别吞
+    if (out.baseline.ref) {
+      const rv = JSON.parse(refTree.read(KERNEL_JSON).toString('utf8')).version;
+      if (out.kernelVersion && rv !== out.kernelVersion) {
+        out.warnings.push(`参考树内核版本 ${rv} ≠ 本包 ${out.kernelVersion} → 世代比对基准过期，old-generation 结果只作参考`);
+      }
     }
     checkOldGeneration(payload, opts, out);
   } finally {
@@ -372,9 +465,16 @@ function runChecks(opts) {
 
 function report(out, opts) {
   const L = [];
+  const base = out.baseline || { ran: false, oldTrees: [] };
+  const inputErrs = out.inputErrors || [];
   if (out.kernelVersion) L.push(`内核版本：${out.kernelVersion}${opts.expectVersion ? `（声明 ${opts.expectVersion}）` : ''}`);
   if (typeof out.familyCount === 'number') L.push(`内核家族包：${out.familyCount} 个`);
-  if (typeof out.comparedCount === 'number') L.push(`与参考树逐条比对：${out.comparedCount} 条不同；参考树缺失 ${out.refAbsentCount ?? 0} 条`);
+  if (base.ran) {
+    L.push(`世代基线：参考树 + ${base.oldTrees.length} 棵旧世代树（${base.oldTrees.map((t) => path.basename(t.dir) + ':' + t.files).join(', ')}）`);
+    L.push(`与参考树逐条比对：${out.comparedCount ?? 0} 条不同；参考树缺失 ${out.refAbsentCount ?? 0} 条`);
+  } else {
+    L.push('世代基线：无 —— 参考树 / 旧世代树缺一即没有判据');
+  }
   for (const n of out.notes) L.push('  · ' + n);
   for (const w of out.warnings) L.push('  ! ' + w);
   if (out.allowed.length) L.push(`  · --allow 放行 ${out.allowed.length} 条本机补丁`);
@@ -384,28 +484,55 @@ function report(out, opts) {
     L.push('');
     L.push(`✗ 不通过：${out.violations.length} 条违规 —— 别签名、别上传，先逐条查清。`);
     L.push('  （旧世代整文件覆盖会让新装用户撞 400/白屏；这条链在 v1.48/code296 已经真出过事）');
-  } else if (out.warnings.length || out.comparedCount) {
-    // 2026-11-07（Lead 的话）：没有违规 ≠ 一切都对。与参考树不同的那几处必须让人自己认，
-    // 而不是看到一句"通过"就放心 —— 参考树本身也可能脏（"本机运行树"不等于"上游原版"）。
-    const n = out.comparedCount || 0;
+    if (inputErrs.length) {
+      L.push('');
+      for (const e of inputErrs) L.push(`✗ [input] ${e}`);
+      L.push('  （这些违规是在没有世代基线的状态下判出来的：清完违规也得先补基线，不能就此签名）');
+    }
+  } else if (inputErrs.length) {
+    // 判据的作用对象没了：不许出现"一致"，只能说"无法判定"
     L.push('');
-    L.push(`✓ 世代一致：没有已知旧世代残留，前端引用齐全。`);
-    L.push(`  但本次与参考树不同 ${n} 处（上面逐条列了，含 ${out.warnings.length} 条提示）——`);
-    L.push(`  这些是"不是旧版"而不是"一定是你想要的本机补丁"，签名前请自己过一遍这份清单。`);
+    for (const e of inputErrs) L.push(`✗ [input] ${e}`);
+    L.push('');
+    L.push('✗ 无法判定：世代比对没有运行 —— 这道闸本轮等于不存在，不许拿它当通过。');
+    L.push('  补回基线（--ref + 至少一棵 --old）才会恢复；确认这轮不补，就显式加 --no-kernel-baseline 降级跑。');
+  } else if (!base.ran) {
+    // 走到这里只可能是显式 --no-kernel-baseline：横幅要让人绕不过去
+    L.push('');
+    L.push('════════════════════════════════════════════════════════════');
+    L.push(' ⚠ 降级运行：本轮没有旧世代基线（--no-kernel-baseline 显式放行）');
+    L.push(' 「旧内核整文件覆盖 → 已认证请求 400 / 前端白屏」那道保护【没有运行】。');
+    L.push(' 本包是否含旧世代文件：无法判定 —— 不是"没有"，是这轮不查。');
+    L.push(' 已核的只有：前端引用、本地静态资源、内核家族版本号。');
+    L.push('════════════════════════════════════════════════════════════');
+    // 结论放在最后两行是有意的：出包链用 `tail -2` 收日志，关键结论必须落在尾巴上
+    L.push(' ⚠ 降级：旧世代保护【没有运行】—— 本包是否含旧世代文件：无法判定');
+    L.push(' 补回基线：上一代内核 tar 解到 kernels/<版本>.disabled/dshroot，再去掉 --no-kernel-baseline');
+  } else if (out.comparedCount) {
+    // 没有违规 ≠ 一切都对：与参考树不同的那几处必须让人自己认
+    // （参考树本身也可能脏："本机运行树"不等于"上游原版"）。
+    L.push('');
+    L.push('✓ 世代一致：没有已知旧世代残留，前端引用齐全。');
+    L.push(`  但本次与参考树不同 ${out.comparedCount} 处（上面逐条列了，含 ${out.warnings.length} 条提示）——`);
+    L.push('  这些是"不是旧版"而不是"一定是你想要的本机补丁"，签名前请自己过一遍这份清单。');
   } else {
-    L.push('✓ 通过：payload 内内核包世代一致，前端引用齐全（与参考树零差异）。');
+    L.push('✓ 世代一致：没有已知旧世代残留，前端引用齐全（与参考树零差异）。');
   }
   return L.join('\n');
 }
 
 // ── 自检：合成用例，不碰真实包 ────────────────────────────────────────────
+// 这一批用例的重点不是"好包过、坏包红"，而是"判据本身没了会怎样"：
+// 基线缺失、基线是空目录、只有 overlay 没有旧树 —— 这三种形态以前全打 ✓。
+// 只把提示改回 warning 而不动出口，自检必须能抓住。
 function selfTest() {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'coherence-'));
   const K = 'dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/';
+  const KJSON = 'dshroot/lib/node_modules/@deepseek-ai/dsh/package.json';
   const OK_HTML = '<script type="module" src="./assets/index-AAA.js"></script>\n<link rel="stylesheet" href="/mobile.css?v=1">';
   const build = (tag, { pkgVersions, html }) => {
     const entries = [
-      { name: 'dshroot/lib/node_modules/@deepseek-ai/dsh/package.json', data: JSON.stringify({ name: '@deepseek-ai/dsh', version: '0.2.2-rc.1' }) },
+      { name: KJSON, data: JSON.stringify({ name: '@deepseek-ai/dsh', version: '0.2.2-rc.1' }) },
       { name: K + 'dsh-web-frontend/dist/index.html', data: html },
       { name: K + 'dsh-web-frontend/dist/mobile.css', data: 'body{}' },
       { name: K + 'dsh-web-frontend/dist/assets/index-AAA.js', data: 'console.log(1)' },
@@ -417,52 +544,91 @@ function selfTest() {
     writeZip(entries, z);
     return z;
   };
-  const cases = [];
   // 好包：版本一条线 + 引用齐全
   const good = build('good', { pkgVersions: { 'dsh-host-webserver': '0.2.2-rc.1', 'dsh-app-boot': '0.2.2-rc.1' }, html: OK_HTML });
   // 坏包 A：混世代（0.2.1 残留）
   const mixed = build('mixed', { pkgVersions: { 'dsh-host-webserver': '0.2.1-rc.5' }, html: OK_HTML });
   // 坏包 B：index.html 引用不存在的 bundle（白屏）
   const brokenHtml = build('brokenhtml', { pkgVersions: { 'dsh-host-webserver': '0.2.2-rc.1' }, html: '<script src="./assets/index-GONE.js"></script><link href="/mobile.css">' });
-  // 旧世代残留：参考树 + 旧树各造一份，payload 取旧树的字节
+
+  // 旧世代残留：参考树放本代字节、旧树放上一代字节，payload 里躺的却是旧字节
   const refDir = path.join(tmp, 'ref'), oldDir = path.join(tmp, 'old');
+  const emptyOld = path.join(tmp, 'old-empty'), missingOld = path.join(tmp, 'old-gone');
   const rel = K + 'dsh-host-webserver/lib/index.js';
   for (const [d, body] of [[refDir, 'NEW-0.2.2'], [oldDir, 'OLD-0.2.1']]) {
     fs.mkdirSync(path.join(d, path.dirname(rel)), { recursive: true });
     fs.writeFileSync(path.join(d, rel), body + '\n');
   }
+  fs.mkdirSync(emptyOld, { recursive: true });
+  fs.mkdirSync(path.join(refDir, path.dirname(KJSON)), { recursive: true });
+  fs.writeFileSync(path.join(refDir, KJSON), JSON.stringify({ name: '@deepseek-ai/dsh', version: '0.2.2-rc.1' }));
+  // 参考树本身得是"真有内核文件、和好包同代"的树，否则测的不是判据而是空转
+  for (const e of readZip(good, { load: false })) {
+    const dst = path.join(refDir, e.name);
+    fs.mkdirSync(path.dirname(dst), { recursive: true });
+    fs.writeFileSync(dst, readEntry(good, e));
+  }
   const stale = path.join(tmp, 'stale.zip');
   writeZip([
-    { name: 'dshroot/lib/node_modules/@deepseek-ai/dsh/package.json', data: JSON.stringify({ version: '0.2.2-rc.1' }) },
+    { name: KJSON, data: JSON.stringify({ version: '0.2.2-rc.1' }) },
     { name: K + 'dsh-web-frontend/dist/index.html', data: OK_HTML },
     { name: K + 'dsh-web-frontend/dist/mobile.css', data: 'body{}' },
     { name: K + 'dsh-web-frontend/dist/assets/index-AAA.js', data: 'x' },
     { name: rel, data: 'OLD-0.2.1\n' },
   ], stale);
+  // overlay 里躺着一份旧世代文件：还没进包，但一打包就会被整文件盖进去（事故的源头形态）
+  const ovl = path.join(tmp, 'overlay-old');
+  fs.mkdirSync(path.join(ovl, path.dirname(rel)), { recursive: true });
+  fs.writeFileSync(path.join(ovl, rel), 'OLD-0.2.1\n');
 
-  const base = { payload: null, ref: null, old: [], overlay: null, allow: [], expectVersion: null };
-  cases.push(['好包', runChecks({ ...base, payload: good }), 0]);
-  cases.push(['混世代', runChecks({ ...base, payload: mixed }), 1]);
-  cases.push(['引用缺失(白屏)', runChecks({ ...base, payload: brokenHtml }), 1]);
-  cases.push(['旧世代残留', runChecks({ ...base, payload: stale, ref: refDir, old: [oldDir] }), 1]);
+  // 参考树在名字上、其实什么都没得比：空 zip / 只有内核 package.json 的薄包
+  const emptyRef = path.join(tmp, 'ref-empty.zip');
+  writeZip([], emptyRef);
+  const thinRef = path.join(tmp, 'ref-thin');
+  fs.mkdirSync(path.join(thinRef, path.dirname(KJSON)), { recursive: true });
+  fs.writeFileSync(path.join(thinRef, KJSON), JSON.stringify({ name: '@deepseek-ai/dsh', version: '0.2.2-rc.1' }));
+
+  const none = { payload: null, ref: null, old: [], overlay: null, allow: [], expectVersion: null, noKernelBaseline: false };
+  const cases = [
+    ['好包 + 有基线', { ...none, payload: good, ref: refDir, old: [oldDir] }, 0, ['✓ 世代一致'], []],
+    ['好包但没有基线', { ...none, payload: good }, 2, ['无法判定'], ['✓ 世代一致']],
+    ['混世代', { ...none, payload: mixed }, 1, [], []],
+    ['引用缺失(白屏)', { ...none, payload: brokenHtml }, 1, [], []],
+    ['旧世代残留（旧树在）', { ...none, payload: stale, ref: refDir, old: [oldDir] }, 1, ['[old-generation]'], []],
+    ['旧世代残留 + 旧树路径不存在', { ...none, payload: stale, ref: refDir, old: [missingOld] }, 2, ['无法判定'], ['✓ 世代一致']],
+    ['旧世代残留 + 旧树是空目录', { ...none, payload: stale, ref: refDir, old: [emptyOld] }, 2, ['无法判定'], ['✓ 世代一致']],
+    ['空 zip 当 --ref', { ...none, payload: stale, ref: emptyRef, old: [oldDir] }, 2, ['无法判定'], ['✓ 世代一致']],
+    ['--ref 只有内核 package.json', { ...none, payload: stale, ref: thinRef, old: [oldDir] }, 2, ['无法判定'], ['✓ 世代一致']],
+    ['逃生口 + 旧树不存在', { ...none, payload: stale, ref: refDir, old: [missingOld], noKernelBaseline: true }, 0, ['没有运行'], ['✓ 世代一致']],
+    ['只有 --overlay 没有 --old', { ...none, payload: good, ref: refDir, overlay: ovl }, 2, ['预检未能比对世代'], ['✓ 世代一致', '预检通过']],
+    ['overlay 里躺着旧世代 + 有基线', { ...none, payload: good, ref: refDir, old: [oldDir], overlay: ovl }, 1, ['[overlay-stale]'], []],
+  ];
 
   let bad = 0;
-  for (const [label, res, expect] of cases) {
-    const got = res.violations.length ? 1 : 0;
-    const ok = got === expect;
+  const verdict = (r) => (r.violations.length ? 1 : (r.inputErrors.length ? 2 : 0));
+  for (const [label, o, expect, must, mustNot] of cases) {
+    const res = runChecks(o);
+    const text = report(res, o);
+    const got = verdict(res);
+    const miss = must.filter((x) => !text.includes(x));
+    const seen = mustNot.filter((x) => text.includes(x));
+    const ok = got === expect && !miss.length && !seen.length;
     if (!ok) bad++;
-    console.log(`${ok ? '  ✓' : '  ✗'} 自检 ${label}：期望退出 ${expect}，实际 ${got}` +
-      (ok ? '' : `\n${report(res, base)}`));
+    console.log(`${ok ? '  ✓' : '  ✗'} 自检 ${label}：期望退出 ${expect}，实际 ${got}`
+      + (miss.length ? `；该有而没输出：${miss.join(' / ')}` : '')
+      + (seen.length ? `；不该出现却出现：${seen.join(' / ')}` : '')
+      + (ok ? '' : '\n' + text));
   }
   fs.rmSync(tmp, { recursive: true, force: true });
   if (bad) { console.error(`✗ 自检失败 ${bad} 条`); return 2; }
-  console.log('✓ 自检通过（4 个合成用例）');
+  console.log(`✓ 自检通过（${cases.length} 个合成用例）`);
   return 0;
 }
 
 // ── 入口 ──────────────────────────────────────────────────────────────────
 function main(argv) {
-  const opts = { payload: null, ref: null, old: [], overlay: null, expectVersion: null, allow: [], json: null, selfTest: false };
+  const opts = { payload: null, ref: null, old: [], overlay: null, expectVersion: null, allow: [], json: null, selfTest: false,
+    noKernelBaseline: process.env.DSH_NO_KERNEL_BASELINE === '1' };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const val = () => { const v = argv[++i]; if (v === undefined) { console.error(`✗ ${a} 缺少参数`); process.exit(2); } return v; };
@@ -475,6 +641,7 @@ function main(argv) {
       case '--allow': opts.allow.push(val()); break;
       case '--json': opts.json = val(); break;
       case '--self-test': opts.selfTest = true; break;
+      case '--no-kernel-baseline': opts.noKernelBaseline = true; break;
       case '-h': case '--help': console.log(USAGE); return 0;
       default: console.error(`✗ 未知参数 ${a}\n\n${USAGE}`); return 2;
     }
@@ -484,10 +651,13 @@ function main(argv) {
   const out = runChecks(opts);
   console.log(report(out, opts));
   if (opts.json) {
-    fs.writeFileSync(opts.json, JSON.stringify({ payload: opts.payload, ref: opts.ref, old: opts.old, overlay: opts.overlay, ...out }, null, 2));
+    const verdict = out.violations.length ? 1 : (out.inputErrors.length ? 2 : 0);
+    fs.writeFileSync(opts.json, JSON.stringify({ payload: opts.payload, ref: opts.ref, old: opts.old, overlay: opts.overlay, verdict, ...out }, null, 2));
     console.log(`  报告：${opts.json}`);
   }
-  return out.violations.length ? 1 : 0;
+  if (out.violations.length) return 1;
+  if (out.inputErrors.length) return 2;
+  return 0;
 }
 
 process.exit(main(process.argv.slice(2)));

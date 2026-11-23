@@ -11,15 +11,57 @@
 #   ④ 正文里保留了 require('@deepseek-ai/dsh-client-ui-primitives')（靠共享模块表解析）
 #
 # 退出码 0 = 通过。
+#
+# 收尾清理：本脚本每跑一次都要 cp -a 一份完整 dshhome，实测 5.3G。从前收尾只杀进程、
+# 不删副本，这 5.3G 就一直躺在 $F/tmp 里等下次跑它才被覆盖；而它不归 gate 调、纯手工
+# 按需跑，能躺好几天没人管。现在所有退出路径（成功 / 失败 / 早期 exit 2 / 被 kill）都由
+# trap 兜底清理；KEEP=1（或 --keep）保留副本并打印路径与大小，退出码不受影响；失败时
+# 默认仍清理，但会提示「要排查请带 KEEP=1 重跑」，不让清理把现场连根抹掉。
 # ============================================================================
 set -u
-F=/data/user/0/com.deepseek.harness/files
+# 下面两个环境覆写口只为验证「清理逻辑」本身（造个小假目录跑，不必真拷 5.3G），
+# 正常跑别设：DSH_FILES_DIR 换掉 $F，ISO_DIR 换掉隔离目录。守卫见 iso_guard。
+F=${DSH_FILES_DIR:-/data/user/0/com.deepseek.harness/files}
 NODE=$F/.bin/node
 CURL=$F/payload/runtime/bin/curl
 LIVE=$F/payload/dshroot
-ISO=$F/tmp/console-plugin-check
+ISO=${ISO_DIR:-$F/tmp/console-plugin-check}
 PORT=3098
 LOG=$ISO/engine.log
+KEEP=${KEEP:-0}
+CLEANUP_ONLY=0
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --keep) KEEP=1 ;;
+    --cleanup-only) CLEANUP_ONLY=1 ;;
+    -h|--help) sed -n '3,20p' "$0"; exit 0 ;;
+    *) echo "✗ 未知参数：$1（本脚本只认 --keep / --cleanup-only）"; exit 2 ;;
+  esac
+  shift
+done
+
+# ── rm -rf 的保险丝 + 收尾清理在 scripts/lib/iso-cleanup.sh ─────────────────
+# 抽出去的理由：本脚本是全工程唯一敢 rm -rf 一个 5.3G 副本的闸，三条守卫必须逐条被
+# 自测咬住；而「ISO 为空」那条在正常流程里走不到（ISO 总有默认值，空路径也会先被
+# 「副本不存在」拦掉），只有直接调函数才验得到。自测 source 同一个库，验的就是这里
+# 真正会跑的那份代码。
+LIB="$(dirname "$0")/lib/iso-cleanup.sh"
+[ -f "$LIB" ] || { echo "✗ 缺少清理库：$LIB（守卫与清理逻辑不在，不敢往下走）"; exit 2; }
+. "$LIB" || { echo "✗ 清理库读不进来：$LIB"; exit 2; }
+
+# trap 必须在任何复制动作之前装：早期 exit 2（node 起不来 / 复制失败 / 插件目录不存在 /
+# PLUGIN_SRC_CLIENT 不存在 / 覆盖失败）全都要清，只在文件末尾写一行 rm -rf 会把这些全漏掉。
+# 信号只负责把退出码改成 128+n，真正的杀进程 + 清理统一走 EXIT，避免跑两遍。
+PID=""
+trap 'cleanup_iso' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+if [ "$CLEANUP_ONLY" = 1 ]; then
+  echo "== 只跑收尾清理（--cleanup-only：不复制、不起引擎）=="
+  exit 0
+fi
 
 # ⚠️ 本脚本里那几次 `node -e`（从 SSE 里抽我们那条 url）**必须**带 runtime 的 lib 路径，
 #    否则报 "library libcares.so not found" 直接起不来；而它的 stderr 被 2>/dev/null 吞掉，
@@ -28,6 +70,7 @@ export LD_LIBRARY_PATH="$F/payload/runtime/lib"
 export TMPDIR="$F/tmp"
 "$NODE" -e 'process.exit(0)' 2>/dev/null || { echo "✗ node 起不来（缺 LD_LIBRARY_PATH？），本门禁的 url 抽取会静默失效，先修环境"; exit 2; }
 
+iso_guard || { echo "✗ 隔离目录不安全，拒绝动手（见上面那条）"; exit 2; }
 rm -rf "$ISO"; mkdir -p "$ISO"
 echo "== 复制隔离 DSH_HOME（含本次要验的插件）=="
 cp -a "$F/payload/dshhome" "$ISO/dshhome" 2>/dev/null || { echo "✗ 复制 dshhome 失败"; exit 2; }
@@ -148,8 +191,6 @@ else
   fi
 fi
 
-echo "== 收尾：杀掉隔离实例 =="
-kill $PID 2>/dev/null; sleep 2; kill -9 $PID 2>/dev/null
-
+# 收尾（杀进程 + 删 5.3G 副本）都在 EXIT trap 里，所有退出路径共用一份逻辑。
 if [ $FAIL = 0 ]; then echo "✅ 控制台插件隔离预检通过"; else echo "⛔ 控制台插件隔离预检失败"; fi
 exit $FAIL

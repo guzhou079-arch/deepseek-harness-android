@@ -8,8 +8,8 @@ whenToUse: 任务涉及操作手机上的其他 App（微信/QQ/飞书/WPS/浏�
 
 
 > ⚠️ **2026-11-05 起 3081/3181/8998/8999 本机桥都校验共享密钥**（`X-DSH-Token`）。
-> bash 里没有这个环境变量：**用 `sh /sdcard/DeepSeekHarness/tools/curl.sh` 代替裸 `curl`**（自动带密钥，
-> 只对环回地址生效，外网不会泄漏）；或者 `TOKEN=$(sh /sdcard/DeepSeekHarness/tools/bridge-token.sh)`
+> bash 里没有这个环境变量：**用 `sh $DSH_HOME/tools/curl.sh` 代替裸 `curl`**（自动带密钥，
+> 只对环回地址生效，外网不会泄漏）；或者 `TOKEN=$(sh $DSH_HOME/tools/bridge-token.sh)`
 > 再自己加 `-H "X-DSH-Token: $TOKEN"`。`dsh-tool-android` / `dsh-tool-shizuku` / `dsh-tool-accessibility` /
 > `dsh-tool-nfc` / `dsh-native-command` 等插件已自动带上，插件调用无需关心。
 
@@ -30,13 +30,13 @@ whenToUse: 任务涉及操作手机上的其他 App（微信/QQ/飞书/WPS/浏�
 - **能走数据就绝不点界面**：文件、剪贴板、Intent、HTTP 优先；UI 只用在"非点不可"的地方
   （发消息、点"接收"、点"用其他应用打开"）。
 - **第二遍必须固化成脚本**：同一件事做过一次就写进本技能 `scripts/` 或
-  `/sdcard/DeepSeekHarness/skills-local/`，下次一条命令跑完，不让模型重新拆步骤。
+  本机技能源目录，下次一条命令跑完，不让模型重新拆步骤。
 - **一次拿全**：合并读屏、合并确认，不要"点一下读一次"。
 
 ## 纪律
 
 - **不可逆动作（发送/删除/支付）默认停在「草稿 + 用户确认」**；白名单可免（配置在
-  `/sdcard/DeepSeekHarness/config/`，个人数据，不进包）。
+  本机配置目录，个人数据，不进包）。
 - **发消息前必须核对收件人姓名**；发送后截图回证。
 - **前台是游戏 / 全屏应用时不许动主屏**：不要 tap/swipe/back/home，也不要为了"看一眼"截图或
   切前台。**别靠包名清单判断** —— 动手前先看前台是什么（`GET http://127.0.0.1:3181/status`

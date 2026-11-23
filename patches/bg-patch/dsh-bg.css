@@ -54,10 +54,11 @@
    ============================================================ */
 
 :root {
-  /* 自定义背景图：把下面这行换成自己的图即可（内置的深蓝星空矢量图是默认值）。
+  /* 自定义背景图：把下面这行换成自己的图即可。
      ?v= 是给图的缓存版本号：换图就 +1（CSS 本身由注入代码带 ?rev= 时间戳，不受缓存影响）。
-     想换回自带的深蓝星空矢量图：改成 url("/dsh-bg.svg?v=1") 即可。
-     ⚠️ 发行包（make-dist-apk.sh）会把这一行换成 /dsh-bg.svg —— 别忘了那边也要一致。 */
+     想用自带的深蓝星空矢量图：改成 url("/dsh-bg.svg?v=1") 即可。
+     ⚠️ 发行包（make-dist-apk.sh）会把这一行置 none、遮罩一并归零 —— 不带任何壁纸图，
+        底色由前端那套渐变决定。那边改了这里也要跟着改。 */
   --dsh-user-bg-image: url("/dsh-bg-user.png?v=1");
 
   /* ---------- 遮罩必须跟随主题----------
@@ -66,8 +67,8 @@
      实测对比度：修复前 1.23:1（看不见）→ 修复后 10.2:1（AAA）。 */
   --dsh-user-bg-scrim-top-light: rgba(247, 249, 253, 0.55);
   --dsh-user-bg-scrim-bottom-light: rgba(247, 249, 253, 0.70);
-  --dsh-user-bg-scrim-top-dark: rgba(4, 8, 16, 0.60);
-  --dsh-user-bg-scrim-bottom-dark: rgba(4, 8, 16, 0.76);
+  --dsh-user-bg-scrim-top-dark: rgba(4, 8, 16, 0.38);
+  --dsh-user-bg-scrim-bottom-dark: rgba(4, 8, 16, 0.54);
 
   /* 当前生效值 = **浅色**那套（前端没在 body 上挂 data-ds-dark-theme 时就是浅色主题） */
   --dsh-user-bg-scrim-top: var(--dsh-user-bg-scrim-top-light);
@@ -183,4 +184,22 @@ html:not(:has(textarea)):not(:has([contenteditable="true"])):not(:has([class*="c
 }
 html:has(body[data-ds-dark-theme]):not(:has(textarea)):not(:has([contenteditable="true"])):not(:has([class*="composer"])) {
   background: #161616 !important;
+}
+
+/* ---------- 7) 右侧边栏：打开时整片实底，不让壁纸从缝里渗出来 ----------
+   dockkit 侧右栏的外壳 `.P3OORG_panel` 是 absolute 覆盖层
+   (top:0;bottom:0;right:0;overflow:clip)，**自己没有底色**；它里面那条 tab 栏
+   和面板底部到 tabBody 之间的过渡区也都是透明容器。聊天页深色壁纸是 #1d2230
+   起手的 168deg 渐变（上下各带一条 26px 的 #1d2230 渐隐条），于是这些缝隙里
+   透出来就是一片偏蓝的深色，看着像上下各一条深蓝带。
+   兜底改在 panel 上：它一实底，里面所有透明子容器都落在同一片颜色上，不用再
+   逐个去追 tab 栏和 tabBody。
+   ⚠️ 必须带「展开」判定：panel 一直存在且宽度撑满视口，右栏收起时只是把内容
+   滑到屏幕外（tabBody 的 x 落在视口右侧之外），此时给 panel 上底色等于给整个
+   聊天区盖一块实心板。手机上的全屏抽屉形态里 data-rightbar-collapsed 依然在
+   （右栏不占 grid 列，列宽为 0），真正能判到的是 data-rightbar-fullscreen；
+   :not([data-rightbar-collapsed]) 那条留给宽屏分栏形态。 */
+html body .pI_x6G_frame:not([data-rightbar-collapsed]) .P3OORG_panel,
+html body .pI_x6G_frame[data-rightbar-fullscreen] .P3OORG_panel {
+  background: var(--dsw-alias-bg-base, #151517) !important;
 }

@@ -1,447 +1,805 @@
 #!/usr/bin/env node
 /**
- * DSH 时光机全站一键备份与迁移工具 (DSH Snapshot & Migration)
- * 
- * 零第三方依赖：纯 Node.js 内置模块（fs/zlib/crypto/path），在手机端秒级执行。
- * 
- * 功能：
- *   node backup.mjs create [--name 标签]    一键打包全站资产（记忆库+会话+配置+技能）
- *   node backup.mjs list                   列出所有可用备份快照
- *   node backup.mjs verify <文件>           校验快照完整性与元数据摘要
- *   node backup.mjs restore <文件> [--yes]  一键完整还原全站资产
+ * DSH 全站备份 v2（流式 · 全资产）
+ *
+ * 用法：
+ *   node backup.mjs create [--full] [--name 标签]   创建快照（默认 core，--full 含附件）
+ *   node backup.mjs list                            列出快照
+ *   node backup.mjs verify <文件>                    校验完整性
+ *   node backup.mjs restore <文件> [--yes]           还原
+ *   node backup.mjs inspect <文件>                   看快照里有什么
+ *
+ * 设计要点：
+ *   · 流式：边读边压边写，内存恒定，附件几个 G 也不炸
+ *   · 一遍读：读到哪算到哪，不会有「两遍读取哈希对不上」的竞态
+ *   · SQLite：VACUUM INTO 出一致性快照，不裸拷 WAL 中的库
+ *   · symlink：保留链接目标，pnpm 的 node_modules 结构能原样回去
+ *   · manifest 在文件尾：写完才知道清单，不用预扫描
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import crypto from 'node:crypto';
-import { execSync } from 'node:child_process';
+import { Readable, Writable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
+import { fileURLToPath } from 'node:url';
 
-// 路径解析（2026-11-17）：老布局把库/工具放 /sdcard/DeepSeekHarness、备份落 /sdcard/Download。
-// 新装的应用默认没有「所有文件访问权限」，这些路径都不可写，备份会直接不可用。
-// 能写就沿用老布局，写不了退到 App 私有目录。
-function writable(dir) {
+// ══ 路径层 ═════════════════════════════════════════════════════
+// 这个脚本要随 DSH 发到任何一台手机，所以不假设任何「本机自建」目录存在。
+// 一切以 DSH_HOME 为准；外部工作区（个别用户的装配才有）发现即收，没有就跳过。
+
+const isDir = (p) => {
   try {
-    fs.mkdirSync(dir, { recursive: true });
-    const p = path.join(dir, '.wprobe-' + process.pid);
-    fs.writeFileSync(p, '');
-    fs.unlinkSync(p);
+    return fs.statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+};
+
+function isDshHome(p) {
+  try {
+    return fs.statSync(path.join(p, 'profiles')).isDirectory() || fs.statSync(path.join(p, 'sessions')).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/** 数据根：技能就住在 <DSH_HOME>/skills/<名>/scripts/，按位置上溯最可靠 */
+function detectDshHome() {
+  if (process.env.DSH_HOME && isDshHome(process.env.DSH_HOME)) return path.resolve(process.env.DSH_HOME);
+  try {
+    let dir = path.dirname(fileURLToPath(import.meta.url));
+    for (let i = 0; i < 5; i++) {
+      dir = path.resolve(dir, '..');
+      if (isDshHome(dir)) return dir;
+    }
+  } catch {}
+  for (const cand of [
+    process.env.HOME && path.join(process.env.HOME, 'dshhome'),
+    '/data/data/com.deepseek.harness/files/payload/dshhome',
+    '/data/user/0/com.deepseek.harness/files/payload/dshhome',
+  ]) {
+    if (cand && isDshHome(cand)) return path.resolve(cand);
+  }
+  throw new Error('找不到 DSH 数据目录；请用 DSH_HOME 环境变量指定');
+}
+
+const DSH_HOME = detectDshHome();
+
+/** 外部工作区：不是每台设备都有。个别装配会把记忆库和工具放到外部存储，发现就收 */
+function detectWorkRoots() {
+  const out = [];
+  const add = (p) => {
+    if (!p) return;
+    const r = path.resolve(p);
+    if (r === path.resolve(DSH_HOME) || out.includes(r) || !isDir(r)) return;
+    out.push(r);
+  };
+  add(process.env.DSH_WORKSPACE);
+  const bases = [...new Set([process.env.EXTERNAL_STORAGE, '/storage/emulated/0', '/sdcard'].filter(Boolean))];
+  for (const b of bases) for (const n of ['DeepSeekHarness', 'DSH']) add(path.join(b, n));
+  return out;
+}
+
+const WORK_ROOTS = detectWorkRoots();
+// 外部工作区只收这两类：记忆库和工具。截图、构建产物那些属于使用者自己的东西，不进包
+const WORK_SUBDIRS = ['memory', 'tools'];
+
+// 归档前缀：外部工作区一律走 ext/<目录名>/，避免和 DSH_HOME 下同名目录撞车
+const WORK_PREFIX = new Map();
+for (const root of WORK_ROOTS) {
+  let base = path.basename(root) || 'workspace';
+  while ([...WORK_PREFIX.keys()].includes(base)) base += '_';
+  WORK_PREFIX.set(base, root);
+}
+const prefixOf = (root) => {
+  for (const [name, r] of WORK_PREFIX) if (r === root) return `ext/${name}`;
+  return 'ext/workspace';
+};
+
+/** 归档路径 → 落地位置；目标机没有对应工作区时返回 null（跳过） */
+function resolveTarget(rel) {
+  const m = /^ext\/([^/]+)\/(.*)$/.exec(rel);
+  if (!m) return { base: DSH_HOME, sub: rel };
+  const root = WORK_PREFIX.get(m[1]);
+  return root ? { base: root, sub: m[2] } : null;
+}
+
+/** 备份输出位置：先试用户能看见的外部目录，不可写才退 App 私有 */
+function canWriteDir(d) {
+  try {
+    fs.mkdirSync(d, { recursive: true });
+    const probe = path.join(d, `.dsh-wtest-${process.pid}-${Date.now()}`);
+    fs.writeFileSync(probe, 'x');
+    fs.unlinkSync(probe);
     return true;
   } catch {
     return false;
   }
 }
-function privRoot() {
-  const home = process.env.DSH_HOME || '';
-  return home ? path.resolve(home, '..', '..') : process.cwd();
-}
-function pick(envKeys, legacy, fallback) {
-  for (const k of envKeys) {
-    const v = process.env[k];
-    if (v && writable(v)) return v;
+
+function detectBackupDir() {
+  if (process.env.DSH_BACKUP_DIR) return process.env.DSH_BACKUP_DIR;
+  const bases = [...new Set([process.env.EXTERNAL_STORAGE, '/storage/emulated/0', '/sdcard'].filter(Boolean))];
+  for (const b of bases) {
+    const d = path.join(b, 'Download', 'DSH_Backups');
+    if (canWriteDir(d)) return d;
   }
-  if (legacy && writable(legacy)) return legacy;
-  const d = path.join(privRoot(), fallback);
-  try { fs.mkdirSync(d, { recursive: true }); } catch { /* 调用方会报错 */ }
-  return d;
+  return path.join(DSH_HOME, 'backups');
 }
 
-const DSH_HOME = process.env.DSH_HOME || path.join(privRoot(), 'payload', 'dshhome');
-const MEM_DIR = pick(['DSH_MEM_DIR', 'DSH_MEMORY_DIR'], '/sdcard/DeepSeekHarness/memory', 'memory');
-const TOOLS_DIR = pick(['DSH_TOOLS_DIR'], '/sdcard/DeepSeekHarness/tools', 'tools');
-const BACKUP_DIR = pick(['DSH_BACKUP_DIR'], '/sdcard/Download/DSH_Backups', 'backups');
+const BACKUP_DIR = detectBackupDir();
 
-// 确保备份目录存在
-if (!fs.existsSync(BACKUP_DIR)) {
-  fs.mkdirSync(BACKUP_DIR, { recursive: true });
+const MAGIC = 'DSHBK2\n\n';
+const TAIL_MAGIC = 'DSHEND\n\n';
+const HDR = 64;
+const CHUNK = 1 << 20;
+const GZ_LEVEL = 3;
+const SKIP_FILE_RE = /(\.lock$|\.tmp$|~$|^\.DS_Store$|^\.thumbnails$)/;
+// 顶层目录黑名单：只排可重建的缓存与临时物，其余一律收
+const SKIP_TOP_DIRS = new Set(['cache', 'tmp', 'logs', '__pycache__', '.git', 'node_modules', '.cache']);
+// 默认不收的大件（媒体/附件类），--full 时才进包
+const BULK_DIRS = new Set(['attachments', 'office-kit']);
+// 默认不收的大件路径前缀（参考图、素材），--full 时才收
+const BULK_PREFIXES = ['crew/refs/'];
+const MAX_TOP_FILE = 20 * 1024 * 1024;
+
+const log = (...a) => console.log(...a);
+const fmt = (b) =>
+  b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(1)} KB` : b < 1073741824 ? `${(b / 1048576).toFixed(1)} MB` : `${(b / 1073741824).toFixed(2)} GB`;
+
+function ensureDir(d) {
+  if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
 }
 
-// 收集目录下的所有文件
-function walk(dir, base = '', depth = 0) {
-  const results = [];
-  if (!fs.existsSync(dir)) return results;
-  if (depth > 40) return results;
-  const list = fs.readdirSync(dir);
-  for (const item of list) {
-    // 忽略锁文件、临时目录与临时缓存
-    if (item === '.DS_Store' || item.endsWith('.lock') || item.endsWith('.tmp') || item === 'cache') continue;
-    const full = path.join(dir, item);
-    const rel = base ? `${base}/${item}` : item;
-    // 死链（指向已卸载插件残留的 .bin 软链）会让 statSync 抛 ENOENT；
-    // 跳过这一条就行，别为一条坏链让整次备份白跑。
-    let stat;
+/** 递归收集：文件记来源，软链接记目标（不进软链目录，避免重复） */
+function walk(dir, relBase, acc, depth = 0) {
+  if (depth > 40) return;
+  let names;
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    if (SKIP_FILE_RE.test(name)) continue;
+    const full = path.join(dir, name);
+    const rel = relBase ? `${relBase}/${name}` : name;
+    let st;
     try {
-      stat = fs.statSync(full);
+      st = fs.lstatSync(full);
+    } catch {
+      continue; // 断链/权限不足，跳过别让整次备份白跑
+    }
+    if (st.isDirectory()) {
+      walk(full, rel, acc, depth + 1);
+    } else if (st.isSymbolicLink()) {
+      let target;
+      try {
+        target = fs.readlinkSync(full);
+      } catch {
+        continue;
+      }
+      acc.push({ rel, type: 'link', target });
+    } else if (st.isFile()) {
+      acc.push({ rel, type: 'file', src: full, size: st.size });
+    }
+  }
+}
+
+/** 收集要收的树：黑名单之外全收，新增目录不用改脚本 */
+function collectTrees(full) {
+  const acc = [];
+  let names = [];
+  try {
+    names = fs.readdirSync(DSH_HOME).sort();
+  } catch {}
+  for (const name of names) {
+    if (SKIP_TOP_DIRS.has(name)) continue;
+    if (!full && BULK_DIRS.has(name)) continue;
+    const p = path.join(DSH_HOME, name);
+    if (isDir(p)) acc.push([name, p]);
+  }
+  // 外部工作区：记忆库和工具可能不在 DSH_HOME 里（个别装配如此），有就收
+  for (const root of WORK_ROOTS) {
+    const pre = prefixOf(root);
+    for (const sub of WORK_SUBDIRS) {
+      const p = path.join(root, sub);
+      if (isDir(p)) acc.push([`${pre}/${sub}`, p]);
+    }
+  }
+  return acc;
+}
+function collectTopFiles(acc) {
+  let names;
+  try {
+    names = fs.readdirSync(DSH_HOME);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    if (SKIP_FILE_RE.test(name)) continue;
+    const full = path.join(DSH_HOME, name);
+    let st;
+    try {
+      st = fs.lstatSync(full);
     } catch {
       continue;
     }
-    if (stat.isDirectory()) {
-      results.push(...walk(full, rel, depth + 1));
-    } else if (stat.isFile()) {
-      results.push({ fullPath: full, relPath: rel, size: stat.size, mtime: stat.mtimeMs });
+    if (st.isSymbolicLink()) {
+      acc.push({ rel: name, type: 'link', target: fs.readlinkSync(full) });
+    } else if (st.isFile() && st.size <= MAX_TOP_FILE) {
+      acc.push({ rel: name, type: 'file', src: full, size: st.size });
     }
   }
-  return results;
 }
 
-// 格式化字节数
-function formatSize(bytes) {
-  if (bytes < 1024) return bytes + ' B';
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-  return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+/** 所有记忆库的归档路径：DSH_HOME 里一个，外部工作区各一个 */
+function memDbRels() {
+  return ['memory/mem.db', ...WORK_ROOTS.map((r) => `${prefixOf(r)}/memory/mem.db`)];
 }
 
-// 生成快照
-function createBackup(customTag = '') {
-  console.log('📦 正在生成 DSH 全站时光机备份快照...');
-  const startTime = Date.now();
-
-  const manifest = {
-    version: 1,
-    app: 'DeepSeek Harness Android',
-    createdAt: new Date().toISOString(),
-    tag: customTag || 'manual',
-    stats: {
-      sessionsCount: 0,
-      memoryDbSize: 0,
-      filesCount: 0,
-      totalUncompressedBytes: 0,
-    },
-    entries: []
-  };
-
-  const filesToPack = [];
-
-  // 1. 记忆系统资产
-  if (fs.existsSync(MEM_DIR)) {
-    const memFiles = walk(MEM_DIR, 'memory');
-    for (const f of memFiles) {
-      filesToPack.push(f);
-      if (f.relPath.endsWith('mem.db')) {
-        manifest.stats.memoryDbSize = f.size;
+/** 每个 mem.db 各做一份一致性快照：VACUUM INTO 优先，失败退化 checkpoint 后读主库 */
+async function snapshotMemDbs() {
+  const out = [];
+  let DatabaseSync;
+  try {
+    ({ DatabaseSync } = await import('node:sqlite'));
+  } catch {
+    return out;
+  }
+  for (const rel of memDbRels()) {
+    const t = resolveTarget(rel);
+    if (!t) continue;
+    const dbPath = path.join(t.base, t.sub);
+    if (!fs.existsSync(dbPath)) continue;
+    const tmp = path.join(BACKUP_DIR, `.memdb-${process.pid}-${Date.now()}.db`);
+    try {
+      const db = new DatabaseSync(dbPath, { readOnly: true });
+      try {
+        db.exec(`VACUUM INTO '${tmp.replace(/'/g, "''")}'`);
+      } finally {
+        db.close();
       }
+      out.push({ rel, tmp });
+    } catch (e) {
+      log(`  ⚠ ${rel} 一致性快照失败（${e.message}），退化为直接读取主库`);
+      try {
+        if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
+      } catch {}
+      try {
+        const db = new DatabaseSync(dbPath);
+        try {
+          db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+        } finally {
+          db.close();
+        }
+      } catch {}
     }
   }
+  return out;
+}
 
-  // 2. 会话记录（sessions）
-  const sessionsDir = path.join(DSH_HOME, 'sessions');
-  if (fs.existsSync(sessionsDir)) {
-    const sessFiles = walk(sessionsDir, 'sessions');
-    for (const f of sessFiles) {
-      filesToPack.push(f);
-      if (f.relPath.endsWith('.jsonl.zstd') || f.relPath.endsWith('.jsonl')) {
-        manifest.stats.sessionsCount++;
-      }
+function createCmd(args) {
+  const full = args.includes('--full');
+  const nameIdx = args.indexOf('--name');
+  const tag = nameIdx !== -1 ? (args[nameIdx + 1] || 'manual') : 'manual';
+
+  ensureDir(BACKUP_DIR);
+  const t0 = Date.now();
+
+  const trees = collectTrees(full);
+  log('');
+  log(`📦 DSH 全站备份${full ? '（完整 · 含附件）' : '（核心 · 不含附件）'}`);
+  log('');
+
+  const entries = [];
+  collectTopFiles(entries);
+  const topCount = entries.length;
+  for (const [rel, dir] of trees) {
+    if (!fs.existsSync(dir)) continue;
+    walk(dir, rel, entries);
+  }
+  // 参考图/素材默认不进包；这类东西丢了能重截，不值得占几百 MB
+  const picked = full ? entries : entries.filter((e) => !BULK_PREFIXES.some((p) => e.rel.startsWith(p)));
+  const files = picked.filter((e) => e.type === 'file');
+  const links = picked.filter((e) => e.type === 'link');
+  const totalBytes = files.reduce((s, e) => s + e.size, 0);
+
+  log(`  扫描：${files.length} 个文件 + ${links.length} 个软链，合计 ${fmt(totalBytes)}`);
+  log(`  其中根目录配置 ${topCount} 项（凭据/抬头/外观）`);
+  log('');
+
+  return (async () => {
+    // mem.db 一致性快照，打包时顶替原文件（可能有多个：DSH_HOME 里一个，外部工作区各一个）
+    const memSnaps = await snapshotMemDbs();
+    for (const { rel, tmp } of memSnaps) {
+      const hit = files.find((e) => e.rel === rel);
+      if (!hit) continue;
+      hit.src = tmp;
+      hit.size = fs.statSync(tmp).size;
     }
-  }
+    if (memSnaps.length) log(`  ✓ ${memSnaps.length} 个 mem.db 出了一致性快照（VACUUM INTO）`);
 
-  // 3. 用户配置与设置（profiles）
-  const profilesDir = path.join(DSH_HOME, 'profiles');
-  if (fs.existsSync(profilesDir)) {
-    filesToPack.push(...walk(profilesDir, 'profiles'));
-  }
+    const ts = new Date().toISOString().replace(/[-:]/g, '').replace(/\..+/, '').replace('T', '_');
+    const outPath = path.join(BACKUP_DIR, `DSH_Backup_${ts}${tag ? `_${tag}` : ''}.dshbackup`);
 
-  // 4. 技能集（skills）
-  const skillsDir = path.join(DSH_HOME, 'skills');
-  if (fs.existsSync(skillsDir)) {
-    filesToPack.push(...walk(skillsDir, 'skills'));
-  }
+    const fd = fs.openSync(outPath, 'w');
+    fs.writeSync(fd, Buffer.alloc(HDR), 0, HDR, 0);
+    let written = HDR;
 
-  manifest.stats.filesCount = filesToPack.length;
-  // 总长在打包循环里按实际读到的字节累加，stat 的 size 会因文件增长而过期
-  let packedBytes = 0;
-
-  // 打包结构：使用标准轻量级 archive 容器
-  // [4B 魔数 DSHB][4B manifest 长度][manifest JSON 数据 UTF-8][压缩的文件内容块...]
-  const payloadBuffers = [];
-  for (const f of filesToPack) {
-    const content = fs.readFileSync(f.fullPath);
-    const hash = crypto.createHash('sha256').update(content).digest('hex');
-    manifest.entries.push({
-      path: f.relPath,
-      size: content.length,
-      sha256: hash,
-      mtime: f.mtime
+    const sink = new Writable({
+      write(chunk, _enc, cb) {
+        fs.writeSync(fd, chunk, 0, chunk.length, written);
+        written += chunk.length;
+        cb();
+      },
     });
-    payloadBuffers.push(content);
-    packedBytes += content.length;
-  }
 
-  manifest.stats.totalUncompressedBytes = packedBytes;
+    const manifest = {
+      format: 2,
+      app: 'DeepSeek Harness Android',
+      createdAt: new Date().toISOString(),
+      tag,
+      mode: full ? 'full' : 'core',
+      dshHome: DSH_HOME,
+      workRoots: WORK_ROOTS,
+      stats: { files: files.length, links: links.length, totalBytes, sessions: 0, memoryDbSize: 0 },
+      entries: [],
+    };
 
-  const manifestJson = JSON.stringify(manifest, null, 2);
-  const manifestBuf = Buffer.from(manifestJson, 'utf-8');
+    const entryMeta = [];
+    let seen = 0;
+    let doneBytes = 0;
+    const total = files.length;
 
-  // 对所有内容整体执行 zlib 压缩
-  const allContentsBuf = Buffer.concat(payloadBuffers);
-  const compressedPayload = zlib.gzipSync(allContentsBuf, { level: 9 });
-
-  // 组装最终 .dshbackup 文件
-  const magic = Buffer.from('DSHB', 'utf-8'); // Magic: DeepSeek Harness Backup
-  const manifestLenBuf = Buffer.alloc(4);
-  manifestLenBuf.writeUInt32BE(manifestBuf.length, 0);
-
-  const finalBuffer = Buffer.concat([
-    magic,
-    manifestLenBuf,
-    manifestBuf,
-    compressedPayload
-  ]);
-
-  const now = new Date();
-  const dateStr = now.getFullYear() +
-    String(now.getMonth() + 1).padStart(2, '0') +
-    String(now.getDate()).padStart(2, '0') + '_' +
-    String(now.getHours()).padStart(2, '0') +
-    String(now.getMinutes()).padStart(2, '0') +
-    String(now.getSeconds()).padStart(2, '0');
-
-  const filename = `DSH_Backup_${dateStr}${customTag ? '_' + customTag : ''}.dshbackup`;
-  const outPath = path.join(BACKUP_DIR, filename);
-
-  fs.writeFileSync(outPath, finalBuffer);
-
-  // 写盘后立刻自检：清单长度与哈希必须跟载荷自洽。
-  // 不过这关就当场失败——「创建成功」却还原不了，比直接失败更糟。
-  // 失败时顺手删掉这份坏包：留在 Download/DSH_Backups 里，`list` 会把它当可用备份列出来，
-  // 用户拿去还原才发现坏，比当场失败更糟。
-  try {
-    loadVerifiedBackup(outPath);
-  } catch (err) {
-    try { fs.unlinkSync(outPath); } catch (ignored) {}
-    throw new Error(`自检未通过，已删除损坏的快照 ${filename}：${err && err.message ? err.message : err}`);
-  }
-
-  const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-  console.log('✅ 全站快照备份创建成功！');
-  console.log(`  📂 备份文件: ${outPath}`);
-  console.log(`  📊 快照大小: ${formatSize(finalBuffer.length)}（未压缩原始大小: ${formatSize(manifest.stats.totalUncompressedBytes)}）`);
-  console.log(`  💬 会话数量: ${manifest.stats.sessionsCount} 个`);
-  console.log(`  🧠 记忆资产: ${formatSize(manifest.stats.memoryDbSize)} (mem.db)`);
-  console.log(`  📄 资产文件: 共 ${manifest.stats.filesCount} 个文件`);
-  console.log(`  ⏱️ 耗时: ${duration}s`);
-  return outPath;
-}
-
-// 解析快照
-function parseBackupFile(filePath) {
-  if (!fs.existsSync(filePath)) {
-    throw new Error(`找不到备份文件: ${filePath}`);
-  }
-  const buf = fs.readFileSync(filePath);
-  if (buf.length < 8) {
-    throw new Error('文件已损坏：长度过短');
-  }
-  const magic = buf.subarray(0, 4).toString('utf-8');
-  if (magic !== 'DSHB') {
-    throw new Error(`未知备份格式，魔数期望 DSHB，实际: ${magic}`);
-  }
-  const manifestLen = buf.readUInt32BE(4);
-  if (buf.length < 8 + manifestLen) {
-    throw new Error('文件已损坏：元数据截断');
-  }
-  const manifestJson = buf.subarray(8, 8 + manifestLen).toString('utf-8');
-  const manifest = JSON.parse(manifestJson);
-  const compressedPayload = buf.subarray(8 + manifestLen);
-
-  return { manifest, compressedPayload };
-}
-
-// 完整校验快照；还原也必须先通过这里，避免损坏数据被写入。
-function loadVerifiedBackup(filePath) {
-  const { manifest, compressedPayload } = parseBackupFile(filePath);
-  if (!manifest || !Array.isArray(manifest.entries)) {
-    throw new Error('校验失败：清单缺少 entries 数组');
-  }
-
-  const allowedRoots = new Set(['memory', 'sessions', 'profiles', 'skills']);
-  const seenPaths = new Set();
-  let expectedSize = 0;
-  for (const entry of manifest.entries) {
-    if (!entry || typeof entry.path !== 'string' || !entry.path) {
-      throw new Error('校验失败：条目路径缺失');
-    }
-    const parts = entry.path.split('/');
-    if (entry.path.includes('\0') || entry.path.includes('\\') || entry.path.startsWith('/') ||
-        path.posix.normalize(entry.path) !== entry.path || parts.length < 2 ||
-        !allowedRoots.has(parts[0]) || parts.some(part => !part || part === '.' || part === '..')) {
-      throw new Error(`校验失败：非法条目路径 ${entry.path}`);
-    }
-    if (seenPaths.has(entry.path)) {
-      throw new Error(`校验失败：重复条目路径 ${entry.path}`);
-    }
-    seenPaths.add(entry.path);
-    if (!Number.isSafeInteger(entry.size) || entry.size < 0) {
-      throw new Error(`校验失败：条目 ${entry.path} 大小无效`);
-    }
-    if (typeof entry.sha256 !== 'string' || !/^[0-9a-f]{64}$/i.test(entry.sha256)) {
-      throw new Error(`校验失败：条目 ${entry.path} 哈希无效`);
-    }
-    expectedSize += entry.size;
-    if (!Number.isSafeInteger(expectedSize)) {
-      throw new Error('校验失败：清单总长度溢出');
-    }
-  }
-
-  let decompressed;
-  try {
-    decompressed = zlib.gunzipSync(compressedPayload, { maxOutputLength: Math.max(1, expectedSize) });
-  } catch (err) {
-    throw new Error(`校验失败：无法按清单总长度解压（${err.message}）`);
-  }
-  if (decompressed.length !== expectedSize) {
-    throw new Error(`校验失败：解压总长度不匹配，清单 ${expectedSize}，实际 ${decompressed.length}`);
-  }
-
-  let offset = 0;
-  for (const entry of manifest.entries) {
-    const chunk = decompressed.subarray(offset, offset + entry.size);
-    const hash = crypto.createHash('sha256').update(chunk).digest('hex');
-    if (hash !== entry.sha256) {
-      throw new Error(`校验失败：文件 ${entry.path} 哈希校验不匹配`);
-    }
-    offset += entry.size;
-  }
-  return { manifest, decompressed };
-}
-
-// 校验快照
-function verifyBackup(filePath) {
-  console.log(`🔍 正在校验备份快照: ${filePath}...`);
-  const { manifest } = loadVerifiedBackup(filePath);
-
-  console.log('✅ 校验通过，快照完整无损！');
-  console.log(`  🕒 创建时间: ${manifest.createdAt}`);
-  console.log(`  🏷️ 标签备注: ${manifest.tag}`);
-  console.log(`  💬 包含会话: ${manifest.stats.sessionsCount} 个`);
-  console.log(`  🧠 记忆数据: ${formatSize(manifest.stats.memoryDbSize)}`);
-  console.log(`  📄 包含文件: ${manifest.stats.filesCount} 个（总计 ${formatSize(manifest.stats.totalUncompressedBytes)}）`);
-}
-
-// 还原快照
-function restoreBackup(filePath, force = false) {
-  if (!force) {
-    throw new Error('还原会覆盖现有资产；还原前会自动保存当前快照，确认后追加 --yes 执行');
-  }
-  console.log(`⚠️ 准备还原快照: ${filePath}`);
-  const { manifest, decompressed } = loadVerifiedBackup(filePath);
-  const safetyBackup = createBackup(`BeforeRestore_${Date.now()}`);
-  console.log(`🛟 还原前安全快照: ${safetyBackup}`);
-
-  console.log(`🚀 开始解包还原 ${manifest.entries.length} 个资产文件...`);
-  let offset = 0;
-  let restoredCount = 0;
-
-  try {
-    for (const entry of manifest.entries) {
-      const chunk = decompressed.subarray(offset, offset + entry.size);
-      offset += entry.size;
-
-      const targetBase = entry.path.startsWith('memory/') ? path.dirname(MEM_DIR) : DSH_HOME;
-      const targetFile = path.resolve(targetBase, entry.path);
-      const relative = path.relative(targetBase, targetFile);
-      if (!relative || relative.startsWith('..' + path.sep) || path.isAbsolute(relative)) {
-        throw new Error(`拒绝越界还原路径: ${entry.path}`);
+    // 文件流：读到哪算到哪，同一份字节既进归档也算哈希，不存在两遍读取的竞态
+    async function* fileStream() {
+      for (const e of files) {
+        const hash = crypto.createHash('sha256');
+        let size = 0;
+        let rfd;
+        try {
+          rfd = fs.openSync(e.src, 'r');
+        } catch (err) {
+          log(`  ⚠ 跳过读不了的文件：${e.rel}（${err.code}）`);
+          continue;
+        }
+        try {
+          const buf = Buffer.alloc(CHUNK);
+          let pos = 0;
+          for (;;) {
+            let n;
+            try {
+              n = fs.readSync(rfd, buf, 0, CHUNK, pos);
+            } catch (err) {
+              log(`  ⚠ 读取中断：${e.rel}（${err.code}）`);
+              break;
+            }
+            if (!n) break;
+            pos += n;
+            size += n;
+            doneBytes += n;
+            const piece = Buffer.from(buf.subarray(0, n));
+            hash.update(piece);
+            yield piece;
+          }
+        } finally {
+          fs.closeSync(rfd);
+        }
+        entryMeta.push({
+          rel: e.rel,
+          type: 'file',
+          size,
+          offset: manifest.stats.totalBytes === undefined ? 0 : 0,
+          hash: hash.digest('hex'),
+        });
+        if (e.rel.endsWith('.jsonl') || e.rel.endsWith('.jsonl.zstd') || e.rel.endsWith('.jsonl.zst')) manifest.stats.sessions++;
+        if (e.rel.endsWith('/mem.db')) manifest.stats.memoryDbSize += size;
+        seen++;
+        if (seen % 200 === 0 || seen === total) {
+          const pct = ((doneBytes / Math.max(totalBytes, 1)) * 100).toFixed(0);
+          process.stdout.write(`\r  打包 ${seen}/${total} 文件 · ${pct}% · ${fmt(doneBytes)}   `);
+        }
       }
-      const targetDir = path.dirname(targetFile);
-
-      if (!fs.existsSync(targetDir)) {
-        fs.mkdirSync(targetDir, { recursive: true });
-      }
-
-      fs.writeFileSync(targetFile, chunk);
-      restoredCount++;
     }
-  } catch (err) {
-    throw new Error(`还原中断，可能处于混合状态；可用安全快照回滚: ${safetyBackup}（${err.message}）`);
-  }
 
-  console.log(`✅ 成功还原 ${restoredCount} 个文件！`);
+    await pipeline(Readable.from(fileStream()), zlib.createGzip({ level: GZ_LEVEL }), sink);
 
-  // 触发记忆系统投影同步
-  try {
-    const memJs = path.join(TOOLS_DIR, 'mem.js');
-    if (fs.existsSync(memJs)) {
-      console.log('🔄 正在同步记忆库投影（AGENTS.md / hot.md）...');
-      execSync(`node ${memJs} sync`, { stdio: 'inherit' });
+    // 补 offset：按顺序累加
+    let off = 0;
+    for (const m of entryMeta) {
+      m.offset = off;
+      off += m.size;
+      manifest.entries.push(m);
     }
-  } catch (err) {
-    console.warn('⚠️ 记忆库同步提示:', err.message);
-  }
+    for (const l of links) manifest.entries.push({ rel: l.rel, type: 'link', target: l.target });
 
-  console.log('🎉 时光机全站还原完成！刷新页面或重启 App 即可无缝回到备份时刻。');
+    manifest.stats.packedBytes = off;
+    process.stdout.write('\r' + ' '.repeat(70) + '\r');
+
+    // manifest 与尾标写在数据之后
+    const dataEnd = fs.fstatSync(fd).size;
+    const mBuf = zlib.gzipSync(Buffer.from(JSON.stringify(manifest)), { level: 6 });
+    fs.writeSync(fd, mBuf, 0, mBuf.length, dataEnd);
+    fs.writeSync(fd, Buffer.from(TAIL_MAGIC), 0, 8, dataEnd + mBuf.length);
+
+    const hb = Buffer.alloc(HDR);
+    hb.write(MAGIC, 0);
+    hb.writeBigUInt64LE(BigInt(dataEnd), 8);
+    hb.writeUInt32LE(mBuf.length, 16);
+    fs.writeSync(fd, hb, 0, HDR, 0);
+    fs.closeSync(fd);
+
+    for (const { tmp } of memSnaps) {
+      try {
+        fs.unlinkSync(tmp);
+      } catch {}
+    }
+
+    const finalSize = fs.statSync(outPath).size;
+    const secs = ((Date.now() - t0) / 1000).toFixed(1);
+    log(`  ✅ 完成：${fmt(finalSize)}（原始 ${fmt(totalBytes)}，压缩率 ${((finalSize / Math.max(totalBytes, 1)) * 100).toFixed(0)}%）`);
+    log(`  💬 会话 ${manifest.stats.sessions} 个 · 🧠 记忆库 ${fmt(manifest.stats.memoryDbSize)}`);
+    log(`  ⏱  ${secs} 秒`);
+    log('');
+    log(`  ${outPath}`);
+    log('');
+    return outPath;
+  })();
 }
 
-// 列出所有快照
-function listBackups() {
-  console.log(`📋 备份仓库目录: ${BACKUP_DIR}\n`);
-  const files = fs.readdirSync(BACKUP_DIR).filter(f => f.endsWith('.dshbackup'));
-  if (files.length === 0) {
-    console.log('（暂无备份快照，执行 node backup.mjs create 立即创建第一个备份）');
+function openSnapshot(file) {
+  const fd = fs.openSync(file, 'r');
+  const hb = Buffer.alloc(HDR);
+  fs.readSync(fd, hb, 0, HDR, 0);
+  const magic = hb.toString('utf8', 0, 8);
+  if (magic !== MAGIC) {
+    fs.closeSync(fd);
+    if (magic.startsWith('DSHB')) {
+      throw new Error('这是 v1 老格式快照，请用旧版 backup.mjs 还原');
+    }
+    throw new Error(`不是有效的 DSH 快照（magic=${JSON.stringify(magic)}）`);
+  }
+  const dataEnd = Number(hb.readBigUInt64LE(8));
+  const mLen = hb.readUInt32LE(16);
+  const size = fs.statSync(file).size;
+  const tb = Buffer.alloc(8);
+  fs.readSync(fd, tb, 0, 8, dataEnd + mLen);
+  if (tb.toString('utf8') !== TAIL_MAGIC) {
+    fs.closeSync(fd);
+    throw new Error('快照尾部标记缺失，文件可能被截断');
+  }
+  const mb = Buffer.alloc(mLen);
+  fs.readSync(fd, mb, 0, mLen, dataEnd);
+  fs.closeSync(fd);
+  const manifest = JSON.parse(zlib.gunzipSync(mb).toString('utf8'));
+  return { manifest, dataEnd, size };
+}
+
+/** 按条目顺序流式解压，逐块交给回调 */
+async function streamEntries(file, manifest, dataEnd, onChunk) {
+  const entries = manifest.entries.filter((e) => e.type === 'file');
+  const rs = fs.createReadStream(file, { start: HDR, end: dataEnd - 1 });
+  const gun = zlib.createGunzip();
+  rs.pipe(gun);
+  let idx = 0;
+  let remain = entries.length ? entries[idx].size : 0;
+  let hasher = entries.length ? crypto.createHash('sha256') : null;
+  let written = 0;
+  for await (const chunk of gun) {
+    let p = 0;
+    while (p < chunk.length) {
+      if (idx >= entries.length) {
+        // 多余数据说明 manifest 和实际不符
+        throw new Error('解压数据比清单长，快照损坏');
+      }
+      const take = Math.min(remain, chunk.length - p);
+      const piece = chunk.subarray(p, p + take);
+      await onChunk(entries[idx], piece);
+      if (hasher) hasher.update(piece);
+      written += take;
+      remain -= take;
+      p += take;
+      if (remain === 0) {
+        const got = hasher ? hasher.digest('hex') : '';
+        await onChunk(entries[idx], null, got);
+        idx++;
+        if (idx < entries.length) {
+          remain = entries[idx].size;
+          hasher = crypto.createHash('sha256');
+        } else {
+          hasher = null;
+        }
+      }
+    }
+  }
+  if (idx !== entries.length) throw new Error(`解压数据比清单短（${idx}/${entries.length}）`);
+  return written;
+}
+
+function verifyCmd(file) {
+  log('');
+  log(`🔍 校验快照：${path.basename(file)}`);
+  const { manifest, dataEnd, size } = openSnapshot(file);
+  log(`  创建于：${manifest.createdAt}`);
+  log(`  模式：${manifest.mode} · 文件 ${manifest.stats.files} 个 · 软链 ${manifest.stats.links} 个`);
+  log(`  归档大小：${fmt(size)} · 原始：${fmt(manifest.stats.totalBytes)}`);
+
+  return (async () => {
+    const byRel = new Map(manifest.entries.filter((e) => e.type === 'file').map((e) => [e.rel, e]));
+    let bad = [];
+    let count = 0;
+    await streamEntries(file, manifest, dataEnd, (entry, piece, doneHash) => {
+      if (doneHash !== undefined) {
+        const expect = byRel.get(entry.rel);
+        if (expect && expect.hash !== doneHash) bad.push(entry.rel);
+        count++;
+      }
+    });
+    if (bad.length) {
+      log(`  ❌ ${bad.length} 个文件哈希不符：`);
+      bad.slice(0, 5).forEach((r) => log(`     ${r}`));
+      process.exitCode = 1;
+      return false;
+    }
+    log(`  ✅ ${count} 个文件哈希全部一致，快照可安全还原`);
+    log('');
+    return true;
+  })();
+}
+
+function inspectCmd(file) {
+  const { manifest, dataEnd, size } = openSnapshot(file);
+  const roots = new Map();
+  for (const e of manifest.entries) {
+    const top = e.rel.split('/')[0];
+    const cur = roots.get(top) || { n: 0, bytes: 0 };
+    cur.n++;
+    cur.bytes += e.size || 0;
+    roots.set(top, cur);
+  }
+  log('');
+  log(`📋 ${path.basename(file)}（${manifest.mode}，${fmt(size)}）`);
+  log('');
+  for (const [k, v] of [...roots.entries()].sort((a, b) => b[1].bytes - a[1].bytes)) {
+    log(`  ${k.padEnd(24)} ${String(v.n).padStart(6)} 项  ${fmt(v.bytes)}`);
+  }
+  log('');
+}
+
+function restoreCmd(file, yes) {
+  const { manifest, dataEnd } = openSnapshot(file);
+  log('');
+  log(`♻️  从快照还原：${path.basename(file)}`);
+  log(`  模式：${manifest.mode} · 文件 ${manifest.stats.files} 个`);
+  if (!yes) {
+    log('');
+    log('  这是覆盖写入，会改动 DSH 数据目录。确认执行请加 --yes');
+    log('');
     return;
   }
 
-  files.sort().reverse();
-  console.log('序号 | 文件名 | 大小 | 创建时间 | 会话数 | 记忆');
-  console.log('---|---|---|---|---|---');
-  files.forEach((file, index) => {
-    const full = path.join(BACKUP_DIR, file);
+  return (async () => {
+    // 还原前自动做一份安全快照（core 模式，快）
+    log('  先做一份安全快照，出事能回滚…');
     try {
-      const { manifest } = parseBackupFile(full);
-      const stat = fs.statSync(full);
-      const timeStr = manifest.createdAt.replace('T', ' ').substring(0, 19);
-      console.log(`${String(index + 1).padStart(2, ' ')} | ${file} | ${formatSize(stat.size)} | ${timeStr} | ${manifest.stats.sessionsCount}个 | ${formatSize(manifest.stats.memoryDbSize)}`);
+      const safe = await createCmd(['--name', `BeforeRestore_${new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '')}`]);
+      log(`  安全快照：${path.basename(safe)}`);
     } catch (e) {
-      console.log(`${String(index + 1).padStart(2, ' ')} | ${file} | (损坏或格式不匹配)`);
+      log(`  ⚠ 安全快照失败（${e.message}），继续还原。`);
     }
-  });
+
+    // 归档路径 → 落地位置：DSH_HOME 内按原相对路径，ext/ 前缀落回对应外部工作区
+    const targetOf = (rel) => {
+      const t = resolveTarget(rel);
+      return t ? path.join(t.base, t.sub) : null;
+    };
+
+    // 覆盖 SQLite 前先清掉同名的 -wal/-shm/-journal：旧事务残留会在下次打开时回放，
+    // 把刚写回的数据冲掉（备份时的一次性快照也会因此作废）
+    const dropSqliteSidecars = (dest) => {
+      for (const suffix of ['-wal', '-shm', '-journal']) {
+        try {
+          fs.unlinkSync(dest + suffix);
+        } catch {}
+      }
+    };
+
+    let restored = 0;
+    const fds = new Map();
+    await streamEntries(file, manifest, dataEnd, (entry, piece, doneHash) => {
+      const dest = targetOf(entry.rel);
+      if (!dest) return; // 本机没有这个外部工作区，跳过
+      if (piece === null) {
+        if (fds.has(entry.rel)) {
+          fs.closeSync(fds.get(entry.rel));
+          fds.delete(entry.rel);
+        }
+        restored++;
+        return;
+      }
+      if (!fds.has(entry.rel)) {
+        ensureDir(path.dirname(dest));
+        if (entry.rel.endsWith('.db')) dropSqliteSidecars(dest);
+        fds.set(entry.rel, fs.openSync(dest, 'w'));
+      }
+      fs.writeSync(fds.get(entry.rel), piece, 0, piece.length);
+    });
+    for (const fd of fds.values()) {
+      try {
+        fs.closeSync(fd);
+      } catch {}
+    }
+
+    for (const e of manifest.entries) {
+      if (e.type !== 'link') continue;
+      const dest = targetOf(e.rel);
+      if (!dest) continue;
+      try {
+        ensureDir(path.dirname(dest));
+        try {
+          fs.unlinkSync(dest);
+        } catch {}
+        fs.symlinkSync(e.target, dest);
+      } catch {}
+    }
+
+    log(`  ✅ 还原 ${restored} 个文件`);
+    const expect = manifest.entries.filter((e) => e.type === 'file').length;
+    if (expect > restored) log(`  ⚠ 跳过 ${expect - restored} 个文件（本机没有备份里记录的外部工作区）`);
+
+    // 记忆投影重建（发行版不一定带这个工具，找不到就跳过）
+    // 工作区母版优先：包内那份可能缺 consolidate/concept，用它会重建出一份巩固不了的投影
+    const memJs = [...WORK_ROOTS.map((r) => path.join(r, 'tools', 'mem.js')), path.join(DSH_HOME, 'tools', 'mem.js')].find((p) => fs.existsSync(p));
+    if (memJs) {
+      log('  重建记忆投影…');
+      try {
+        const { execFileSync } = await import('node:child_process');
+        execFileSync(process.execPath, ['--preserve-symlinks', '--preserve-symlinks-main', memJs, 'sync'], { stdio: 'ignore', timeout: 120000 });
+        log('  ✓ 记忆投影已重建');
+      } catch {
+        log('  ⚠ 记忆投影重建失败，重启后手动跑一次 mem.js sync');
+      }
+    }
+    log('  提示：建议重启 DSH 让配置与插件重新加载');
+    log('');
+  })();
 }
 
-// 主命令行分发
+function listCmd() {
+  ensureDir(BACKUP_DIR);
+  const files = fs
+    .readdirSync(BACKUP_DIR)
+    .filter((f) => f.endsWith('.dshbackup'))
+    .map((f) => {
+      const p = path.join(BACKUP_DIR, f);
+      const st = fs.statSync(p);
+      let info = null;
+      try {
+        info = openSnapshot(p).manifest;
+      } catch {}
+      return { f, p, size: st.size, mtime: st.mtime, info };
+    })
+    .sort((a, b) => b.mtime - a.mtime);
+
+  if (!files.length) {
+    log('还没有备份。跑 `node backup.mjs create` 生成第一份。');
+    return;
+  }
+  log('');
+  log('📚 DSH 备份快照');
+  log('');
+  let total = 0;
+  for (const x of files) {
+    total += x.size;
+    const mode = x.info ? x.info.mode : 'v1老格式';
+    const cnt = x.info ? `${x.info.stats.files} 文件` : '用旧脚本还原';
+    log(`  ${x.f.padEnd(56)} ${fmt(x.size).padStart(10)}  ${mode.padEnd(6)} ${cnt}`);
+    log(`  ${' '.repeat(8)}${x.mtime.toISOString().slice(0, 19).replace('T', ' ')}`);
+  }
+  log('');
+  log(`  共 ${files.length} 份，占用 ${fmt(total)}`);
+  if (files.length > 3) log(`  嫌占地儿就跑：node backup.mjs prune --keep 3`);
+  log('');
+}
+
+/** 手动清理：默认只列不删，带 --yes 才真删 */
+function pruneCmd(keep, yes) {
+  const files = fs
+    .readdirSync(BACKUP_DIR)
+    .filter((f) => f.endsWith('.dshbackup'))
+    .map((f) => {
+      const p = path.join(BACKUP_DIR, f);
+      const st = fs.statSync(p);
+      return { f, p, size: st.size, mtime: st.mtime };
+    })
+    .sort((a, b) => b.mtime - a.mtime);
+
+  const victims = files.slice(keep);
+  log('');
+  if (!victims.length) {
+    log(`  当前 ${files.length} 份，不超过保留数 ${keep}，无需清理。`);
+    log('');
+    return;
+  }
+  const freed = victims.reduce((s, v) => s + v.size, 0);
+  log(`  保留最近 ${keep} 份，将删除 ${victims.length} 份（释放 ${fmt(freed)}）：`);
+  log('');
+  for (const v of victims) {
+    log(`  ${v.f.padEnd(56)} ${fmt(v.size).padStart(10)}  ${v.mtime.toISOString().slice(0, 19).replace('T', ' ')}`);
+  }
+  log('');
+  if (!yes) {
+    log('  这是删除操作，确认请加 --yes');
+    log('');
+    return;
+  }
+  let done = 0;
+  for (const v of victims) {
+    try {
+      fs.unlinkSync(v.p);
+      done++;
+    } catch (e) {
+      log(`  ⚠ 删不掉 ${v.f}：${e.code}`);
+    }
+  }
+  log(`  ✅ 已删除 ${done} 份，释放 ${fmt(freed)}`);
+  log('');
+}
+
 const args = process.argv.slice(2);
-const cmd = args[0] || 'create';
+const cmd = args[0] || 'help';
 
-switch (cmd) {
-  case 'create':
-  case 'backup':
-  case 'snap': {
-    const nameIdx = args.indexOf('--name');
-    const tag = nameIdx !== -1 ? args[nameIdx + 1] : '';
-    createBackup(tag);
-    break;
-  }
-  case 'list':
-  case 'ls': {
-    listBackups();
-    break;
-  }
-  case 'verify':
-  case 'check': {
-    const target = args[1];
-    if (!target) {
-      console.error('用法: node backup.mjs verify <备份文件路径>');
-      process.exit(1);
-    }
-    verifyBackup(target);
-    break;
-  }
-  case 'restore': {
-    const target = args[1];
-    if (!target) {
-      console.error('用法: node backup.mjs restore <备份文件路径> [--yes]');
-      process.exit(1);
-    }
-    restoreBackup(target, args.includes('--yes') || args.includes('-y'));
-    break;
-  }
-  default:
-    console.log(`DSH 时光机全站备份工具
+(async () => {
+  try {
+    switch (cmd) {
+      case 'create':
+      case 'backup':
+        await createCmd(args.slice(1));
+        break;
+      case 'list':
+      case 'ls':
+        listCmd();
+        break;
+      case 'verify':
+      case 'check':
+        if (!args[1]) throw new Error('用法: node backup.mjs verify <文件>');
+        await verifyCmd(path.resolve(args[1]));
+        break;
+      case 'inspect':
+      case 'info':
+        if (!args[1]) throw new Error('用法: node backup.mjs inspect <文件>');
+        inspectCmd(path.resolve(args[1]));
+        break;
+      case 'restore':
+        if (!args[1]) throw new Error('用法: node backup.mjs restore <文件> [--yes]');
+        await restoreCmd(path.resolve(args[1]), args.includes('--yes') || args.includes('-y'));
+        break;
+      case 'prune': {
+        const kIdx = args.indexOf('--keep');
+        const keep = kIdx !== -1 ? parseInt(args[kIdx + 1], 10) || 3 : 3;
+        pruneCmd(keep, args.includes('--yes') || args.includes('-y'));
+        break;
+      }
+      default:
+        log(`
+DSH 全站备份 v2
 
-用法：
-  node backup.mjs create [--name 标签]    创建新备份
-  node backup.mjs list                   列出已有备份
-  node backup.mjs verify <文件>           校验快照完整性
-  node backup.mjs restore <文件>          从快照还原
+  node backup.mjs create [--full] [--name 标签]   创建快照（默认 core，--full 含附件/参考图）
+  node backup.mjs list                            列出快照
+  node backup.mjs inspect <文件>                   看快照内容构成
+  node backup.mjs verify <文件>                    校验完整性
+  node backup.mjs restore <文件> [--yes]           还原
+  node backup.mjs prune [--keep 3] [--yes]        清理旧快照（默认只列不删）
+
+core 包含：记忆库、会话、配置、技能、工具、团队数据、根目录凭据与抬头
+full  额外包含：attachments（聊天图片）、office-kit、crew/refs（参考图）
 `);
-    break;
-}
+    }
+  } catch (e) {
+    console.error(`\n❌ ${e.message}\n`);
+    process.exitCode = 1;
+  }
+})();

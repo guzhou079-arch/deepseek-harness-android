@@ -113,12 +113,31 @@ patch)
   }
   ( cd "$SB/build-overlay" && ovl_find dshroot | sed 's|^dshroot/||' ) > "$WORK/forced-a.txt"
   ( cd "$SB/../v118/dsh-patches/overlay" && ovl_find . | sed 's|^\./||; s|^dshroot/||' ) > "$WORK/forced-b.txt"
-  cat "$WORK/forced-a.txt" "$WORK/forced-b.txt" | sed '/^$/d' | sed 's|^|dshroot/|' | sort -u > "$WORK/dshroot_forced.txt"
+  cat "$WORK/forced-a.txt" "$WORK/forced-b.txt" | sed '/^$/d' | sed 's|^|dshroot/|' | sort -u > "$WORK/dshroot_forced.raw.txt"
   rm -f "$WORK/forced-a.txt" "$WORK/forced-b.txt"
+  # 2026-11-20：清单落定前先过两道筛，否则它会要求包里根本没有的条目 ——
+  #   ① 被瘦身剥掉的开发期文件（.d.ts/.map/test 目录）：patch 阶段不写进 payload，
+  #      设备端开机强刷就是刷一条空路径，症状与「补丁没生效」一模一样；
+  #   ② 底包换代后已不存在的历史路径（v118 旧内核的 hashed chunk 名）：payload 只可能来自
+  #      「底包 + overlay」，这种名字永远进不了包，留着只会让清单叫得比现实大。
+  # 判据不在这里另写：瘦身规则走 lib/slim-payload.js（与打包侧同源），实在性判据走底包条目表。
+  "$NODE" "$SB/lib/selfbuild.js" forced-list-filter \
+    "$WORK/dshroot_forced.raw.txt" "$WORK/dshroot_forced.txt" \
+    --payload "$PAY_OLD" --overlay "$SB/build-overlay"
+  rm -f "$WORK/dshroot_forced.raw.txt"
   echo "  REVISION(构建号)=$REV_STAMP；overlay 强制清单 $(wc -l < "$WORK/dshroot_forced.txt") 条"
   # DSH_FORCED_LIST：让 payload-patch 自己对账「动的条目是否都在 forced 清单里」。
   # 缺一条就说明设备端开机不会强刷它 —— 包内是新的、手机上是旧的，症状是「改了没生效」。
   DSH_FORCED_LIST="$WORK/dshroot_forced.txt" "$NODE" "$SB/lib/selfbuild.js" payload-patch "$PAY_OLD" "$PAY_NEW" "$SB/build-overlay"
+
+  # ⚠️ 门禁：包内嵌页面脚本的语法/遮蔽自检（2026-11-19）。
+  #    星图面板（dsh-memory-ui/tools/mem-ui-page.html）带着三个只在运行时才炸的错误发出去过：
+  #      · `returnt(` —— return 与函数名粘连，整页 8 处文本渲染全废；
+  #      · 两处 `var t=` 遮蔽同文件的全局翻译函数 t()，抛
+  #        "TypeError: t is not a function"，被 try/catch 抓成角落常驻的错误提示。
+  #    出包期完全看不出来：文件是 .html，不在任何 JS 语法检查路径上；装到别人手机上才显形。
+  #    判据只认「同一函数体内既声明了同名变量、又真的调用了那个函数」，不做全量作用域分析。
+  "$NODE" "$SB/scripts/check-payload-frontend-syntax.js" --payload "$PAY_NEW" || exit 1
 
   # ⚠️ 门禁：背景图注入必须真在**随包发出去的那份 payload** 里。
   #    背景图靠 open-in-app/lib/client.js 里的一段本地注入才会被加载（/dsh-bg.css?rev=）；
@@ -129,8 +148,15 @@ patch)
   #    正是事故的形状；两处都拦，缺一处都不算验过。
   BG_ENTRY="dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-open-in-app/lib/client.js"
   BG_OVL="$SB/build-overlay/$BG_ENTRY"
-  BG_ZIP_OK=0
-  "$NODE" "$SB/scripts/check-bg-injection.js" --zip "$PAY_NEW" --entry "$BG_ENTRY" && BG_ZIP_OK=1
+  # 三态：0 通过 / 1 注入丢了（真违规）/ 2 没问到（读不了、条目是空的 —— 不能当违规）。
+  # 早先写成 `&& BG_ZIP_OK=1`，rc=2 也被折进下面那句「整体丢失」，语义就丢了。
+  BG_ZIP_RC=0
+  "$NODE" "$SB/scripts/check-bg-injection.js" --zip "$PAY_NEW" --entry "$BG_ENTRY" || BG_ZIP_RC=$?
+  if [ "$BG_ZIP_RC" = 2 ]; then
+    echo "✗ 无法判定：背景图注入这条判据没有问到（rc=2）—— 不是「注入丢了」，「注入还在」也没证据。"
+    echo "  禁止出包。检查 payload 里那条 $BG_ENTRY 是否为空/解不开，或重跑 scripts/check-bg-injection.js 看具体原因。"
+    exit 1
+  fi
   if [ -f "$BG_OVL" ]; then
     "$NODE" "$SB/scripts/check-bg-injection.js" "$BG_OVL" || {
       echo "✗ overlay 里那份 $BG_ENTRY 没有背景图注入。它会在 patch 阶段覆盖掉带注入的版本，"
@@ -139,7 +165,7 @@ patch)
       exit 1
     }
   fi
-  if [ "$BG_ZIP_OK" != 1 ]; then
+  if [ "$BG_ZIP_RC" = 1 ]; then
     echo "✗ 背景图注入整体丢失，不是覆盖问题："
     echo "  底包里那条 $BG_ENTRY 是带注入的，现在包里也没有、overlay 里也没有，"
     echo "  说明这条文件整个没进 payload（或进的是别处的干净版本）→ 装上去背景图不会加载。"
@@ -155,6 +181,13 @@ patch)
   # overlay 里有就取 overlay、没有就取底包 —— 这正好是 patch 的定义。
   # 关键字判定（补丁语义还在不在）留在 verify 阶段做，这里只管字节。
   "$NODE" "$SB/scripts/check-kernel-baseline.js" --payload "$PAY_NEW" --base-payload "$PAY_OLD" --overlay "$SB/build-overlay" || exit 1
+
+  # 把「打包这一刻 overlay 长什么样」钉下来（2026-11-19）。
+  # verify 的判据是「包内 = 底包 + overlay 推导值」，而 overlay 是活的：有另一个会话
+  # 在改同一棵树时，patch 拍的是旧快照、verify 拿的却是新 overlay —— 来源和被测对象
+  # 不是同一个东西，必然误报「文件与期望不一致」，看起来像打包坏了。
+  # 落一份指纹，verify 先比它：一致才继续做字节级检查，不一致就直接说「包是旧快照」。
+  "$NODE" "$SB/scripts/overlay-snapshot.js" --overlay "$SB/build-overlay" --write "$WORK/payload-new.zip.overlay.json" || exit 1
   ;;
 pack)
   # 用法: pack [--dex <classes.dex>] [--asset <本地文件>:<APK 内条目名>]...
@@ -245,6 +278,41 @@ verify)
   sh "$RUN" java -cp /tc/apksigner.jar com.android.apksigner.ApkSignerTool verify --verbose --print-certs "$APK"
   echo '— 包内 payload 必须等于「底包 + overlay」推出来的那份 —'
   "$NODE" "$SB/lib/selfbuild.js" payload-extract "$APK" "$WORK/payload-check.zip" >/dev/null
+  # 先问一个更基本的问题：这份包的 overlay 快照，和现在的 overlay 还是同一棵树吗？
+  # overlay 是活的（可能另一个会话正在改），不先对齐就往下验，报出来的是
+  # 「文件与期望不一致」—— 看着像打包坏了，实际是拿现在的树验过去的包。
+  # 这道前置检查只拦「快照过期」，不参与包本身的判定。
+  if [ -f "$WORK/payload-new.zip.overlay.json" ]; then
+    "$NODE" "$SB/scripts/overlay-snapshot.js" --overlay "$SB/build-overlay" --diff "$WORK/payload-new.zip.overlay.json" || {
+      rm -f "$WORK/payload-check.zip"
+      echo '  ✗ 拒绝继续做基线检查：拿现在的 overlay 验一份旧快照，无论报什么都不可信。'
+      exit 1
+    }
+  fi
+  # 随包路径硬门禁：以前只有 make-dist-apk.sh / make-install-apk.sh 经 gate.sh 跑它，
+  # selfbuild 链出来的包从来没被扫过；而这道闸本身还曾把「扫描 0 个文件」当通过打印 ✓
+  # （对 zip 用 readdirSync 抛 EINVAL 被 catch 吞成空列表）。两件事都要堵：闸修好，
+  # 并且接进每一次出包，否则修了也等于没跑。
+  # 口径只取随包用户空间（dshhome/）：这道闸是给 dist payload 写的，gate.sh 传进去的
+  # 是整包（dshhome/ + dshroot/），这里是自己出包前的一道快筛，只解 dshhome/ 就够。
+  # 内核树（dshroot/）另有 6 处老路径回退，是上游工具自己的兼容分支（tools/backup.mjs
+  # 的 pick、dsh-tool-android 的 legacy 截图目录、console 的 life 脚本兜底…），
+  # 每一处都在 assert-no-hardcoded-paths.js 的白名单里按文件登记、并验同文件带探测痕迹。
+  # 把这 6 处当判据只会让每次自建都红成噪音，红久了就没人看 —— 那这道闸等于又死了一次。
+  # 内核树那 6 处由发版链（gate.sh，喂整包 zip）按同一套白名单判，不在这里重复解包。
+  rm -rf "$WORK/pathcheck" && mkdir -p "$WORK/pathcheck"
+  unzip -qq "$WORK/payload-check.zip" 'dshhome/*' -d "$WORK/pathcheck" || {
+    rm -f "$WORK/payload-check.zip"
+    echo '  ✗ 没能从 payload 里抽出 dshhome/，路径闸无从扫起 —— 判死，不判过。'
+    exit 1
+  }
+  "$NODE" "$SB/scripts/assert-no-hardcoded-paths.js" "$WORK/pathcheck/dshhome" --quiet || {
+    rm -f "$WORK/payload-check.zip"
+    echo '  ✗ 随包路径闸未过（见上）；随包文件改完必须重新 pack，改 overlay 不会自己进已出的包。'
+    exit 1
+  }
+  rm -rf "$WORK/pathcheck"
+  echo '✓ 随包路径闸通过：用户空间里没有写死的 /sdcard/DeepSeekHarness'
   # 2026-11-07 整改：原来这里是「拿 checks.manifest 的 md5 当闸门」，而那份 md5 是
   # patch-check.sh --regen 从**手机运行时树**刷出来的 —— 判据的来源和被测对象不是同一个东西：
   # 改 overlay → 打包 → 拿手机上的旧内容当期望 → 必红；想绿只能先装机再 regen，
@@ -278,9 +346,25 @@ verify)
   echo '— 二进制 manifest 回读 —'
   "$NODE" "$SB/scripts/set-apk-version.js" "$APK" --dump
   # 光 dump 不算闸门：分享过滤器/singleTop/降级 versionCode 都要显式判定（2026-10-15 补）
+  # 「降级 versionCode」这项拿骨架包（≈当前装机版）当判据对象。骨架不在时**不许**把 MCHK
+  # 空着往下走：脚本会把这一整段略过、只打一个 ✓ —— 判据还在、对象没了、出口却是绿的
+  # （2026-11-21 查实）。work/ 被清理、换机后 work/ 是空的都会走到这里，不是罕见路径。
+  # 出口码按全工程口径：0=通过 / 1=违规 / 2=无法判定。这里是「无法判定」，不是通过；
+  # 但不在此处 exit —— 出包后的自检，骨架没落盘时其余检查仍要跑完给结论，末尾统一 exit 2。
   MCHK=""
-  if [ -f "$BASE" ]; then MCHK="--base $BASE"; fi
+  UNJUDGED=""
+  if [ -f "$BASE" ]; then
+    MCHK="--base $BASE"
+  else
+    UNJUDGED="降级检查：骨架包不在（$BASE）"
+  fi
   "$NODE" "$SB/scripts/check-install-manifest.js" "$APK" $MCHK
+  if [ -n "$UNJUDGED" ]; then
+    echo "✗ 降级检查无法判定：骨架包不在（$BASE）"
+    echo '  这一项本次没有对象可判，不算通过（verify 结束时 exit 2）。'
+    echo '  为什么要判：versionCode 必须高于当前装机版，否则 pm install 降级失败、白签一次包。'
+    echo '  补救：sh selfbuild.sh base（读装机 APK，需 Shizuku/root），或 DSH_BASE=<旧的签名 APK> 再跑 verify。'
+  fi
   # 关键 asset 闸门：2026-10-18 手搓 pack 命令漏了 --asset .../splash/boot.html，
   #   开机动画静默消失（Java 读不到就退回原生启动页），上面这些闸门全绿也看不出来。
   echo '— 关键 asset 必须真的在包里 —'
@@ -300,6 +384,11 @@ verify)
     "$NODE" "$SB/lib/selfbuild.js" dex-extract "$APK" "$WORK/check-classes.dex"
     cmp "$WORK/check-classes.dex" "$WORK/appbuild/out/classes.dex" || { echo '✗ APK dex 与内容哈希编译产物不同'; exit 1; }
   else echo '✗ 无编译输入收据，无法证明源码与 dex 关联'; exit 1
+  fi
+  # 有判据没有对象的那几项，前面已经喊过一次；这里给出口收口，不让它变成一次绿退。
+  if [ -n "$UNJUDGED" ]; then
+    echo "✗ verify 未全部判定：$UNJUDGED（exit 2）"
+    exit 2
   fi
   ;;
 check)

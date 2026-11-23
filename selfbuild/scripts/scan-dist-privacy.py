@@ -185,6 +185,22 @@ def file_sha(file):
     return h.hexdigest()
 
 
+def load_tools_allow():
+    """随包 dshhome/tools/ 白名单，读 scripts/dist-tools-allow.json（唯一真相源）。
+
+    读不到就抛错而不是返回空集合：空集合会让每一条 dshhome/tools/ 都被判成
+    'unexpected dshhome seed'，但更糟的是有人为了让闸变绿去放宽规则 ——
+    宁可在打包时炸掉，也不要发一个自己都不知道里面有什么的包。
+    """
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dist-tools-allow.json')
+    with open(path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    tools = data.get('tools') if isinstance(data, dict) else None
+    if not isinstance(tools, list) or not tools:
+        raise RuntimeError('dist-tools-allow.json: tools must be a non-empty list (' + path + ')')
+    return set(tools)
+
+
 def scan(apk, overlay, wallpaper):
     problems = []
     with zipfile.ZipFile(apk) as outer:
@@ -207,13 +223,14 @@ def scan(apk, overlay, wallpaper):
                 if not isinstance(dependencies, dict) or dependencies:
                     problems.append('distribution profile dependencies must be empty')
             # Only distributable seed configuration may survive under dshhome.
-            # dshhome/tools/ 例外到**文件级**：crew.js / crew-selftest.sh / browser.js 是技能的运行时
-            # 依赖，技能文档直接引用它们，缺了就指向空路径。逐文件列名而不是整个 tools/ 放行 ——
-            # 目录级放行会让以后丢进来的私人脚本一起过闸。
+            # dshhome/tools/ 例外到**文件级**：技能文档直接引用其中若干脚本，缺了就指向空路径。
+            # 逐文件列名而不是整个 tools/ 放行 —— 目录级放行会让以后丢进来的私人脚本一起过闸。
+            # 名单不在这里手抄：唯一真相源是 scripts/dist-tools-allow.json，与 strip-dist-payload.js、
+            # assert-dist-privacy.js 共用（三处手抄必然漂，漂的方向是「删掉技能要调的工具却三道全绿」）。
             # tool-gate.json 是发行默认值（enabled:false），不是个人配置：
             # 缺它时 dsh-tool-gate 按 enabled:true 走，用户装上去开局只剩 bash + tool_load。
             allowed = {'skills', 'cordis.patch.yml', 'profiles', 'tool-gate.json'}
-            tools_allow = {'dshhome/tools/crew.js', 'dshhome/tools/crew-selftest.sh', 'dshhome/tools/browser.js'}
+            tools_allow = load_tools_allow()
             for n in names:
                 if not n.startswith('dshhome/') or len(n.split('/')) < 2:
                     continue
@@ -320,8 +337,20 @@ def scan(apk, overlay, wallpaper):
             if os.environ.get('DSH_KEEP_USER_BG') == '1':
                 if not image or 'dsh-bg-user.png' not in image[0] or prefix + 'dsh-bg-user.png' not in names:
                     problems.append('user background missing or not selected')
-            elif not image or 'dsh-bg.svg' not in image[0] or prefix + 'dsh-bg.svg' not in names:
-                problems.append('generic background missing or not selected')
+            else:
+                # 发行包不带壁纸图（make-dist-apk.sh 把 --dsh-user-bg-image 置 none）。
+                # 这里判的是「确实没有指向任何图」：变量还在但值是 url(...) 就是一个悬空引用
+                # ——本机能看、新装 404，正是这条判据当初要抓的东西。
+                if not image:
+                    problems.append('background image variable missing from dsh-bg.css')
+                elif 'none' not in image[0]:
+                    problems.append('distribution background must be none, got: ' + image[0])
+                if prefix + 'dsh-bg-user.png' in names:
+                    problems.append('personal wallpaper shipped in dist: ' + prefix + 'dsh-bg-user.png')
+                # 内置那张矢量星空同理：发行版没引用它，留着只是给"包里有没有壁纸"留个反面样本。
+                svg = [n for n in names if n.endswith('/dsh-bg.svg')]
+                if svg:
+                    problems.append('bundled wallpaper shipped in dist: ' + svg[0])
     return problems, vendored, suppressed, name_files, default_stats
 
 

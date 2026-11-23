@@ -1,40 +1,59 @@
 ---
 name: dsh-backup
-description: DSH 时光机全站一键备份、快照管理与跨设备迁移。用于“帮我备份一下系统/记忆/会话”、“查看备份列表”、“还原指定备份”等需求。
+description: DSH 全站一键备份与还原。备份会话、记忆库、模型通道配置、账号凭据、技能、工具与团队数据，打成单个 .dshbackup 文件；换手机或系统出问题时用它恢复。
 ---
 
-# DSH 时光机全站备份与迁移技能 (`dsh-backup`)
+# DSH 时光机全站备份
 
-本技能封装了 DSH 安卓端全站资产（记忆库 `mem.db`、全部历史会话 `sessions/`、用户配置 `profiles/`、技能集 `skills/`）的一键安全快照打包、校验与迁移还原。
+一个文件装下整台 DSH：会话记录、记忆库、模型通道配置、账号凭据、技能、工具、团队数据。
 
-备份文件统一存放在公共目录 `/sdcard/Download/DSH_Backups/`（格式为 `.dshbackup`），支持随时通过微信/QQ/网盘发送到新手机或电脑进行 100% 完整还原。
+## 什么时候用
 
-## 常用操作
+- 换手机、重装 App 前
+- 改配置、装插件之前，先留一个能回滚的点
+- 把整套配置搬到另一台设备
 
-> 脚本位置：优先使用随包分发的 `<本技能目录>/scripts/backup.mjs`，或 `/sdcard/DeepSeekHarness/tools/backup.mjs`。
+## 备份
 
-### 1. 创建全站备份快照
 ```bash
-node <本技能目录>/scripts/backup.mjs create [--name 标签名]
+node <本技能目录>/scripts/backup.mjs create
+node <本技能目录>/scripts/backup.mjs create --full      # 连聊天附件、office 文档、参考图一起
+node <本技能目录>/scripts/backup.mjs create --name 换机前
 ```
-- 输出包含会话数、文件数、打包后大小与耗时。
 
-### 2. 查看所有历史备份
-```bash
-node <本技能目录>/scripts/backup.mjs list
-```
-- 表格化列出所有 `.dshbackup` 备份文件、创建时间、大小与包含的会话数。
+默认存到手机的 `Download/DSH_Backups/`。写不进去（比如没给存储权限）会自动退到 App 私有目录 `backups/`，实际位置会在结尾打印出来。
 
-### 3. 校验备份文件完整性
-```bash
-node <本技能目录>/scripts/backup.mjs verify <备份文件绝对路径>
-```
-- 逐个文件比对 SHA256 哈希，确保无损坏。
+默认（core）包含记忆库、会话、配置、技能、工具、团队数据、根目录凭据与抬头。
+`--full` 额外包含聊天附件、office 文档和参考图，体积会大很多。
 
-### 4. 从快照还原全站数据
+## 看一眼
+
 ```bash
-node <本技能目录>/scripts/backup.mjs restore <备份文件绝对路径> --yes
+node <本技能目录>/scripts/backup.mjs list              # 有哪些快照、占多大
+node <本技能目录>/scripts/backup.mjs inspect <文件>    # 里面装了什么
+node <本技能目录>/scripts/backup.mjs verify <文件>     # 逐文件校验，确认没坏
 ```
-- 先校验全部文件哈希、条目路径与解压总长度，再覆盖回 DSH 数据目录；`--yes` 表示确认覆盖，省略时不会写入。
-- 写入前自动生成 `BeforeRestore_<时间戳>` 安全快照；中途失败会给出快照路径，可再用 `restore <安全快照> --yes` 回滚。
-- 还原后自动触发 `mem.js sync` 重建记忆投影。
+
+`list` 会给出总占用；快照攒多了会提示怎么清理。
+
+## 还原
+
+```bash
+node <本技能目录>/scripts/backup.mjs restore <文件> --yes
+```
+
+先逐文件校验哈希，再覆盖回数据目录；`--yes` 是确认覆盖，不带它不会写盘。
+覆盖前自动做一份 `BeforeRestore_<时间戳>` 安全快照，中途出事可以用它回滚。
+装了记忆工具的会自动跑一次 `mem.js sync` 重建记忆投影，没装就跳过。
+
+## 清理
+
+```bash
+node <本技能目录>/scripts/backup.mjs prune --keep 3        # 只列，不删
+node <本技能目录>/scripts/backup.mjs prune --keep 3 --yes  # 真删
+```
+
+## 说明
+
+- 会话记录是 zstd 存好的、图片本来就是压缩格式，再压一遍基本没收益，所以包体偏大（核心约 750 MB）。
+- 记忆库用 `VACUUM INTO` 出一致性快照，不会在写入中途打包到半个数据库。

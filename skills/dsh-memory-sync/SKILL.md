@@ -22,7 +22,17 @@ whenToUse: 用户说「记住这个 / 以后都这么做 / 保存这条经验 / 
 ## 🛠️ 常用记忆操作命令
 
 ```bash
-MEM="node /sdcard/DeepSeekHarness/tools/mem.js"
+# 工具不一定在 $DSH_HOME/tools：老布局在 /sdcard/DeepSeekHarness/tools，有「所有文件
+# 访问权限」的设备上插件首次运行会把记忆栈铺到那儿（那份可能比包内版新）；新装、没这个
+# 权限的设备铺不出去，就用插件自带的那份。按这个顺序找，第一个找到的就是该用的。
+for d in /sdcard/DeepSeekHarness/tools "$DSH_HOME/tools" \
+         "$DSH_HOME/profiles/web/node_modules/dsh-memory-ui/tools"; do
+  [ -f "$d/mem.js" ] && { MEM_TOOLS=$d; break; }
+done
+MEM="node $MEM_TOOLS/mem.js"
+
+# 0. 先看一眼库的状态（条数 / 注入预算 / 哪些条目陈旧）
+$MEM status
 
 # 1. 查找记忆（按关键词）
 $MEM find 关键词1 关键词2
@@ -35,3 +45,6 @@ EOF
 # 3. 记录流水日志
 $MEM log "完成了某某任务，验证方式为..."
 ```
+
+正文一律走 stdin 或 `--body-file`，别用 `--body`：那个会被 shell 展开，引号和反引号先没了，
+写进去的就不是你原话。

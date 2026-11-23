@@ -11,7 +11,7 @@ description: 手机本地代码仓库、技术文档、配置文件与日志的�
 
 ## 常用操作
 
-> 脚本位置：优先使用随包分发的 `<本技能目录>/scripts/rag.mjs`，或 `/sdcard/DeepSeekHarness/tools/rag.mjs`。
+> 脚本位置：优先使用随包分发的 `<本技能目录>/scripts/rag.mjs`，或 `$DSH_HOME/tools/rag.mjs`。
 
 ### 1. 为指定目录/代码仓建立知识库
 ```bash

@@ -46,7 +46,7 @@ node "$SK/scripts/inventory.mjs" /sdcard/某目录 --width 720 --height 1280 --o
 
 ```json
 {
-  "output": "/sdcard/DeepSeekHarness/videos/demo.mp4",
+  "output": "./videos/demo.mp4",
   "width": 720, "height": 1280, "fps": 30,
   "scenes": [
     { "src": "/sdcard/素材/01.jpg", "duration": 2.2, "motion": "in",    "text": "第一句" },
@@ -122,17 +122,9 @@ $RUN ffmpeg -hide_banner -i out.mp4 -af volumedetect -f null - 2>&1 | grep mean_
 bash "$SK/scripts/selftest.sh"    # 造素材→渲染→ffprobe 校验分辨率/编码/时长→PASS
 ```
 
-自测会在 `/sdcard/DeepSeekHarness/tmp/dsh-video-selftest/run-XXXXXX/` 创建独立目录，保留此前的测试素材和成片。
+自测会在临时目录下创建独立的 `run-XXXXXX/` 子目录，保留此前的测试素材和成片。
 
-## 安装位置与恢复
+## 安装位置
 
-- 生效位置：`$DSH_HOME/skills/dsh-video/`（本机即 `.../payload/dshhome/skills/dsh-video`）。
-- 源码副本：`/sdcard/DeepSeekHarness/skills-src/dsh-video/`（重装 App 不丢）。
-- App 重装 / 内核重解压会清 payload → 技能消失时用源码副本恢复：
-
-```sh
-cp -r /sdcard/DeepSeekHarness/skills-src/dsh-video \
-      /data/user/0/com.deepseek.harness/files/payload/dshhome/skills/
-```
-
-改完源码副本后同样执行上面这条覆盖回去。
+- 生效位置：`$DSH_HOME/skills/dsh-video/`。
+- 源码由出包源维护。App 重装或内核重解压会清空 payload，技能消失时从出包源重新部署。

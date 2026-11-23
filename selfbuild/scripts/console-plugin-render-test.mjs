@@ -162,7 +162,10 @@ if (!win.__reg) throw new Error('client.js 没有调用 window.__ModuleLoader__.
 const mod = win.__reg.factory(requireStub);
 if (typeof mod.apply !== 'function') throw new Error('插件没有导出 apply');
 
+// settings.section 有多个注册者（控制台 / 文档预览 / 桌宠），只按 name 取会留下最后一个 ——
+// 拿到的是桌宠页，于是所有控制台断言都在桌宠页上找东西。按 id 取，并按 id 留档。
 let Section = null;
+const Sections = {};
 let Overlay = null;
 let ComposerDock = null;
 const ctx = {
@@ -170,7 +173,10 @@ const ctx = {
   slots: {
     inject: (name, fn) => { fn(); },
     register: (options, component) => {
-      if (options.name === 'settings.section') Section = component;
+      if (options.name === 'settings.section') {
+        Sections[options.id] = component;
+        if (options.id === 'android-console') Section = component;
+      }
       if (options.name === 'shell.overlay') Overlay = component;
       if (options.name === 'conversation.composer.dock') ComposerDock = component;
       return () => {};
@@ -337,7 +343,15 @@ step('模型分工入口可点击，子页显示角色和官方暂停状态', ()
   const tree = freshMain();
   clickByText(tree, '模型分工');
   const text = texts(settle({ close() {} }));
-  for (const want of ['当前使用', '按任务选择', '代码实现', '分析与审查', '架构与规划', '已暂停', '应用配置']) {
+  // 角色名单以 client.js 的 MODEL_ROLES 为准（用户可在设置里改，默认仍是这 7 个）。
+  // 这里断言完整清单而不是「包含『模型』」，否则角色改名/漏渲染都测不出来。
+  // 不在这里断言「已暂停」：角色的暂停状态来自引擎侧 model-roles.json（/android-console-roles），
+  // 这套桩没有那个 endpoint，而且 useEffect 是空实现（远端角色回来也没有第二次渲染窗口）——
+  // 留着它就是一条永远不会成立的断言。改成断言这页结构性、与数据无关的那几块。
+  for (const want of ['当前使用', '按任务选择',
+    '前端 UI 与审美', '后端与复杂编码', '需求分析与拆解', '中文长文与翻译',
+    '测试与第二遍查错', '日常工作', '轻量与重复任务',
+    '应用配置', '目标模型']) {
     if (!text.includes(want)) throw new Error('模型页缺文案：' + want);
   }
 });
@@ -438,10 +452,12 @@ step('子页：智能生活助理', () => {
   for (const want of ['账户余额：', '农业银行(0770) ¥1069.97', '招商银行(1234) ¥8888.88']) {
     if (t.indexOf(want) < 0) throw new Error('记账卡缺余额：' + want);
   }
-  // 记账卡还要显示「月结余」（结余 = 本月收入 − 本月支出，跟着 /life/api/status 的 month* 字段走）
+  // 记账卡还要显示月净额（= 本月收入 − 本月支出，跟着 /life/api/status 的 month* 字段走）。
+  // 桩数据 monthIncome=1698.45、monthExpense=641.47，所以 1698.45 − 641.47 = 1056.98 > 0，
+  // 标签取的是「本月净收入」；负数时 client.js 会改成「本月净支出」并给绝对值。
   // 注意：文本节点会被 trim，标签后面那个空格不保证留下，所以别在断言里带尾空格。
-  for (const want of ['本月结余', '¥1056.98', '支出 ¥641.47', '收入 ¥1698.45', '73 笔']) {
-    if (t.indexOf(want) < 0) throw new Error('记账卡缺月结余：' + want);
+  for (const want of ['本月净收入', '¥1056.98', '支出 ¥641.47', '收入 ¥1698.45', '73 笔']) {
+    if (t.indexOf(want) < 0) throw new Error('记账卡缺月净额：' + want);
   }
   clickByText(tree, '立即执行');
   if (acts[acts.length - 1][0] !== 'life.task.run' || acts[acts.length - 1][1] !== 'morning_brief') {

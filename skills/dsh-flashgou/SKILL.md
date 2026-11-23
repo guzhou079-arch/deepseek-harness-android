@@ -20,10 +20,10 @@ whenToUse: 用户说「帮我点杯奶茶/点外卖/买点喝的」「附近有�
 ## 1. 工具
 
 ```sh
-VS=/sdcard/DeepSeekHarness/tools/vs.sh
+VS=$DSH_HOME/tools/vs.sh
 sh $VS disp                 # displayId
 sh $VS launch com.taobao.taobao   # 启动到虚拟屏（走桥，不是 am start）
-sh $VS see /sdcard/DeepSeekHarness/vscreen/q.png   # 抓帧，1/2 缩放
+sh $VS see                        # 抓帧，1/2 缩放（默认存到工具目录旁的 vscreen/）
 sh $VS tap X Y              # 坐标按原图 1008x1792 算
 sh $VS swipe X1 Y1 X2 Y2 [ms]
 sh $VS key back

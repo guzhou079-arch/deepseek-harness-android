@@ -72,6 +72,15 @@
             </intent-filter>
         </activity>
 
+        <!-- 原生设置页：外观 / 引擎 / 关于。
+             排版标度、描边、圆角全在本类里用 dp 与画布背景决定，不依赖 dist 的哈希类名。 -->
+        <activity
+            android:name=".SettingsActivity"
+            android:exported="false"
+            android:label="设置"
+            android:theme="@style/AppTheme" />
+
+
         <!-- 前台保活服务：引擎运行期间常驻通知栏，挂后台不被杀 -->
         <service
             android:name=".EngineService"

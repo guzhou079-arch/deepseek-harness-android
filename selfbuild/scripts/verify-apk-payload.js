@@ -17,7 +17,16 @@ const apk = process.argv[2];
 const inventory = process.argv.includes('--inventory');
 if (!apk || !fs.existsSync(apk)) { console.error('用法: node verify-apk-payload.js <apk> [--inventory]'); process.exit(2); }
 
-const outer = readZip(apk);
+// 连 zip 目录都读不出来 = 判不了（给的文件不是 APK），不是「这个包不可用」。
+// 缺 payload.zip 是另一回事（下面那行维持 2：结构判据没有对象）——两者都归 2，但说法不同。
+let outer;
+try {
+  outer = readZip(apk);
+} catch (e) {
+  console.error('✗ 打不开这个文件（不是 zip）：' + String((e && e.message) || e));
+  console.error('  返回 2 = 无法判定，不是包不合规 —— 先确认给的是不是 APK。');
+  process.exit(2);
+}
 const pz = outer.find((e) => e.name === 'assets/payload.zip');
 if (!pz) { console.error('✗ APK 里没有 assets/payload.zip'); process.exit(2); }
 const tmp = '/data/user/0/com.deepseek.harness/files/tmp/verify-payload.zip';

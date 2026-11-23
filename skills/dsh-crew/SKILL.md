@@ -122,7 +122,7 @@ $C shift                                      # 本轮开工清单：谁领哪�
 
 `crew/<名字>/` 里四样东西：`profile.json`（岗位 + 模型档 + 岗位标签）、`role.md`（岗位卡六要素，手填）、`memory.md`（追加式长期记忆）、`routines.md`（它自己的节奏）。**冷下来再回来，`brief` 一跑它就知道自己是谁、上次干到哪** —— 这就是「明天还是那个它」的全部秘密，没有魔法，只有文件。
 
-重装兜底：`crew.js`、`weekly.js`、`crew-selftest.sh`、`browser.js` 和本技能在 `/sdcard/DeepSeekHarness/` 有副本，重装后跑 `sh /sdcard/DeepSeekHarness/restore-crew.sh` 恢复；只覆盖工具和技能，不动 `crew/` 名册。改完工具先跑 `sh tools/crew-selftest.sh`（41 项断言，跑在临时名册，不碰真实数据）。
+重装兜底：工具与技能随包恢复；`crew/` 名册是独立数据，不随包覆盖。改完工具先跑 `sh tools/crew-selftest.sh`（41 项断言，跑在临时名册，不碰真实数据）。
 
 派活的闭环（拉取式，2026-11-05 实测跑通）：
 - **上板**：`crew task add "标题" --role verify --gear auto --accept "可机械核对的验收标准"`。背景写进 `--note`，成员一 `pull` 就看得到。
