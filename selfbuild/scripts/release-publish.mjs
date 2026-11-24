@@ -46,6 +46,24 @@ export async function publishVerifiedRelease({ request, artifact, tag, commit, t
   return uploaded;
 }
 
+// 闸的退出码是三态，不是布尔：0 通过 / 1 违规 / 2 无法判定。
+// 2 必须和 1 一样阻断：判不了不等于合规，否则「验了个寂寞」也会被记成绿灯。
+export function runGate(label, script, args, opts = {}) {
+  insist(fs.existsSync(script), `Missing gate script: ${script}`);
+  try {
+    execFileSync(process.execPath, [script, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 << 20, ...opts });
+  } catch (e) {
+    const rc = typeof e.status === 'number' ? e.status : -1;
+    // 闸的报告很长，只捞它的红行（连同红行下面那行 md5/期望），比笼统截尾巴有用。
+    const lines = `${e.stdout || ''}${e.stderr || ''}`.split('\n').map(l => l.trimEnd()).filter(Boolean);
+    const hit = [];
+    lines.forEach((l, i) => { if (/[❌✗]/.test(l)) hit.push(l, lines[i + 1] || ''); });
+    const report = (hit.length ? hit : lines.slice(-8)).slice(0, 14).join('\n');
+    const why = rc === 2 ? 'undecidable (exit 2)' : `exit ${rc}`;
+    throw new Error(`${label} failed: ${why}${report ? '\n' + report : ''}`);
+  }
+}
+
 async function main() {
   insist(/^[0-9]+(?:\.[0-9]+)*$/.test(process.env.DSH_DIST_VERSION || '') && /^[1-9][0-9]*$/.test(process.env.DSH_DIST_CODE || ''), 'Set explicit DSH_DIST_VERSION and DSH_DIST_CODE');
   const artifactFile = arg('artifact', path.join(sb, `out/release-v${VERSION}-code${CODE}.json`)), artifact = checkArtifact(artifactFile);
@@ -55,6 +73,14 @@ async function main() {
   checkEvidence(arg('isolated', artifact.apk + '.isolated.json'), 'isolated', artifact.apkSha256);
   const clone = arg('clone', `${process.env.DSH_VERIFY_DIR || '/data/user/0/com.deepseek.harness/files/_verify'}/ws-GitHub`);
   checkSynced(clone);
+  // 两道正对口的闸，主语不同，别混：
+  //   verify-apk-payload                主语是产物：包内 md5 逐条对 checks.manifest
+  //   assert-manifest-matches-overlay   主语是源码树：清单的 md5 列 vs build-overlay，不看包
+  // 后者只能在本地树跑：build-overlay 是本地构建输入，公开仓库里没有，在 clone 里跑恒判「无法判定」；
+  // 而 checkSynced 已把本地清单与 clone 锁成逐字节一致，所以本地跑代表的就是要发的那份源码。
+  // verify 咬的只是漂移（产物 vs 清单）；清单和包一起把错的东西说成对时它看不见，那归语义闸。
+  runGate('verify-apk-payload', path.join(sb, 'scripts/verify-apk-payload.js'), [artifact.apk], { cwd: sb });
+  runGate('assert-manifest-matches-overlay', path.join(sb, 'scripts/assert-manifest-matches-overlay.js'), [], { cwd: sb });
   const git = (...a) => { try { return execFileSync('git', ['-C', clone, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim(); } catch { throw new Error('Source Git check failed'); } };
   insist(git('status', '--porcelain').length === 0, 'Publishing clone has uncommitted/untracked files');
   insist(git('branch', '--show-current') === 'main', 'Publishing clone must be on main');

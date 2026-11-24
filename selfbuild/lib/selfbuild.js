@@ -541,14 +541,54 @@ else if (cmd === 'check') {
   }
   const lines = fs.readFileSync(manifestPath, 'utf8').split('\n');
   let pass = 0, fail = 0, skip = 0;
-  const fails = [], drifts = [];
+  const fails = [], drifts = [], skips = [];
+  // policy=local 的行在 --dist 模式下不校验（发行包主动剔除了它们）。跳过本身没问题，
+  // 但「跳过了几条、跳过了谁」必须进结果行：否则把一条 all 改成 local 就等于从分母里
+  // 悄悄删掉一条判据 —— 包里少个文件也没人喊，分母自己缩水，和「数了不算」同源。
+  // 跳过集合还得与闸外点名册双向相等：名册没登记的跳过 = 那条补丁可以凭空消失；
+  // 名册登记了这次却没跳过 = 名册上躺着一具尸体。名册读不了或结构烂 → 判不了，退 2，
+  // 不给结论（红绿都可能是假的）。
+  const distMode = args.includes('--dist');
+  let ledgerFile = '';
+  let ledgerPaths = null;
+  if (distMode) {
+    ledgerFile = path.resolve(process.env.DSH_MANIFEST_DIST_ABSENT_BASELINE_PATH
+      || path.join(__dirname, '..', 'scripts', 'manifest-dist-absent-baseline.json'));
+    let ledger;
+    try { ledger = JSON.parse(fs.readFileSync(ledgerFile, 'utf8')); }
+    catch (e) {
+      console.error(`✗ 读不了缺席名册 ${ledgerFile}（${e.code || e.message}）→ 判不了「哪些允许不在」（返回 2，不是包不合规）`);
+      process.exit(2);
+    }
+    const bad = [];
+    if (!ledger || typeof ledger !== 'object') bad.push('顶层不是对象');
+    else {
+      if (!Array.isArray(ledger.entries)) bad.push('缺 entries 数组');
+      if (typeof ledger._count !== 'number' || !Number.isInteger(ledger._count)) bad.push('缺整数 _count');
+    }
+    ledgerPaths = [];
+    for (const it of Array.isArray(ledger && ledger.entries) ? ledger.entries : []) {
+      if (!it || typeof it.path !== 'string' || !it.path) { bad.push('有条目缺 path'); continue; }
+      if (typeof it.why !== 'string' || !it.why.trim()) bad.push(`${it.path}: 缺 why（登记不等于豁免，得写清凭什么不在）`);
+      if (ledgerPaths.includes(it.path)) bad.push(`${it.path}: 重复登记`);
+      ledgerPaths.push(it.path);
+    }
+    if (ledger && typeof ledger._count === 'number' && ledger._count !== ledgerPaths.length) {
+      bad.push(`_count 写 ${ledger._count}，实际 ${ledgerPaths.length} 条 —— 两个数字必须同时改，改数字才有痕迹`);
+    }
+    if (bad.length) {
+      console.error(`✗ 缺席名册自身不合法（${bad.length} 处）→ 判不了（返回 2，不是包不合规）：\n    ${bad.join('\n    ')}`);
+      process.exit(2);
+    }
+  }
+  const ledgerSet = new Set(ledgerPaths || []);
   for (const raw of lines) {
     const line = raw.trim();
     if (!line || line.startsWith('#')) continue;
     const [rel, wantMd5, keyword, policy = 'all', why = '', kwmin] = line.split('|').map((s) => (s || '').trim());
     if (!['all', 'local'].includes(policy)) die('未知清单策略: ' + policy);
     if (!keyword) die(`清单条目缺关键字列（路径后面第二根竖线是空的）: ${rel}`);
-    if (args.includes('--dist') && policy === 'local') { skip++; continue; }
+    if (distMode && policy === 'local') { skip++; skips.push({ rel, why }); continue; }
     let buf = null;
     if (isZip) {
       const hit = map.get(rel) || map.get(rel.replace(/^dshroot\//, 'dshroot/'));
@@ -620,6 +660,43 @@ else if (cmd === 'check') {
     }
   }
 
+  // 跳过对账：跳过集合 ↔ 缺席名册，双向都得相等。
+  // 只比「数量」没用：把一条 all 改成 local、再删掉载荷里那份文件，数量变 63，
+  // 结论照样绿。所以这里比集合、点名到条。
+  let ledgerBad = 0;
+  if (distMode) {
+    const inPayload = (rel) => (isZip ? map.has(rel) : fs.existsSync(path.join(target, rel)));
+    const skipped = skips.map((s) => s.rel);
+    const skippedSet = new Set(skipped);
+    const unregistered = skipped.filter((p) => !ledgerSet.has(p));
+    const corpses = (ledgerPaths || []).filter((p) => !skippedSet.has(p));
+    if (skips.length) {
+      log(`  ↷ --dist 跳过 ${skips.length} 条（policy=local：发行包主动剔除，本模式不校验内容）`);
+      for (const s of skips) {
+        log(`    · ${s.rel}`);
+        if (s.why) log(`      ${s.why}`);
+      }
+      const stillThere = skipped.filter(inPayload);
+      if (stillThere.length) {
+        log(`    （其中 ${stillThere.length} 条在载荷里仍然存在：--dist 只是不校验它，不代表剔干净了；剔没剔干净由 verify-apk-payload.js 判）`);
+      }
+    } else {
+      log('  ↷ --dist 跳过 0 条（清单里没有 policy=local 的行）');
+    }
+    if (unregistered.length || corpses.length) {
+      ledgerBad = unregistered.length + corpses.length;
+      log(`  ✗ 跳过集合与缺席名册对不上（${ledgerBad} 处）—— 名册: ${ledgerFile}`);
+      for (const p of unregistered) {
+        log(`    · 跳过了一条名册里没有的：${p}`);
+        log('      （清单把它标成 policy=local 就跳出了分母，名册又没登记 → 这条补丁可以从包里凭空消失）');
+      }
+      for (const p of corpses) {
+        log(`    · 名册登记了但这次没跳过：${p}`);
+        log('      （名册上躺着一具尸体：清单里这行不再是 local，或者那行被删了）');
+      }
+    }
+  }
+
   log(`检查 ${isZip ? 'zip' : '目录'}: ${target}`);
   for (const f of fails) log('  ' + f);
   for (const d of drifts) log('  ' + d);
@@ -632,8 +709,11 @@ else if (cmd === 'check') {
   } else {
     log('  ⚠ 没给 --overlay：只按清单关键字判，无法发现「文件被换成同一代别的内容」');
   }
-  log(`结果: ✅ ${pass} 通过  ❌ ${fail} 失败  (共 ${pass + fail})`);
-  process.exit(fail ? 1 : 0);
+  log(`结果: ✅ ${pass} 通过  ❌ ${fail} 失败  ↷ ${skip} 跳过${distMode ? '（policy=local，--dist 模式）' : ''}  (共 ${pass + fail})`
+    + (ledgerBad ? `  ⚠ 跳过名册对账失败 ${ledgerBad} 处 → 判 1` : ''));
+  // 收尾用 exitCode 自然退出，不调 process.exit()：强制退出会在 stdio 还没刷完时拆环境，
+  // 偶发卡死在退出阶段（输出已经打完、进程不退），这条路径正是装机前预检走的，不能有这个赌。
+  process.exitCode = fail || ledgerBad ? 1 : 0;
 }
 
 else if (cmd === 'inspect') {

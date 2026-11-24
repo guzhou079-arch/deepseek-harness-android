@@ -21,6 +21,16 @@
  */
 const path = require('node:path');
 
+// 「开发备份」这件事只在 lib/overlay-skip.js 里定义一次，这里派生，不另抄一份。
+// 为什么必须这样：overlay-skip 只管 overlay → payload 那一路；payload 里还有一部分是从底包
+// 骨架 APK 解出来的，那一路只经过 strip。两边各维护一份名单的结果不是「一边窄」，而是
+// 「各缺一块」—— .rej/.md5/.sha256/~/.DS_Store 只在 overlay-skip 里，`.bak.<时间戳>` 只在 strip 里，
+// 于是底包带进来的那一半没人删、复核也不叫（复核用的是同一份窄名单），七道闸一起静默。
+// 派生之后两边不可能再漂：谁想加一种开发备份，加在 overlay-skip 就同时生效。
+const { SKIP_RE: OVERLAY_SKIP_RE } = require(path.join(__dirname, '..', 'lib', 'overlay-skip.js'));
+// 保留 i：`.BAK` 这类大写同样算备份，旧规则本来就是不区分大小写的。
+const BACKUP_RE = new RegExp(OVERLAY_SKIP_RE.source, 'i');
+
 // 自测口子（口径同 dist-tools-allow.js 的 DSH_DIST_TOOLS_ALLOW）：要验「规则表被清空时
 // 闸会不会自己叫」，只能造一份空表；绝不能在真文件上改来改去 —— 测试进程一崩，
 // 真规则就停在被改坏的状态，下一次打包静默放行。这里只影响 require 本模块的一方，
@@ -44,8 +54,8 @@ const BAD = [
   [/archive-2\.5d\/layers\//i, '派生美术'],
   [/MainActivity\.java\.(bak|pre-lan)/i, '源码备份'],
   [/\.(keystore|p12|pfx)$/i, '签名钥匙'],
-  // 开发备份不属于运行内容；overlay 里出现 .bak-* / *.bak / *.orig 时也不能带进发行包。
-  [/(?:\.bak(?:[.-]|$)|\.orig$)/i, '开发备份'],
+  // 开发备份不属于运行内容；名单不在这里写，派生自 lib/overlay-skip.js（见文件头的说明）。
+  [BACKUP_RE, '开发备份'],
   [/(^|\/)AGENTS\.md$/i, '全局指令'],
   [/(^|\/)\.credentials/i, '登录凭据'],
   [/sessions\/session-|session\.v4\.jsonl/i, '会话数据'],

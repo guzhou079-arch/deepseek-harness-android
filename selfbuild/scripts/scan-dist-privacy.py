@@ -11,13 +11,20 @@
 #   只放行这一个文件里的这一处；同文件出现别的私人称呼、或目录里别的文件出现，
 #   照旧失败 —— 防止以后往 data/ 里塞东西也顺着目录放行漏过去。
 # ---------------------------------------------------------------------------
+import os  # 顶部先导入：privacy_skip 的加载路径和目录都要用（文件原来的 import 块在中间）
 import re  # 顶部先导入：下面的模块级常量要编译正则（文件原来的 import 块在中间，不能依赖它）
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import privacy_skip  # noqa: E402  （跳过名册：三闸共用的唯一判据）
 
 PRIVATE_NAMES = ('阿舟', '孤舟', '孤天光', '天光')
 NAME_EXCEPTIONS = {
     'dshhome/skills/dsh-zhanbu/data/zhuge.json': frozenset({'孤舟'}),
 }
-NAME_SCAN_MAX_BYTES = 8 * 1024 * 1024
+# 2026-11-23 r21：这里原来是 NAME_SCAN_MAX_BYTES = 8 MB，超过就 `continue` —— 静默跳过。
+# 现在上限来自名册（maxScanBytes），而且「超上限」不再等于「不用判」：
+# 名册里点名的照常跳过并出声，没登记的退 2（判不了），绝不静默当通过。
 
 # ---------------------------------------------------------------------------
 # 2026-11-07 P1-7：两条漏检缝
@@ -52,7 +59,45 @@ NAME_KEY_RX = re.compile(r'(?i)\bname\b\s*[:=]\s*("[^"\n]{0,80}"|\'[^\'\n]{0,80}
 ALL_PRIVATE_TOKENS = PRIVATE_NAMES + BOUNDED_NAMES
 
 
-def scan_private_defaults(inner, problems, suppressed):
+def texts_of(inner, n, ledger, plan):
+    """这条要不要看正文？返回候选文本列表；None = 按名册跳过（或判不了，已记在 plan 里）。
+
+    2026-11-23 r21：原来这里是 `if b'\\0' in data[:1024]: continue` —— 按内容判二进制，
+    判到就静默放过，UTF-16 存的 JSON（记事本「Unicode」默认形态）整条逃掉。
+    现在跳过只认名册里逐条点名的路径；文本扩展名哪怕带 NUL 也按 UTF-16 再解一遍继续扫。
+    plan 为 None 时是底包（只做参考审计，不对账）：照样不按内容放行文本文件。
+    """
+    label = n
+    try:
+        info = inner.getinfo(n)
+    except Exception:
+        return None
+    if plan is not None:
+        if label in plan.skip:
+            return None
+        if info.file_size > ledger.max_scan_bytes:
+            return None  # 已在 plan.undecidable 里点名，判不了
+    try:
+        data = inner.read(n)
+    except Exception as exc:
+        if plan is not None:
+            plan.undecidable.append('%s 读不了（%s: %s）' % (n, exc.__class__.__name__, exc))
+        return None
+    text_exts = ledger.text_exts
+    if not privacy_skip.is_binary_head(data):
+        return [data.decode('utf-8', 'ignore')]
+    if privacy_skip.ext_of(n) in text_exts:
+        candidates = privacy_skip.decode_candidates(data)
+        if not candidates:
+            if plan is not None:
+                plan.undecidable.append('%s 是文本扩展名却解不开（UTF-8/UTF-16 都失败）' % n)
+            return None
+        return candidates
+    return None
+
+
+
+def scan_private_defaults(inner, ledger, plan, problems, suppressed):
     """扫「词表形态的称呼」和「配置默认值里的称呼」。
 
     与 scan_names 的分工：scan_names 管裸词通杀（私人称呼出现就红），
@@ -65,45 +110,39 @@ def scan_private_defaults(inner, problems, suppressed):
     for n in inner.namelist():
         if n.endswith('/'):
             continue
-        try:
-            info = inner.getinfo(n)
-            if info.file_size > NAME_SCAN_MAX_BYTES:
-                continue
-            data = inner.read(n)
-        except Exception:
+        texts = texts_of(inner, n, ledger, plan)
+        if texts is None:
             continue
-        if b'\0' in data[:1024]:
-            continue
-        text = data.decode('utf-8', 'ignore')
-        touched = False
-        # (a) 词表形态
-        for m in BOUNDED_NAME_RX.finditer(text):
-            list_hits += 1
-            touched = True
-            problems.append('private name in list form: %s: 「%s」 上下文 %r'
-                            % (n, m.group(1), text[max(0, m.start() - 24):m.end() + 24]))
-        # (b) 配置默认值
-        for m in DEFAULT_VALUE_RX.finditer(text):
-            value = m.group(2)
-            hit = [t for t in ALL_PRIVATE_TOKENS if t in value]
-            if hit:
-                default_hits += 1
-                touched = True
-                problems.append('private name in config default: %s: %s = %s'
-                                % (n, m.group(1), value.strip()[:120]))
-        for m in NAME_KEY_RX.finditer(text):
-            value = m.group(1).strip('\'"')
-            if value in ALL_PRIVATE_TOKENS:
-                default_hits += 1
-                touched = True
-                problems.append('private name as name default: %s: name = %s' % (n, value))
-        if touched:
+        found = []
+        for text in texts:
+            # (a) 词表形态
+            for m in BOUNDED_NAME_RX.finditer(text):
+                list_hits += 1
+                found.append('private name in list form: %s: 「%s」 上下文 %r'
+                             % (n, m.group(1), text[max(0, m.start() - 24):m.end() + 24]))
+            # (b) 配置默认值
+            for m in DEFAULT_VALUE_RX.finditer(text):
+                value = m.group(2)
+                hit = [t for t in ALL_PRIVATE_TOKENS if t in value]
+                if hit:
+                    default_hits += 1
+                    found.append('private name in config default: %s: %s = %s'
+                                 % (n, m.group(1), value.strip()[:120]))
+            for m in NAME_KEY_RX.finditer(text):
+                value = m.group(1).strip('\'"')
+                if value in ALL_PRIVATE_TOKENS:
+                    default_hits += 1
+                    found.append('private name as name default: %s: name = %s' % (n, value))
+        if found:
+            # 同一条命中可能被两个候选解码各撞一次（UTF-8 与 UTF-16 都能解时），按消息去重
+            for msg in dict.fromkeys(found):
+                problems.append(msg)
             files += 1
     return {'files': files, 'listFormHits': list_hits, 'configDefaultHits': default_hits}
 
 
 
-def scan_names(inner, label, problems, suppressed):
+def scan_names(inner, label, ledger, plan, problems, suppressed):
     """扫一层 payload 的**全部**正文（不只我们自己的文件）里的人称。
 
     底层包和最终包都要过这一遍：底包带毒而最终包「通过」是这次事故里最坑的
@@ -111,26 +150,24 @@ def scan_names(inner, label, problems, suppressed):
     """
     allowed = NAME_EXCEPTIONS
     scanned = 0
+    binary_skipped = 0
     for n in inner.namelist():
         if n.endswith('/'):
             continue
-        try:
-            info = inner.getinfo(n)
-        except Exception:
-            continue
-        if info.file_size > NAME_SCAN_MAX_BYTES:
-            continue
-        try:
-            data = inner.read(n)
-        except Exception:
-            continue
-        if b'\0' in data[:1024]:
-            continue
-        text = data.decode('utf-8', 'ignore')
-        hits = {t: text.count(t) for t in PRIVATE_NAMES if t in text}
-        if not hits:
+        texts = texts_of(inner, n, ledger, plan)
+        if texts is None:
+            if plan is None:
+                binary_skipped += 1  # 底包：只计数进报告，不对账（它不是发行件）
             continue
         scanned += 1
+        hits = {}
+        for text in texts:
+            for t in PRIVATE_NAMES:
+                c = text.count(t)
+                if c:
+                    hits[t] = hits.get(t, 0) + c
+        if not hits:
+            continue
         excepted = allowed.get(n, frozenset())
         real = {t: c for t, c in hits.items() if t not in excepted}
         if real:
@@ -140,10 +177,10 @@ def scan_names(inner, label, problems, suppressed):
         if kept:
             suppressed.append({'path': n, 'rule': 'private-name', 'layer': label,
                                'allowed': sorted(kept), 'counts': kept})
-    return scanned
+    return scanned, binary_skipped
 
 
-def scan_base_apk(apk, problems, suppressed):
+def scan_base_apk(apk, ledger, problems, suppressed):
     """扫底包内层 payload——**只作参考报告，不参与判红绿**。
 
     2026-11-06：原实现把命中直接塞进 problems 判 FAIL，依据是「底包内层 payload 才是
@@ -154,18 +191,21 @@ def scan_base_apk(apk, problems, suppressed):
     notes = []
     if not os.path.isfile(apk):
         problems.append('base apk missing: ' + apk)
-        return 0
+        return 0, notes, 0
     total = 0
+    binary_skipped = 0
     with zipfile.ZipFile(apk) as outer:
         entries = [n for n in outer.namelist()
                    if n.lower().endswith('.zip') and 'payload' in n.lower()]
         if not entries:
             problems.append('base apk has no payload.zip: ' + apk)
-            return 0
+            return 0, notes, 0
         for entry in entries:
             with zipfile.ZipFile(io.BytesIO(outer.read(entry))) as inner:
-                total += scan_names(inner, 'base:' + entry, notes, suppressed)
-    return total, notes
+                got, binary = scan_names(inner, 'base:' + entry, ledger, None, notes, suppressed)
+                total += got
+                binary_skipped += binary
+    return total, notes, binary_skipped
 
 import argparse
 import hashlib
@@ -203,11 +243,36 @@ def load_tools_allow():
 
 def scan(apk, overlay, wallpaper):
     problems = []
+    undecidable = []
     with zipfile.ZipFile(apk) as outer:
         with zipfile.ZipFile(io.BytesIO(outer.read('assets/payload.zip'))) as inner:
             names = inner.namelist()
             if len(set(names)) != len(names):
                 problems.append('duplicate payload entries')
+            # ── 跳过名册 + 双向对账（三闸共用 scripts/privacy-scan-skip.json） ────────
+            # 判据是名册里逐条点名的路径，不是「前 1 KB 有没有 NUL」—— 后者正是 r21 的病根：
+            # 同一段带称呼的文本存成 UTF-16LE+BOM（记事本「Unicode」）就整条静默逃掉。
+            ledger = privacy_skip.Ledger.load()  # 坏了就抛 LedgerError，main 里退 2
+            files = [(n, inner.getinfo(n).file_size) for n in names if not n.endswith('/')]
+
+            def head_of(name):
+                try:
+                    with inner.open(name) as f:
+                        return f.read(privacy_skip.HEAD_BYTES)
+                except Exception as exc:
+                    raise OSError(str(exc))
+
+            plan = privacy_skip.build_plan(ledger, files, head_of)
+            # 出声必须排在后面所有检查之前：壁纸源缺失之类会走 FAIL 分支，
+            # 对账结论不能被它挡在后面看不到（这也是三闸「同一份跳过集合」的落点）。
+            privacy_skip.print_plan(plan, print)
+            if getattr(ledger, 'count_note', None):
+                print('\n✗ ' + ledger.count_note)
+                undecidable.append(ledger.count_note)
+            problems.extend('名册死条目（名册有、包里没有）: ' + n for n in plan.dead)
+            problems.extend('名册过期（不再像二进制，正文塞进了这个名字）: ' + n for n in plan.stale)
+            problems.extend('名册漏登记（有 NUL 但名册里没有）: ' + n for n in plan.unregistered)
+            undecidable.extend(plan.undecidable)
             forbidden = r'dsh-bg-user|keystore|\.(?:p12|pfx)$|(?:^|/)AGENTS\.md$|selfbuild/|PATCH-NOTES|whale-shota|archive-2\.5d|\.(?:bak|orig|pre-lan)(?:-[\d.]+)?$|session\.v4\.jsonl|\.credentials|(?:^|/)review\.json|(?:^|/)skills-local/'
             # DSH_KEEP_USER_BG=1 的自用包：机主壁纸是内容而不是泄露，放行文件名规则。
             # 发行包（默认）仍然禁止，这条底线不为自用场景松动。
@@ -236,13 +301,17 @@ def scan(apk, overlay, wallpaper):
                     continue
                 if n.split('/')[1] and n.split('/')[1] not in allowed and n not in tools_allow:
                     problems.append('unexpected dshhome seed: ' + n)
+            # 2026-11-23 r21：这里原来 raise —— 壁纸源不在就整个中止，连名册对账结果和
+            # 报告都拿不到。改成硬 FAIL（仍然非零），并继续把能查的查完。
+            private_hash = None
             if not os.path.isfile(wallpaper):
-                raise RuntimeError('Wallpaper source missing; byte privacy check cannot run')
-            with open(wallpaper, 'rb') as f:
-                private_hash = hashlib.sha256(f.read()).digest()
+                problems.append('wallpaper source missing (byte privacy check cannot run): ' + wallpaper)
+            else:
+                with open(wallpaper, 'rb') as f:
+                    private_hash = hashlib.sha256(f.read()).digest()
             # DSH_KEEP_USER_BG=1 的自用包：这张壁纸是有意随包的，字节比对必然命中，
             # 直接跳过整条；发行包（默认）照旧逐图比对，防止私图混进去。
-            if os.environ.get('DSH_KEEP_USER_BG') != '1':
+            if private_hash is not None and os.environ.get('DSH_KEEP_USER_BG') != '1':
                 for n in names:
                     if n.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')) and hashlib.sha256(inner.read(n)).digest() == private_hash:
                         problems.append('private wallpaper bytes: ' + n)
@@ -279,9 +348,9 @@ def scan(apk, overlay, wallpaper):
             }
             suppressed = []
             # 人称死规则：扫这一层 payload 的**全部**正文，不只我们自己的文件清单。
-            name_files = scan_names(inner, 'payload', problems, suppressed)
+            name_files, _binary = scan_names(inner, 'payload', ledger, plan, problems, suppressed)
             # P1-7：词表形态的「流光/拾光」+ 配置默认值里的称呼（唤醒词就是这条缝漏的）
-            default_stats = scan_private_defaults(inner, problems, suppressed)
+            default_stats = scan_private_defaults(inner, ledger, plan, problems, suppressed)
             if default_stats['listFormHits'] or default_stats['configDefaultHits']:
                 print('FAIL: 称呼规则命中 %d 处词表形态 / %d 处配置默认值（涉及 %d 个文件）'
                       % (default_stats['listFormHits'], default_stats['configDefaultHits'],
@@ -302,14 +371,15 @@ def scan(apk, overlay, wallpaper):
                 if n.startswith(vendor):
                     vendored += 1
                     continue
-                data = inner.read(n)
-                if b'\0' in data[:1024]:
+                # 跳过与解码统一走 texts_of：按名册跳过（带出声），文本扩展名带 NUL 时
+                # 按 UTF-16 再解一遍重扫 —— 这里原先是 `if b'\0' in data[:1024]: continue`。
+                texts = texts_of(inner, n, ledger, plan)
+                if texts is None:
                     continue
-                text = data.decode('utf-8', 'ignore')
                 skip: frozenset = frozenset()
                 exception = content_exceptions.get(n)
                 if exception is not None:
-                    digest = hashlib.sha256(data).hexdigest()
+                    digest = hashlib.sha256(inner.read(n)).hexdigest()
                     if digest == exception['sha256']:
                         skip = frozenset(exception['labels'])
                         suppressed.append({'path': n, 'sha256': digest, 'rules': list(skip)})
@@ -317,11 +387,12 @@ def scan(apk, overlay, wallpaper):
                         # 文件变了 → 旧例外的依据失效，按普通文件全规则扫
                         problems.append('privacy exception stale (file changed, review again): ' + n)
                         skip = frozenset(exception['labels'])
-                for label, pattern in patterns.items():
-                    if label in skip:
-                        continue
-                    if re.search(pattern, text):
-                        problems.append(f'{label} in {n}')
+                for text in texts:
+                    for label, pattern in patterns.items():
+                        if label in skip:
+                            continue
+                        if re.search(pattern, text):
+                            problems.append(f'{label} in {n}')
             for n in ('assets/mobile.css', 'assets/mobile.js', 'AndroidManifest.xml'):
                 if n not in outer.namelist():
                     continue
@@ -351,7 +422,21 @@ def scan(apk, overlay, wallpaper):
                 svg = [n for n in names if n.endswith('/dsh-bg.svg')]
                 if svg:
                     problems.append('bundled wallpaper shipped in dist: ' + svg[0])
-    return problems, vendored, suppressed, name_files, default_stats
+    return {'problems': problems, 'undecidable': undecidable, 'vendored': vendored,
+            'suppressed': suppressed, 'name_files': name_files,
+            'default_stats': default_stats, 'plan': plan, 'ledger': ledger}
+
+
+def write_report(report, target):
+    target = os.path.abspath(target)
+    tmp = target + '.tmp-' + str(os.getpid())
+    assert os.path.dirname(target) == os.path.dirname(tmp)
+    with open(tmp, 'x', encoding='utf-8') as f:
+        json.dump(report, f, ensure_ascii=False, indent=2)
+        f.write('\n')
+    os.replace(tmp, target)
+    with open(target, encoding='utf-8') as f:
+        assert json.load(f) == report
 
 
 def main():
@@ -368,8 +453,18 @@ def main():
     args = a.parse_args()
     before = file_sha(args.apk)
     base_sha = file_sha(args.base_apk) if os.path.isfile(args.base_apk) else None
-    problems, vendored, suppressed, name_files, default_stats = scan(args.apk, args.overlay, args.wallpaper)
-    base_name_files, base_notes = scan_base_apk(args.base_apk, problems, suppressed)
+    try:
+        result = scan(args.apk, args.overlay, args.wallpaper)
+    except privacy_skip.LedgerError as exc:
+        # 名册坏了 = 判不了。绝不退 0：这一轮根本没证明任何东西。
+        print('FAIL: 跳过名册不可用，判不了（这一轮什么都没证明）: %s' % exc)
+        return 2
+    problems = result['problems']
+    undecidable = result['undecidable']
+    plan = result['plan']
+    ledger = result['ledger']
+    base_name_files, base_notes, base_binary = scan_base_apk(
+        args.base_apk, ledger, problems, result['suppressed'])
     if base_sha is not None and file_sha(args.base_apk) != base_sha:
         raise RuntimeError('base APK changed during privacy scan')
     if file_sha(args.apk) != before:
@@ -377,36 +472,55 @@ def main():
     # 底包原文命中只报不判：这是「原料脏、成品干净」的证据，不该让它挡住出包。
     for note in base_notes[:60]:
         print('NOTE(base 原文, 历史输入, 不判失败):', note)
+    skipped = list(plan.skip.values())
+    report = {'schema': 1, 'kind': 'privacy',
+              'ok': not problems and not undecidable,
+              'apkSha256': before,
+              'baseApkSha256': base_sha, 'baseApk': os.path.abspath(args.base_apk),
+              'skipped': skipped,
+              'checks': {'filenames': True, 'wallpaperBytes': True, 'contents': True,
+                         'dshhomeAllowlist': True, 'background': True, 'purge': True,
+                         'profileDependencies': True, 'vendoredContentSkipped': result['vendored'],
+                         'privateNames': True, 'privateNameFiles': result['name_files'],
+                         'privateNameListForm': True, 'privateNameInDefaults': True,
+                         'privateNameDefaultHits': result['default_stats'],
+                         'basePayloadPrivateNameFiles': base_name_files,
+                         'basePayloadBinarySkipped': base_binary,
+                         # 跳过必须计数：checks.skipped 是数字，skipped[] 是逐条点名。
+                         'skipped': len(skipped),
+                         'skipLedger': os.path.abspath(ledger.path),
+                         'skipLedgerDead': list(plan.dead),
+                         'skipLedgerStale': list(plan.stale),
+                         'skipLedgerUnregistered': list(plan.unregistered),
+                         'undecidable': list(undecidable),
+                         'baseFindings': base_notes,
+                         'suppressedContentMatches': result['suppressed']},
+              'problems': list(problems),
+              'scannerSha256': file_sha(__file__), 'overlay': os.path.abspath(args.overlay)}
+    # 报告在失败时也写：拿不到报告的失败最难复盘，「不写报告」本身就会变成一种静默。
+    if args.report:
+        write_report(report, args.report)
     if problems:
-        for issue in problems[:60]:
+        for issue in problems[:80]:
             print('FAIL:', issue)
+        if len(problems) > 80:
+            print('FAIL: …还有 %d 条（见报告）' % (len(problems) - 80))
+        print('结论: FAIL 隐私检查不通过（跳过名册登记 %d 条, %s）'
+              % (len(skipped), '报告已写 ' + os.path.abspath(args.report) if args.report else '未写报告'))
         return 1
+    if undecidable:
+        for item in undecidable[:40]:
+            print('UNDECIDABLE:', item)
+        if len(undecidable) > 40:
+            print('UNDECIDABLE: …还有 %d 条（见报告）' % (len(undecidable) - 40))
+        print('结论: 无法判定 —— 有 %d 条读不了/解不开/超上限，不是「扫过且干净」（exit 2）'
+              % len(undecidable))
+        return 2
     if not args.report:
         # 闸门模式（签名前那次）：同一个 scan()，同一条判据，只是不写报告 ——
         # 早一点的这道如果比后面松，那前移就等于没有。
         print('PASS(闸门模式, 未写报告): 隐私检查通过 apk sha256=' + before)
         return 0
-    report = {'schema': 1, 'kind': 'privacy', 'ok': True, 'apkSha256': before,
-              'baseApkSha256': base_sha, 'baseApk': os.path.abspath(args.base_apk),
-              'checks': {'filenames': True, 'wallpaperBytes': True, 'contents': True,
-                         'dshhomeAllowlist': True, 'background': True, 'purge': True,
-                         'profileDependencies': True, 'vendoredContentSkipped': vendored,
-                         'privateNames': True, 'privateNameFiles': name_files,
-                         'privateNameListForm': True,'privateNameInDefaults': True,
-                         'privateNameDefaultHits': default_stats,
-                         'basePayloadPrivateNameFiles': base_name_files,
-                         'baseFindings': base_notes,
-                         'suppressedContentMatches': suppressed},
-              'scannerSha256': file_sha(__file__), 'overlay': os.path.abspath(args.overlay)}
-    target = os.path.abspath(args.report)
-    tmp = target + '.tmp-' + str(os.getpid())
-    assert os.path.dirname(target) == os.path.dirname(tmp)
-    with open(tmp, 'x', encoding='utf-8') as f:
-        json.dump(report, f, ensure_ascii=False, indent=2)
-        f.write('\n')
-    os.replace(tmp, target)
-    with open(target, encoding='utf-8') as f:
-        assert json.load(f) == report
     print('PASS: privacy report bound to APK sha256=' + before)
     return 0
 

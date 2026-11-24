@@ -112,7 +112,7 @@ dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-fs-
 #    且"到货卡片"只挂在会话页 → 用户分享进来的文件收下了却没人看见。
 #    这两条把「带 shell.overlay 到货横幅的那一份」钉死，两份副本都必须一致）
 # 2026-11-04：设置页「控制台」加 QQ 群入口（群号 1050918023），md5 随改动更新。
-dshhome/profiles/web/node_modules/dsh-android-console/lib/client.js|de45c64110dcca5d758a43ec68804c31|android-share-notice|all||1
+dshhome/profiles/web/node_modules/dsh-android-console/lib/client.js|cfddc68d7c7de93276f0eba12ba193be|android-share-notice|all||1
 dshroot/lib/node_modules/@deepseek-ai/dsh/node_modules/dsh-android-console/lib/client.js|a6fc14fc6c1d36c57177beecf2a40678|android-share-notice|all||1
 # ⚠️ 2026-10-15 之前这条清单**没覆盖**这两个文件，于是"源码改了、包里带的还是旧的"
 #    能一路通过 verify。装 1.39 之前，patch-check 对这两条会报漂移（装机副本还是旧的）——那是**正确**的。
@@ -140,8 +140,8 @@ dshhome/profiles/web/node_modules/dsh-doc-media/package.json|14da7cd85a49a158016
 dshhome/profiles/web/node_modules/dsh-doc-media/lib/index.js|7dbb4a8f650d34075f653ff92d706dcf|dsh-doc-media|all||2
 dshhome/profiles/web/node_modules/dsh-doc-media/lib/client.js|0920c4dccaea83618c33407b8e2759b0|<video|all||1
 dshhome/profiles/web/node_modules/dsh-doc-actions/package.json|89feeb75fd4b64772ff5fd04904da3c2|dsh-doc-actions|all||1
-dshhome/profiles/web/node_modules/dsh-doc-actions/lib/index.js|f8a9ae506cc5c1318f3098ce42d3ad0c|dsh-doc-actions|all||2
-dshhome/profiles/web/node_modules/dsh-doc-actions/lib/client.js|c56f5d7088b82639862ea56b20e251fa|127.0.0.1:3081/open|all||1
+dshhome/profiles/web/node_modules/dsh-doc-actions/lib/index.js|e788ff826340f0d35fa21eff9d8a3979|dsh-doc-actions|all||2
+dshhome/profiles/web/node_modules/dsh-doc-actions/lib/client.js|081badcff263821228545f1b5c365ffc|/doc-actions/open|all||1
 
 # 2026-10-18 v1.39.5：文档预览引擎改为按需下载（不随包），插件提供
 # /dsh-office-kit/status 与 /install 两条路由；装了引擎才解析得到。
