@@ -9,6 +9,10 @@
  *
  *   1.42 起 App 壳新增了一个 /open 桥（127.0.0.1:3081），用系统自带的
  *   DocumentsProvider 构造 content:// URI，把文件交给系统应用。
+ *
+ *   壳自 v1.55 起给三个本地桥统一加了 X-DSH-Token 鉴权，密钥只在 App 进程与引擎
+ *   env 里，页面拿不到 —— 所以这里不直连桥，只 POST 同源 /doc-actions/open 交给
+ *   Node 半边（lib/index.js）带密钥转发。
  *   本插件只负责在预览工具栏上放三个按钮，并把 absolutePath 发过去。
  *
  * 按钮：
@@ -28,8 +32,12 @@ window.__ModuleLoader__.load({
     const React = require('react');
     const h = React.createElement;
 
-    /** App 壳的文件动作桥。端口和路径与 MainActivity 的 handleOpenRequest 对应。 */
-    const OPEN_BRIDGE = 'http://127.0.0.1:3081/open';
+    /**
+     * 唯一路径：引擎侧代发。壳要求 X-DSH-Token，密钥只在 App 进程与引擎 env 里，
+     * 页面拿不到 —— 直连壳必被 401 拒，所以不留直连兜底（页面与壳同包出厂，
+     * 「新页面配不校验密钥的旧壳」这种组合不存在）。
+     */
+    const SERVER_ROUTE = '/doc-actions/open';
 
     /** 只留 id；标签在渲染时取词，语言切换后无需重建数组。 */
     const ACTIONS = [
@@ -43,8 +51,9 @@ window.__ModuleLoader__.load({
       'view.label': '打开', 'view.title': '用系统应用打开',
       'reveal.label': '文件夹', 'reveal.title': '打开所在文件夹',
       'share.label': '分享', 'share.title': '分享这个文件',
-      bridgeDown: '连不上 App 桥（需要 1.42 或更新的壳）',
+      bridgeDown: '连不上 App 桥（壳没响应，或引擎没拿到本机密钥）',
       bridgeHttp: 'App 桥返回 HTTP {status}',
+      bridgeNoRoute: '引擎侧没有转发路由（HTTP {status}；插件比引擎新，重装一次即可）',
       bridgeBad: 'App 桥返回了无法解析的内容',
       openFailed: '打开失败',
     }
@@ -52,8 +61,9 @@ window.__ModuleLoader__.load({
       'view.label': 'Open', 'view.title': 'Open with a system app',
       'reveal.label': 'Folder', 'reveal.title': 'Open the containing folder',
       'share.label': 'Share', 'share.title': 'Share this file',
-      bridgeDown: 'Cannot reach the App bridge (requires shell 1.42 or newer)',
+      bridgeDown: 'Cannot reach the App bridge (shell not responding, or the engine has no local key)',
       bridgeHttp: 'App bridge returned HTTP {status}',
+      bridgeNoRoute: 'The engine has no forwarding route (HTTP {status}; the plugin is newer than the engine — reinstall to fix)',
       bridgeBad: 'App bridge returned an unparseable response',
       openFailed: 'Open failed',
     }
@@ -95,24 +105,38 @@ window.__ModuleLoader__.load({
       },
     };
 
-    /** 发一次 /open；返回 {ok, error?}。桥不在（例如装的是旧壳）要能说清楚。 */
-    async function runOpen(path, action) {
-      let response;
+    /** 读一次应答体；不是 JSON 就说"答得不对"，别把 HTML 错误页当结果。 */
+    async function readResult(response) {
       try {
-        response = await fetch(OPEN_BRIDGE, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ path, action }),
-        });
-      } catch (error) {
-        return { ok: false, error: T('bridgeDown') };
-      }
-      if (!response.ok) return { ok: false, error: T('bridgeHttp', { status: response.status }) };
-      try {
-        return await response.json();
+        const value = await response.json();
+        return value !== null && typeof value === 'object' ? value : { ok: false, error: T('bridgeBad') };
       } catch (error) {
         return { ok: false, error: T('bridgeBad') };
       }
+    }
+
+    /** 发一次打开；返回 {ok, error?}。失败要把原因说清楚，别做成"点了没反应"。 */
+    async function runOpen(path, action) {
+      const payload = JSON.stringify({ path, action });
+      // 引擎侧代发：密钥在 Node 半边，页面不碰。只有这一条路，没有可退的第二步。
+      let viaServer;
+      try {
+        viaServer = await fetch(SERVER_ROUTE, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: payload,
+        });
+      } catch (error) {
+        // 同源请求都发不出去：引擎重启中，或页面自己离线。
+        return { ok: false, error: T('bridgeDown') };
+      }
+      if (viaServer.ok) return await readResult(viaServer);
+      // 404/405 = 引擎侧没有这条转发路由（插件比引擎新）。状态码带进文案：
+      // 下一轮排查的人第一个念头就是「是不是又 404 了」，实际可能是 405。
+      if (viaServer.status === 404 || viaServer.status === 405) {
+        return { ok: false, error: T('bridgeNoRoute', { status: viaServer.status }) };
+      }
+      return { ok: false, error: T('bridgeHttp', { status: viaServer.status }) };
     }
 
     /**
